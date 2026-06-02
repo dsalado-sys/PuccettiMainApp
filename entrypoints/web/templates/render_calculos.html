@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
+
+{% block contenido %}
+<link rel="stylesheet" href="/static/css/render_calculos.css?v={{ estaticos_version }}" />
+
+<section class="hero rc-hero">
+  <div class="rc-hero-titulo">
+    <h1>{{ tarjeta.titulo }}</h1>
+  </div>
+  <div class="rc-hero-acciones">
+    <button type="button" id="rc-btn-normativa" class="boton-secundario" title="Normativa municipal del PGOU">
+      Normativa municipal
+    </button>
+    <button type="button" id="rc-btn-distribuir" class="boton-primario" title="Recalcular distribución (macro-layout completo)">
+      Distribuir viviendas
+    </button>
+    <button type="button" id="rc-btn-guardar" class="boton-secundario" title="Guardar parámetros en el proyecto">
+      Guardar
+    </button>
+    <span id="rc-toast" class="rc-toast" role="status" aria-live="polite"></span>
+  </div>
+</section>
+
+{% if estado == "sin_proyecto" %}
+  <section class="aviso aviso-info">
+    <h2>No hay proyecto activo</h2>
+    <p>Abre o crea un proyecto desde <a href="/proyectos">Proyectos</a> y vuelve aquí.</p>
+  </section>
+{% elif estado == "sin_parcela" %}
+  <section class="aviso aviso-info">
+    <h2>El proyecto no tiene parcela asociada</h2>
+    <p>Localiza la parcela en <a href="/modulos/localizacion">Buscar parcela</a> antes de calcular la envolvente.</p>
+  </section>
+{% endif %}
+
+<form id="rc-form"
+      class="rc-layout"
+      data-puede-editar="{{ 'true' if puede_editar else 'false' }}"
+      data-estado="{{ estado }}"
+      autocomplete="off">
+
+  {% include "_rc_panel_params.html" %}
+
+  <!-- ────────── Columna centro: visualización ────────── -->
+  <section class="rc-viz" aria-label="Plano de planta y orientaciones">
+    <nav class="rc-plantas" id="rc-tabs-plantas" role="tablist" aria-label="Selector de planta">
+      <!-- los tabs se inyectan desde JS tras /preview -->
+      <span class="rc-tab rc-tab-vacio">Pulsa «Distribuir viviendas» o cambia un parámetro para empezar.</span>
+    </nav>
+
+    <div class="rc-canvas-wrap">
+      <canvas id="rc-canvas" width="800" height="600"></canvas>
+      <div class="rc-brujula" id="rc-brujula" aria-label="Brújula y orientaciones cardinales"></div>
+      <div class="rc-spinner" id="rc-spinner" hidden>
+        <span class="rc-spinner-circ"></span>
+        <span>Calculando distribución…</span>
+      </div>
+    </div>
+
+    <footer class="rc-leyenda">
+      <span class="rc-leg rc-leg-fachada">Fachada</span>
+      <span class="rc-leg rc-leg-medianera">Medianera</span>
+      <span class="rc-leg rc-leg-unidad">Vivienda</span>
+      <span class="rc-leg rc-leg-adaptada">Vivienda adaptada</span>
+      <span class="rc-leg rc-leg-nucleo">Núcleo vertical</span>
+      <span class="rc-leg rc-leg-patio">Patio interior</span>
+    </footer>
+  </section>
+
+  <!-- ────────── Columna derecha: tabla + KPIs ────────── -->
+  <aside class="rc-tabla" aria-label="Tabla de superficies en tiempo real" aria-live="polite">
+    <div class="rc-kpis">
+      <article class="rc-kpi">
+        <span class="rc-kpi-label">Superficie construida</span>
+        <span class="rc-kpi-valor" data-kpi="construida_total_m2">—</span>
+      </article>
+      <article class="rc-kpi">
+        <span class="rc-kpi-label">Superficie útil</span>
+        <span class="rc-kpi-valor" data-kpi="util_total_m2">—</span>
+      </article>
+      <article class="rc-kpi rc-kpi-destacada">
+        <span class="rc-kpi-label">Viviendas dispuestas</span>
+        <span class="rc-kpi-valor" data-kpi="n_viviendas">—</span>
+      </article>
+      <article class="rc-kpi">
+        <span class="rc-kpi-label">Compacidad / huecos</span>
+        <span class="rc-kpi-valor"><span data-kpi="compacidad">—</span> · <span data-kpi="huecos">—</span>%</span>
+      </article>
+    </div>
+
+    <div class="rc-tabla-tabs" role="tablist">
+      <button type="button" class="rc-tabla-tab rc-tabla-tab-activo" data-tab="planta" role="tab" aria-selected="true">Por planta</button>
+      <button type="button" class="rc-tabla-tab" data-tab="unidad" role="tab" aria-selected="false">Por unidad</button>
+      <button type="button" class="rc-tabla-tab" data-tab="anexo" role="tab" aria-selected="false">Anexo I</button>
+    </div>
+
+    <div class="rc-tabla-wrap" id="rc-tabla-planta-wrap" role="tabpanel">
+      <table class="rc-tabla-tabla" id="rc-tabla-planta">
+        <thead class="rc-thead-sticky">
+          <tr>
+            <th>Planta</th><th>Viv.</th><th>Construida</th><th>Útil</th>
+            <th>Circul.</th><th>Patios</th><th>Muros</th><th>Ef.%</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="rc-tabla-wrap" id="rc-tabla-unidad-wrap" role="tabpanel" hidden>
+      <table class="rc-tabla-tabla" id="rc-tabla-unidad">
+        <thead class="rc-thead-sticky">
+          <tr>
+            <th>Planta</th><th>ID</th><th>Dorms</th>
+            <th>Útil</th><th>Mín.</th><th>Cumple</th>
+            <th>Ventila</th><th>Acceso</th><th>Adapt.</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="rc-tabla-wrap" id="rc-tabla-anexo-wrap" role="tabpanel" hidden>
+      <p class="rc-vacio">Aquí aparecerán las unidades que no cumplen el Anexo I tras pulsar «Distribuir viviendas».</p>
+    </div>
+
+    <div class="rc-export">
+      <button type="button" id="rc-btn-csv" class="boton-secundario">Exportar CSV</button>
+    </div>
+  </aside>
+</form>
+
+<section class="rc-alertas" id="rc-alertas" aria-live="assertive" hidden>
+  <header><h2>Alertas y avisos</h2></header>
+  <ul></ul>
+</section>
+
+{% include "_rc_modal_normativa.html" %}
+
+<script src="/static/js/rc_brujula.js?v={{ estaticos_version }}" defer></script>
+<script src="/static/js/rc_canvas.js?v={{ estaticos_version }}" defer></script>
+<script src="/static/js/render_calculos.js?v={{ estaticos_version }}" defer></script>
+{% endblock %}

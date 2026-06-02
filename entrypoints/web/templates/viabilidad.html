@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
+
+{% block contenido %}
+<link rel="stylesheet" href="/static/css/viabilidad.css?v={{ estaticos_version }}" />
+
+<section class="hero">
+  <h1>{{ tarjeta.titulo }}</h1>
+</section>
+
+{% if proyecto_activo is none %}
+  <section class="aviso aviso-info">
+    <h2>No hay proyecto activo</h2>
+    <p>Abre o crea un proyecto desde <a href="/proyectos">Proyectos</a> y vuelve a esta pantalla para configurar el estudio.</p>
+  </section>
+{% endif %}
+
+<form id="form-viabilidad"
+      class="vb-layout"
+      data-puede-editar="{{ 'true' if puede_editar else 'false' }}"
+      data-guardado="{{ 'true' if guardado else 'false' }}"
+      autocomplete="off">
+
+  <!-- ───────────────────── Columna izquierda: parámetros ───────────────────── -->
+  <div class="vb-col vb-col-params">
+
+    <article class="vb-card">
+      <header class="vb-card-h">
+        <h2>Parcela del proyecto</h2>
+        {% if parcela %}
+          <span class="vb-badge vb-badge-dorado">Asociada</span>
+        {% else %}
+          <span class="vb-badge vb-badge-gris">Sin parcela</span>
+        {% endif %}
+      </header>
+      {% if parcela %}
+        <dl class="vb-dl">
+          <div><dt>Ref. catastral</dt><dd>{{ parcela.referencia_catastral or "—" }}</dd></div>
+          <div><dt>Municipio</dt><dd>{{ parcela.municipio or "—" }}</dd></div>
+          <div><dt>Sup. parcela</dt><dd>{{ "%.0f"|format(parcela.superficie_m2 or 0) }} m²</dd></div>
+          <div><dt>Sup. construida</dt>
+            <dd>
+              {% set agreg = parcela.agregados or {} %}
+              {{ "%.0f"|format(agreg.suma_superficie_construida_m2 or 0) }} m²
+            </dd>
+          </div>
+        </dl>
+      {% else %}
+        <p class="vb-vacio">
+          Asocia una parcela en
+          <a href="/modulos/localizacion" class="vb-link">Buscar parcela</a>
+          para autocalcular la superficie a aplicar.
+        </p>
+      {% endif %}
+    </article>
+
+    <article class="vb-card">
+      <header class="vb-card-h"><h2>Operación</h2></header>
+      <div class="vb-radios" role="radiogroup" aria-label="Tipo de operación">
+        <label class="vb-radio">
+          <input type="radio" name="operacion" value="venta"
+                 {% if parametros.operacion == "venta" %}checked{% endif %}>
+          <span>Venta</span>
+        </label>
+        <label class="vb-radio">
+          <input type="radio" name="operacion" value="renta"
+                 {% if parametros.operacion == "renta" %}checked{% endif %}>
+          <span>Renta</span>
+        </label>
+      </div>
+    </article>
+
+    <article class="vb-card">
+      <header class="vb-card-h"><h2>Intervención</h2></header>
+      <div class="vb-radios" role="radiogroup" aria-label="Tipo de intervención">
+        <label class="vb-radio">
+          <input type="radio" name="intervencion" value="obra_nueva"
+                 {% if parametros.intervencion == "obra_nueva" %}checked{% endif %}>
+          <span>Obra nueva</span>
+        </label>
+        <label class="vb-radio">
+          <input type="radio" name="intervencion" value="rehabilitacion"
+                 {% if parametros.intervencion == "rehabilitacion" %}checked{% endif %}>
+          <span>Rehabilitación</span>
+        </label>
+      </div>
+    </article>
+
+    <article class="vb-card">
+      <header class="vb-card-h"><h2>Parámetros económicos</h2></header>
+
+      <label class="vb-campo">
+        <span class="vb-campo-label" id="lbl-precio">Precio venta (€/m²)</span>
+        <input type="number" name="precio_eur_m2" min="0" step="50"
+               value="{{ parametros.precio_eur_m2 }}">
+      </label>
+
+      <label class="vb-campo">
+        <span class="vb-campo-label" id="lbl-coste">Coste de construcción (€/m²)</span>
+        <input type="number" name="coste_construccion_eur_m2" min="0" step="50"
+               value="{{ parametros.coste_construccion_eur_m2 }}">
+      </label>
+
+      <label class="vb-campo">
+        <span class="vb-campo-label">Superficie a aplicar (m²)</span>
+        <input type="number" name="superficie_construida_m2" min="0" step="10"
+               value="{{ parametros.superficie_construida_m2 }}"
+               placeholder="0 = autocalcular">
+        <small class="vb-hint">Deja en 0 para autocalcular según el tipo de intervención.</small>
+      </label>
+
+      <label class="vb-campo vb-campo-obra-nueva">
+        <span class="vb-campo-label">Edificabilidad (m²t/m²s)</span>
+        <input type="number" name="edificabilidad_m2t_m2s" min="0" step="0.05"
+               value="{{ parametros.edificabilidad_m2t_m2s }}">
+      </label>
+
+      <label class="vb-campo vb-campo-renta">
+        <span class="vb-campo-label">Ocupación anual (%)</span>
+        <input type="number" name="ocupacion_anual_pct" min="0" max="100" step="1"
+               value="{{ (parametros.ocupacion_anual_pct * 100) | round(0) | int }}">
+        <small class="vb-hint">Solo aplica a renta.</small>
+      </label>
+
+      <details class="vb-avanzado">
+        <summary>Avanzado</summary>
+        <label class="vb-campo">
+          <span class="vb-campo-label">Coste del suelo (€)</span>
+          <input type="number" name="coste_suelo_eur" min="0" step="1000"
+                 value="{{ parametros.coste_suelo_eur }}">
+        </label>
+        <label class="vb-campo">
+          <span class="vb-campo-label">% costes indirectos</span>
+          <input type="number" name="pct_costes_indirectos_pct" min="0" max="100" step="1"
+                 value="{{ (parametros.pct_costes_indirectos * 100) | round(0) | int }}">
+        </label>
+      </details>
+    </article>
+
+    <div class="vb-acciones">
+      <button type="button" id="btn-calcular" class="boton-secundario">Calcular</button>
+      <button type="submit" id="btn-guardar" class="boton-primario">Guardar</button>
+      <span class="vb-toast" id="vb-toast" role="status" aria-live="polite"></span>
+    </div>
+  </div>
+
+  <!-- ───────────────────── Columna derecha: resultados ────────────────────── -->
+  <aside class="vb-col vb-col-resultados" aria-live="polite">
+
+    <div class="vb-kpis">
+      <article class="vb-kpi">
+        <span class="vb-kpi-label">Ingresos estimados</span>
+        <span class="vb-kpi-valor" data-kpi="ingresos_eur">{{ "{:,.0f}".format(estudio.ingresos_eur).replace(",", ".") }} €</span>
+      </article>
+      <article class="vb-kpi">
+        <span class="vb-kpi-label">Coste total</span>
+        <span class="vb-kpi-valor" data-kpi="coste_total_eur">{{ "{:,.0f}".format(estudio.coste_total_eur).replace(",", ".") }} €</span>
+      </article>
+      <article class="vb-kpi vb-kpi-destacada">
+        <span class="vb-kpi-label">Margen bruto</span>
+        <span class="vb-kpi-valor" data-kpi="margen_eur">{{ "{:,.0f}".format(estudio.margen_eur).replace(",", ".") }} €</span>
+      </article>
+      <article class="vb-kpi vb-kpi-destacada">
+        <span class="vb-kpi-label">Margen (% sobre coste)</span>
+        <span class="vb-kpi-valor" data-kpi="margen_pct">{{ "%.1f"|format(estudio.margen_pct) }} %</span>
+      </article>
+    </div>
+
+    <article class="vb-card">
+      <header class="vb-card-h">
+        <h2>Desglose</h2>
+        <span class="vb-badge vb-badge-fuente" data-kpi="fuente_superficie">
+          {% if estudio.fuente_superficie == "catastro_existente" %}superficie · catastro
+          {% elif estudio.fuente_superficie == "manual" %}superficie · manual
+          {% elif estudio.fuente_superficie == "parcela_x_edificabilidad" %}superficie · parcela × edif.
+          {% else %}sin superficie
+          {% endif %}
+        </span>
+      </header>
+      <dl class="vb-dl vb-dl-desglose">
+        <div><dt>Superficie aplicada</dt><dd><span data-kpi="superficie_aplicada_m2">{{ "%.1f"|format(estudio.superficie_aplicada_m2) }}</span> m²</dd></div>
+        <div><dt>Coste de construcción</dt><dd><span data-kpi="coste_construccion_eur">{{ "{:,.0f}".format(estudio.coste_construccion_eur).replace(",", ".") }}</span> €</dd></div>
+        <div><dt>Costes indirectos</dt><dd><span data-kpi="coste_indirectos_eur">{{ "{:,.0f}".format(estudio.coste_indirectos_eur).replace(",", ".") }}</span> €</dd></div>
+        <div><dt>Coste del suelo</dt><dd><span data-kpi="coste_suelo_eur">{{ "{:,.0f}".format(estudio.coste_suelo_eur).replace(",", ".") }}</span> €</dd></div>
+      </dl>
+    </article>
+
+    <article class="vb-avisos {% if not estudio.avisos %}vb-oculto{% endif %}" id="vb-avisos">
+      <h2>Avisos</h2>
+      <ul>
+        {% for aviso in estudio.avisos %}
+          <li>{{ aviso }}</li>
+        {% endfor %}
+      </ul>
+    </article>
+  </aside>
+</form>
+
+<script src="/static/js/viabilidad.js?v={{ estaticos_version }}" defer></script>
+{% endblock %}

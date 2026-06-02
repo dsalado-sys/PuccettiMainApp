@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block titulo %}Puccetti{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/puccetti.css?v={{ estaticos_version }}" />
+</head>
+<body>
+  <header class="cabecera">
+    <a class="marca" href="/">
+      <span class="marca-nombre">PUCCETTI</span>
+      <span class="marca-claim">Prefactibilidad inmobiliaria</span>
+    </a>
+
+    <div class="contexto-sesion">
+      {% if proyecto_activo %}
+        <span class="chip chip-proyecto" title="Proyecto activo">
+          <span class="chip-etiqueta">Proyecto</span>
+          <span class="chip-valor">{{ proyecto_activo.nombre }}</span>
+        </span>
+      {% else %}
+        <span class="chip chip-proyecto chip-vacio">Sin proyecto activo</span>
+      {% endif %}
+
+      <span class="chip chip-rol" title="Rol activo">
+        <span class="chip-etiqueta">Rol</span>
+        <span class="chip-valor">{{ rol_activo.value }}</span>
+      </span>
+    </div>
+  </header>
+
+  <main class="contenido">
+    {% block contenido %}{% endblock %}
+  </main>
+
+  <footer class="pie">
+    <span>Puccetti · {{ rol_activo.value | capitalize }}</span>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block titulo %}Puccetti · Buscar parcela{% endblock %}
+
+{% block contenido %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<link rel="stylesheet" href="/static/css/localizacion.css?v={{ estaticos_version }}" />
+
+<section class="loc-layout" id="loc-layout">
+  <button type="button" class="loc-toggle loc-toggle-sidebar" id="toggle-sidebar"
+          title="Ocultar / mostrar panel de búsqueda" aria-label="Ocultar panel">«</button>
+
+  <aside class="loc-sidebar">
+    <div class="loc-tabs" role="tablist">
+      <button type="button" class="loc-tab" data-tab="rc" role="tab">RC</button>
+      <button type="button" class="loc-tab" data-tab="direccion" role="tab">Dirección</button>
+    </div>
+
+    <form class="loc-panel oculto" data-panel="rc" id="form-rc" autocomplete="off">
+      <label>
+        Referencia catastral
+        <input type="text" name="rc" maxlength="20" placeholder="0000000XX0000X0000XX" required />
+      </label>
+      <button type="submit" class="boton-primario">Buscar</button>
+    </form>
+
+    <form class="loc-panel oculto" data-panel="direccion" id="form-direccion" autocomplete="off">
+      <label>
+        Provincia
+        <div class="cb" data-cb="provincia">
+          <input type="text" id="inp-provincia" name="provincia" class="cb-input"
+                 placeholder="" autocomplete="off" required />
+          <ul class="cb-list" hidden></ul>
+        </div>
+      </label>
+      <label>
+        Municipio
+        <div class="cb" data-cb="municipio">
+          <input type="text" id="inp-municipio" name="municipio" class="cb-input"
+                 placeholder="Selecciona provincia primero" autocomplete="off" disabled required />
+          <ul class="cb-list" hidden></ul>
+        </div>
+      </label>
+      <label>
+        Vía
+        <div class="cb" data-cb="via">
+          <input type="text" id="inp-via" name="via_etiqueta" class="cb-input"
+                 placeholder="Selecciona municipio primero" autocomplete="off" disabled required />
+          <ul class="cb-list" hidden></ul>
+          <input type="hidden" name="tipo_via" />
+          <input type="hidden" name="calle" />
+        </div>
+      </label>
+      <label>Número <input type="text" name="numero" required /></label>
+      <button type="submit" class="boton-primario">Buscar</button>
+    </form>
+
+    <div id="loc-mensaje" class="loc-mensaje oculto"></div>
+
+    <section id="loc-ficha" class="loc-ficha oculto">
+      <h2 id="loc-ficha-titulo"></h2>
+      <dl>
+        <dt>RC</dt>
+        <dd id="loc-ficha-rc"></dd>
+        <dt>Municipio</dt>
+        <dd id="loc-ficha-muni"></dd>
+        <dt>Provincia</dt>
+        <dd id="loc-ficha-prov"></dd>
+        <dt>Superficie</dt>
+        <dd id="loc-ficha-sup"></dd>
+      </dl>
+
+      <div id="loc-agregados" class="loc-agregados oculto">
+        <h3>Agregados de la parcela</h3>
+        <dl>
+          <dt title="Total de inmuebles con RC propia: viviendas + locales + garajes + trasteros">Inmuebles totales</dt>
+          <dd id="loc-agg-n"></dd>
+          <dt>Σ superficie construida</dt>
+          <dd id="loc-agg-sum"></dd>
+          <dt>Edificabilidad</dt>
+          <dd id="loc-agg-edif"></dd>
+          <dt title="Solo inmuebles con uso Residencial / Vivienda">Viviendas</dt>
+          <dd id="loc-agg-viv"></dd>
+          <dt>Densidad</dt>
+          <dd id="loc-agg-dens"></dd>
+        </dl>
+      </div>
+
+      <details class="loc-detalles">
+        <summary>Simplificación y lados del polígono</summary>
+        <div class="loc-slider">
+          <label for="slider-simpl">
+            Simplificación del contorno: <span id="slider-valor">0.0</span> m
+          </label>
+          <input type="range" id="slider-simpl" min="0" max="10" step="0.1" value="0" />
+        </div>
+
+        <h3>Lados del polígono</h3>
+        <table class="loc-tabla-lados">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Long.</th>
+              <th>Orientación</th>
+              <th>Tipo</th>
+            </tr>
+          </thead>
+          <tbody id="loc-lados-tbody"></tbody>
+        </table>
+      </details>
+
+      <div class="loc-acciones">
+        {% if puede_editar and proyecto_activo %}
+          <form method="post" action="/modulos/localizacion/asociar-a-proyecto" id="form-guardar">
+            <button type="submit" class="boton-primario" id="btn-guardar">
+              Guardar como proyecto «{{ proyecto_activo.nombre }}»
+            </button>
+          </form>
+        {% elif not proyecto_activo %}
+          <button type="button" class="boton-primario" disabled
+                  title="Abre o crea un proyecto desde el menú primero">
+            Guardar como proyecto
+          </button>
+          <p class="loc-hint">Abre o crea un proyecto desde el menú para guardar esta parcela.</p>
+        {% endif %}
+      </div>
+    </section>
+  </aside>
+
+  <div id="loc-subref" class="loc-subref oculto">
+    <h3 class="loc-subref-titulo">Inmuebles en la parcela</h3>
+    <div id="loc-cards" class="loc-cards"></div>
+  </div>
+
+  <div id="mapa" class="loc-mapa"></div>
+
+  <div id="loc-spinner" class="loc-spinner oculto" aria-hidden="true">
+    <div class="loc-spinner-anillo"></div>
+    <p class="loc-spinner-texto">Cargando…</p>
+  </div>
+</section>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+  window.PUCCETTI_LOC = {
+    parcelaInicial: {{ parcela_inicial | tojson if parcela_inicial else 'null' }},
+    puedeEditar: {{ 'true' if puede_editar else 'false' }}
+  };
+</script>
+<script src="/static/js/localizacion.js?v={{ estaticos_version }}"></script>
+{% endblock %}

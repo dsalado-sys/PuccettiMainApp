@@ -1,0 +1,228 @@
+{# Panel izquierdo: parámetros del proyecto (req. 18). Inputs comparten el form #rc-form. #}
+<aside class="rc-params" aria-label="Parámetros del proyecto">
+
+  <details class="rc-grupo" open>
+    <summary><span class="rc-grupo-titulo">Urbanismo</span>
+      {% if pgou_municipio_activo %}
+        <span class="rc-badge rc-badge-dorado" title="Valores cargados del PGOU del municipio">
+          PGOU · {{ pgou_municipio_activo.municipio }}
+        </span>
+      {% endif %}
+    </summary>
+
+    <div class="rc-grupo-cuerpo">
+      {% set urb = parametros.urbanisticos %}
+
+      <label class="rc-campo">
+        <span class="rc-campo-label">Edificabilidad (m²t/m²s)</span>
+        <input type="number" name="edificabilidad_m2t_m2s" min="0.1" max="8" step="0.05"
+               value="{{ urb.edificabilidad_m2t_m2s }}" data-bloque="urbanisticos">
+      </label>
+
+      <label class="rc-campo">
+        <span class="rc-campo-label">Ocupación máxima (%)</span>
+        <input type="number" name="ocupacion_maxima_pct" min="30" max="100" step="1"
+               value="{{ urb.ocupacion_maxima_pct }}" data-bloque="urbanisticos">
+      </label>
+
+      <label class="rc-campo">
+        <span class="rc-campo-label">Número máximo de plantas</span>
+        <input type="number" name="n_plantas_max" min="1" max="20" step="1"
+               value="{{ urb.n_plantas_max }}" data-bloque="urbanisticos">
+      </label>
+
+      <label class="rc-campo">
+        <span class="rc-campo-label">Altura de planta (m)</span>
+        <input type="number" name="altura_planta_m" min="2.5" max="4.5" step="0.05"
+               value="{{ urb.altura_planta_m }}" data-bloque="urbanisticos">
+      </label>
+
+      <div class="rc-fila">
+        <label class="rc-campo">
+          <span class="rc-campo-label">Retranq. frontal (m)</span>
+          <input type="number" name="retranqueo_frontal_m" min="0" max="10" step="0.1"
+                 value="{{ urb.retranqueo_frontal_m }}" data-bloque="urbanisticos">
+        </label>
+        <label class="rc-campo">
+          <span class="rc-campo-label">Lateral (m)</span>
+          <input type="number" name="retranqueo_lateral_m" min="0" max="10" step="0.1"
+                 value="{{ urb.retranqueo_lateral_m }}" data-bloque="urbanisticos">
+        </label>
+        <label class="rc-campo">
+          <span class="rc-campo-label">Trasero (m)</span>
+          <input type="number" name="retranqueo_trasero_m" min="0" max="10" step="0.1"
+                 value="{{ urb.retranqueo_trasero_m }}" data-bloque="urbanisticos">
+        </label>
+      </div>
+
+      <fieldset class="rc-usos">
+        <legend>Usos permitidos por el PGOU</legend>
+        {% for u in ["vivienda", "apartamentos_turisticos", "hotelero"] %}
+          <label class="rc-checkbox">
+            <input type="checkbox" name="usos_permitidos" value="{{ u }}"
+                   {% if u in urb.usos_permitidos %}checked{% endif %}
+                   data-bloque="urbanisticos">
+            <span>{{ u | replace("_", " ") | capitalize }}</span>
+          </label>
+        {% endfor %}
+      </fieldset>
+
+      <div class="rc-fila">
+        <label class="rc-campo">
+          <span class="rc-campo-label">Luz mín. patio (m)</span>
+          <input type="number" name="luz_recta_patio_min_m" min="2" max="8" step="0.1"
+                 value="{{ urb.luz_recta_patio_min_m }}" data-bloque="urbanisticos">
+        </label>
+        <label class="rc-campo">
+          <span class="rc-campo-label">Área mín. patio (m²)</span>
+          <input type="number" name="area_patio_min_m2" min="6" max="40" step="0.5"
+                 value="{{ urb.area_patio_min_m2 }}" data-bloque="urbanisticos">
+        </label>
+      </div>
+
+      <details class="rc-subgrupo">
+        <summary>Ático y sótano</summary>
+        <label class="rc-checkbox">
+          <input type="checkbox" name="tiene_atico" {% if urb.tiene_atico %}checked{% endif %} data-bloque="urbanisticos">
+          <span>Hay ático retranqueado</span>
+        </label>
+        <label class="rc-campo">
+          <span class="rc-campo-label">Retranqueo del ático (m)</span>
+          <input type="number" name="retranqueo_atico_m" min="0" max="6" step="0.1"
+                 value="{{ urb.retranqueo_atico_m }}" data-bloque="urbanisticos">
+        </label>
+        <label class="rc-checkbox">
+          <input type="checkbox" name="atico_computa_edificabilidad"
+                 {% if urb.atico_computa_edificabilidad %}checked{% endif %} data-bloque="urbanisticos">
+          <span>El ático computa edificabilidad</span>
+        </label>
+        <label class="rc-checkbox">
+          <input type="checkbox" name="tiene_sotano" {% if urb.tiene_sotano %}checked{% endif %} data-bloque="urbanisticos">
+          <span>Hay sótano</span>
+        </label>
+        <label class="rc-checkbox">
+          <input type="checkbox" name="sotano_computa_edificabilidad"
+                 {% if urb.sotano_computa_edificabilidad %}checked{% endif %} data-bloque="urbanisticos">
+          <span>El sótano computa edificabilidad</span>
+        </label>
+      </details>
+    </div>
+  </details>
+
+  <details class="rc-grupo" open>
+    <summary><span class="rc-grupo-titulo">Programa</span></summary>
+    <div class="rc-grupo-cuerpo">
+      {% set prog = parametros.programa %}
+      <label class="rc-campo">
+        <span class="rc-campo-label">Uso destino</span>
+        <select name="uso" data-bloque="programa">
+          {% for u in usos_edificio %}
+            <option value="{{ u.value }}"
+                    {% if prog.uso == u.value %}selected{% endif %}
+                    {% if not u.habilitado %}disabled{% endif %}>
+              {{ u.label }}{% if not u.habilitado %} (próximamente){% endif %}
+            </option>
+          {% endfor %}
+        </select>
+        <small class="rc-hint">Solo "Vivienda" está totalmente implementado en esta versión.</small>
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Tipología de vivienda</span>
+        <select name="categoria_vivienda" data-bloque="programa">
+          {% for c in ["estudio","1d","2d","3d","4d+"] %}
+            <option value="{{ c }}" {% if prog.categoria_vivienda == c %}selected{% endif %}>
+              {% if c == "estudio" %}Estudio{% elif c == "4d+" %}4 o más dormitorios{% else %}{{ c[0] }} dormitorio{{ "s" if c[0] != "1" }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">% unidades adaptadas (DB SUA)</span>
+        <input type="number" name="pct_unidades_adaptadas" min="0" max="100" step="1"
+               value="{{ prog.pct_unidades_adaptadas }}" data-bloque="programa">
+        <small class="rc-hint">DB SUA exige ≥5%. Las primeras plantas absorben el cupo.</small>
+      </label>
+      <label class="rc-checkbox">
+        <input type="checkbox" name="salon_cocina_open"
+               {% if prog.salon_cocina_open %}checked{% endif %} data-bloque="programa">
+        <span>Salón-cocina integrado</span>
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Viviendas/planta (forzar)</span>
+        <input type="number" name="n_viviendas_por_planta_objetivo" min="0" max="20" step="1"
+               value="{{ prog.n_viviendas_por_planta_objetivo or '' }}" placeholder="auto"
+               data-bloque="programa">
+        <small class="rc-hint">Vacío = derivar de la edificabilidad.</small>
+      </label>
+    </div>
+  </details>
+
+  <details class="rc-grupo">
+    <summary><span class="rc-grupo-titulo">Diseño · muros</span></summary>
+    <div class="rc-grupo-cuerpo">
+      {% set d = parametros.diseno %}
+      <label class="rc-campo">
+        <span class="rc-campo-label">Muro de fachada (m)</span>
+        <input type="number" name="espesor_muro_fachada_m" min="0.10" max="0.60" step="0.01"
+               value="{{ d.espesor_muro_fachada_m }}" data-bloque="diseno">
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Muro medianero (m)</span>
+        <input type="number" name="espesor_muro_medianero_m" min="0.10" max="0.60" step="0.01"
+               value="{{ d.espesor_muro_medianero_m }}" data-bloque="diseno">
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Separación entre unidades (m)</span>
+        <input type="number" name="espesor_separacion_unidades_m" min="0.10" max="0.40" step="0.01"
+               value="{{ d.espesor_separacion_unidades_m }}" data-bloque="diseno">
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Tabique interior (m)</span>
+        <input type="number" name="espesor_tabique_m" min="0.05" max="0.20" step="0.01"
+               value="{{ d.espesor_tabique_m }}" data-bloque="diseno">
+      </label>
+    </div>
+  </details>
+
+  <details class="rc-grupo">
+    <summary><span class="rc-grupo-titulo">Diseño · circulación y accesibilidad</span></summary>
+    <div class="rc-grupo-cuerpo">
+      <label class="rc-campo">
+        <span class="rc-campo-label">Pasillo común mín. (m)</span>
+        <input type="number" name="ancho_min_pasillo_comun_m" min="0.90" max="2.0" step="0.05"
+               value="{{ d.ancho_min_pasillo_comun_m }}" data-bloque="diseno">
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Pasillo en vivienda (m)</span>
+        <input type="number" name="ancho_min_pasillo_vivienda_m" min="0.80" max="1.50" step="0.05"
+               value="{{ d.ancho_min_pasillo_vivienda_m }}" data-bloque="diseno">
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Diámetro vestíbulo (m)</span>
+        <input type="number" name="diametro_min_vestibulo_m" min="1.20" max="2.50" step="0.05"
+               value="{{ d.diametro_min_vestibulo_m }}" data-bloque="diseno">
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Puerta paso libre (m)</span>
+        <input type="number" name="ancho_min_puerta_m" min="0.60" max="1.20" step="0.05"
+               value="{{ d.ancho_min_puerta_m }}" data-bloque="diseno">
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Profundidad máx. sin patio (m)</span>
+        <input type="number" name="profundidad_max_sin_patio_m" min="8" max="20" step="0.5"
+               value="{{ d.profundidad_max_sin_patio_m }}" data-bloque="diseno">
+      </label>
+    </div>
+  </details>
+
+  <div class="rc-resumen-activos" id="rc-resumen-activos" aria-live="polite">
+    <h3>Parámetros activos</h3>
+    <ul>
+      <li><strong>Uso:</strong> <span data-resumen="uso">{{ parametros.programa.uso }}</span></li>
+      <li><strong>Edificabilidad:</strong> <span data-resumen="edif">{{ parametros.urbanisticos.edificabilidad_m2t_m2s }}</span> m²t/m²s</li>
+      <li><strong>Plantas máx.:</strong> <span data-resumen="plantas">{{ parametros.urbanisticos.n_plantas_max }}</span></li>
+      <li><strong>Ocupación:</strong> <span data-resumen="ocupacion">{{ parametros.urbanisticos.ocupacion_maxima_pct }}</span> %</li>
+      <li><strong>% adaptadas:</strong> <span data-resumen="adapt">{{ parametros.programa.pct_unidades_adaptadas }}</span> %</li>
+    </ul>
+  </div>
+</aside>

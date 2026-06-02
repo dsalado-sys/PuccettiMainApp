@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
+
+{% block contenido %}
+<section class="hero">
+  <h1>{{ tarjeta.titulo }}</h1>
+  <p>{{ tarjeta.descripcion }}</p>
+</section>
+
+<section class="aviso aviso-pendiente">
+  <h2>Módulo en construcción</h2>
+  <p>
+    Este módulo todavía no está integrado en la main app. Cuando lo esté
+    seguirá la arquitectura hexagonal del proyecto: puertos en
+    <code>contextos/</code>, adapters en <code>plataforma/</code>.
+  </p>
+  {% if proyecto_activo %}
+    <p>Proyecto activo: <strong>{{ proyecto_activo.nombre }}</strong>.</p>
+  {% else %}
+    <p>No hay proyecto activo. Abre o crea uno desde <a href="/proyectos">Proyectos</a>.</p>
+  {% endif %}
+  <p><a class="boton-secundario" href="/">Volver al menú</a></p>
+</section>
+{% endblock %}

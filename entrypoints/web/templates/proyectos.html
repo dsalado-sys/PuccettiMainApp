@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block titulo %}Puccetti · Proyectos{% endblock %}
+
+{% block contenido %}
+<section class="hero">
+  <h1>Proyectos</h1>
+  <p>Un proyecto es la unidad que comparten los módulos: localización, viabilidad, render e informe leen y escriben sobre él.</p>
+</section>
+
+{% if puede_editar %}
+<section class="formulario-bloque">
+  <h2>Crear nuevo proyecto</h2>
+  <form method="post" action="/proyectos" class="form-vertical">
+    <label>
+      Nombre
+      <input type="text" name="nombre" required placeholder="Ej. Residencial Macarena 12" />
+    </label>
+    <label>
+      Referencia catastral (opcional)
+      <input type="text" name="referencia_catastral" maxlength="14" placeholder="14 caracteres" />
+    </label>
+    <label>
+      Dirección (opcional)
+      <input type="text" name="direccion" placeholder="Calle, número, municipio" />
+    </label>
+    <button type="submit" class="boton-primario">Crear y abrir</button>
+  </form>
+</section>
+{% else %}
+<section class="aviso aviso-info">
+  Tu rol <strong>{{ rol_activo.value }}</strong> puede consultar proyectos pero no crearlos ni eliminarlos.
+</section>
+{% endif %}
+
+<section class="tabla-proyectos">
+  <h2>Proyectos existentes</h2>
+  {% if proyectos %}
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>RC</th>
+          <th>Estado</th>
+          <th>Actualizado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in proyectos %}
+          <tr {% if proyecto_activo and proyecto_activo.id == p.id %}class="activo"{% endif %}>
+            <td>{{ p.nombre }}</td>
+            <td>{{ p.referencia_catastral or "—" }}</td>
+            <td>{{ p.estado.value }}</td>
+            <td>{{ p.actualizado_en.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td class="acciones">
+              <form method="post" action="/sesion/proyecto">
+                <input type="hidden" name="proyecto_id" value="{{ p.id }}" />
+                <button type="submit" class="boton-secundario">Abrir</button>
+              </form>
+              {% if puede_editar %}
+                <form method="post" action="/proyectos/{{ p.id }}/eliminar"
+                      onsubmit="return confirm('¿Eliminar el proyecto «{{ p.nombre }}»?');">
+                  <button type="submit" class="boton-peligro">Eliminar</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="vacio">Aún no hay proyectos. Crea el primero para empezar.</p>
+  {% endif %}
+</section>
+{% endblock %}
