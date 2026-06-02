@@ -86,6 +86,11 @@ def _construir_parcela(
         fuente=fuente,
         subreferencias=subrefs,
         agregados=agregados,
+        uso_catastral=raw.uso_catastral,
+        anio_construccion=raw.anio_construccion,
+        superficie_construida_total_m2=raw.superficie_construida_total_m2,
+        plantas_sobre_rasante=raw.plantas_sobre_rasante,
+        plantas_bajo_rasante=raw.plantas_bajo_rasante,
     )
 
 
@@ -337,6 +342,18 @@ def restaurar_parcela_desde_proyecto(datos: dict) -> Parcela | None:
                 num_viviendas=int(agg_raw.get("num_viviendas") or 0),
                 densidad_viviendas_viv_ha=float(agg_raw.get("densidad_viviendas_viv_ha") or 0.0),
             )
+        def _entero_o_none(v):
+            try:
+                return int(v) if v not in (None, "") else None
+            except (TypeError, ValueError):
+                return None
+
+        def _flotante_o_none(v):
+            try:
+                return float(v) if v not in (None, "") else None
+            except (TypeError, ValueError):
+                return None
+
         return Parcela(
             referencia_catastral=str(datos["referencia_catastral"]),
             direccion=str(datos.get("direccion") or ""),
@@ -351,6 +368,13 @@ def restaurar_parcela_desde_proyecto(datos: dict) -> Parcela | None:
             fuente=str(datos.get("fuente") or "proyecto"),
             subreferencias=subreferencias,
             agregados=agregados,
+            uso_catastral=str(datos.get("uso_catastral") or ""),
+            anio_construccion=_entero_o_none(datos.get("anio_construccion")),
+            superficie_construida_total_m2=_flotante_o_none(
+                datos.get("superficie_construida_total_m2")
+            ),
+            plantas_sobre_rasante=_entero_o_none(datos.get("plantas_sobre_rasante")),
+            plantas_bajo_rasante=_entero_o_none(datos.get("plantas_bajo_rasante")),
         )
     except Exception:
         return None
@@ -371,6 +395,11 @@ def asociar_a_proyecto(parcela: Parcela, proyecto: Proyecto) -> None:
             "municipio": parcela.municipio,
             "provincia": parcela.provincia,
             "superficie_m2": parcela.superficie_m2,
+            "uso_catastral": parcela.uso_catastral,
+            "anio_construccion": parcela.anio_construccion,
+            "superficie_construida_total_m2": parcela.superficie_construida_total_m2,
+            "plantas_sobre_rasante": parcela.plantas_sobre_rasante,
+            "plantas_bajo_rasante": parcela.plantas_bajo_rasante,
             "centroide_lonlat": list(parcela.centroide_lonlat),
             "contorno_wgs84": [list(p) for p in parcela.contorno_wgs84],
             "contorno_simplificado_wgs84": [

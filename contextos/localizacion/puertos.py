@@ -22,6 +22,11 @@ class ParcelaRaw:
     centroide_lonlat: tuple[float, float]
     contorno_wgs84: list[tuple[float, float]]
     subreferencias: tuple[Subreferencia, ...] = field(default_factory=tuple)
+    uso_catastral: str = ""
+    anio_construccion: int | None = None
+    superficie_construida_total_m2: float | None = None
+    plantas_sobre_rasante: int | None = None
+    plantas_bajo_rasante: int | None = None
 
 
 @dataclass(frozen=True)

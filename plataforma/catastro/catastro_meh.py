@@ -249,8 +249,60 @@ def _parcela_a_raw(
     if numero:
         direccion = f"{direccion}, {numero}".strip(", ")
 
+    # RC de la parcela = primeros 14 chars. Cuando ESCatastroLib trabajó con
+    # una metaparcela, `p.rc` es el RC20 de la primera subreferencia, no el
+    # RC14 de la parcela física — recortamos para tener siempre la RC14.
+    rc_obj = (getattr(p, "rc", "") or "").upper().replace(" ", "")
+    rc14 = rc_obj[:14] if len(rc_obj) >= 14 else rc_obj
+
+    # Uso predominante: del objeto p si existe, si no del primer subref.
+    uso = (getattr(p, "uso", "") or "").strip()
+    if not uso and subreferencias:
+        uso = (subreferencias[0].uso or "").strip()
+
+    # Año de construcción: ESCatastroLib lo expone como `antiguedad` (str/int).
+    anio: int | None = None
+    raw_anio = getattr(p, "antiguedad", None)
+    try:
+        anio = int(raw_anio) if raw_anio not in (None, "") else None
+    except (TypeError, ValueError):
+        anio = None
+    if anio is None and subreferencias:
+        for s in subreferencias:
+            if s.anio_construccion:
+                anio = s.anio_construccion
+                break
+
+    # Superficie construida total: si es metaparcela, suma de subrefs; si no,
+    # el atributo `superficie_construida` que ESCatastroLib calcula sumando
+    # las regiones.
+    sup_construida: float | None = None
+    if subreferencias:
+        suma = sum(s.superficie_construida_m2 or 0.0 for s in subreferencias)
+        sup_construida = suma if suma > 0 else None
+    else:
+        try:
+            v = float(getattr(p, "superficie_construida", 0) or 0)
+            sup_construida = v if v > 0 else None
+        except (TypeError, ValueError):
+            sup_construida = None
+
+    # Plantas sobre/bajo rasante: una llamada extra al WFS de edificios. Fallo
+    # suave — no es bloqueante para el módulo.
+    plantas_sup: int | None = None
+    plantas_inf: int | None = None
+    try:
+        np = p.numero_plantas
+        if isinstance(np, dict):
+            ps = np.get("plantas")
+            pi = np.get("sotanos")
+            plantas_sup = int(ps) if isinstance(ps, (int, float)) else None
+            plantas_inf = int(pi) if isinstance(pi, (int, float)) else None
+    except Exception as exc:  # noqa: BLE001 — endpoint WFS opcional
+        log.warning("No se pudo obtener nº plantas para %s: %s", rc14, exc)
+
     return ParcelaRaw(
-        referencia_catastral=getattr(p, "rc", "") or "",
+        referencia_catastral=rc14,
         direccion=direccion,
         municipio=getattr(p, "municipio", "") or "",
         provincia=getattr(p, "provincia", "") or "",
@@ -258,6 +310,11 @@ def _parcela_a_raw(
         centroide_lonlat=(float(lon), float(lat)),
         contorno_wgs84=contorno,
         subreferencias=tuple(subreferencias),
+        uso_catastral=uso,
+        anio_construccion=anio,
+        superficie_construida_total_m2=sup_construida,
+        plantas_sobre_rasante=plantas_sup,
+        plantas_bajo_rasante=plantas_inf,
     )
 
 
