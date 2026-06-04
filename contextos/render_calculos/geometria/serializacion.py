@@ -172,7 +172,12 @@ def edificio_a_dict(
 
 
 def tabla_por_planta(edif: EdificioPlurifamiliar) -> list[dict[str, Any]]:
-    """Una fila por planta (req. 16 y 17)."""
+    """Una fila por planta (req. 16 y 17).
+
+    DEPRECATED desde iteración 3 — la fuente de verdad es ahora
+    `tabla_planta_desde_capacidad` (deriva del cálculo, no de la geometría).
+    Se mantiene para compatibilidad con código que aún reciba `EdificioPlurifamiliar`.
+    """
     rows: list[dict[str, Any]] = []
     for p in edif.plantas:
         rows.append({
@@ -190,7 +195,7 @@ def tabla_por_planta(edif: EdificioPlurifamiliar) -> list[dict[str, Any]]:
 
 
 def tabla_por_unidad(edif: EdificioPlurifamiliar) -> list[dict[str, Any]]:
-    """Una fila por vivienda (req. 16)."""
+    """Una fila por vivienda (req. 16). Idem deprecation que `tabla_por_planta`."""
     rows: list[dict[str, Any]] = []
     for p in edif.plantas:
         for u in p.unidades:
@@ -206,5 +211,92 @@ def tabla_por_unidad(edif: EdificioPlurifamiliar) -> list[dict[str, Any]]:
                 "ventila_ok": u.ventila_ok,
                 "acceso": u.acceso_pasillo,
                 "adaptada": u.es_adaptada,
+            })
+    return rows
+
+
+# ─── Tablas sintéticas iter. 3 — desde Capacidad, sin geometría ─────────────
+def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]:
+    """Tabla por planta derivada del cálculo puro (no de macro_layout).
+
+    Para apartamentos turísticos, si `programa_uso` está dado y tiene áreas
+    comunes obligatorias, se añade una fila agregada al final ("Comunes obligatorias")
+    con la suma de m² reservados al Decreto 194/2010.
+    """
+    rows: list[dict[str, Any]] = []
+    for i, nombre in enumerate(cap.nombres_planta):
+        construida_i = cap.construida_por_planta[i]
+        util_i = cap.util_por_planta[i]
+        viv_i = cap.viv_por_planta[i]
+        tipo_i = cap.tipo_planta[i]
+
+        # Estimación gruesa de m² circulación + muros = construida − útil.
+        no_util = max(0.0, construida_i - util_i)
+        # Repartimos el sobrante 30/70 entre circulación y muros (heurística).
+        circulacion = round(no_util * 0.30, 2)
+        muros = round(no_util * 0.70, 2)
+        ef_pct = round(100.0 * util_i / construida_i, 1) if construida_i else 0.0
+
+        rows.append({
+            "planta": nombre,
+            "tipo": tipo_i,
+            "viviendas": viv_i,
+            "construida_m2": round(construida_i, 2),
+            "util_viviendas_m2": round(util_i, 2),
+            "circulacion_m2": circulacion,
+            "muros_m2": muros,
+            "patios_m2": 0.0,
+            "eficiencia_pct": ef_pct,
+        })
+
+    if programa_uso is not None and getattr(programa_uso, "area_servicios_obligatorios_m2", 0.0) > 0:
+        comunes = float(programa_uso.area_servicios_obligatorios_m2)
+        rows.append({
+            "planta": "Comunes obligatorias",
+            "tipo": "comunes",
+            "viviendas": 0,
+            "construida_m2": round(comunes, 2),
+            "util_viviendas_m2": 0.0,
+            "circulacion_m2": round(comunes, 2),
+            "muros_m2": 0.0,
+            "patios_m2": 0.0,
+            "eficiencia_pct": 0.0,
+        })
+
+    return rows
+
+
+def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[str, Any]]:
+    """Tabla por unidad sintética: una fila por unidad calculada.
+
+    Genera IDs sintéticos V<planta><letra>: V1A, V1B... y marca el % de adaptadas
+    según `params.programa.pct_unidades_adaptadas`.
+    """
+    rows: list[dict[str, Any]] = []
+    util_obj = cap.util_objetivo_viv_m2
+    tipo_unidad = "apartamento" if programa_uso and programa_uso.tipo_unidad == "apartamento" else "vivienda"
+
+    # Recolectar todas las unidades para repartir % adaptadas globalmente.
+    total_unidades = cap.n_viviendas_objetivo
+    pct_adapt = max(0.0, float(getattr(params.programa, "pct_unidades_adaptadas", 0.0)))
+    n_adaptadas = int(total_unidades * pct_adapt / 100.0 + 0.5)
+    adaptadas_marcadas = 0
+
+    for i, nombre_planta in enumerate(cap.nombres_planta):
+        viv_i = cap.viv_por_planta[i]
+        if viv_i == 0:
+            continue
+        for j in range(viv_i):
+            letra = chr(ord('A') + j) if j < 26 else f"#{j+1}"
+            es_adapt = adaptadas_marcadas < n_adaptadas
+            if es_adapt:
+                adaptadas_marcadas += 1
+            rows.append({
+                "planta": nombre_planta,
+                "vivienda": f"V{i+1}{letra}",
+                "dorms": cap.n_dormitorios,
+                "tipo": tipo_unidad,
+                "util_m2_objetivo": util_obj,
+                "adaptada": es_adapt,
             })
     return rows

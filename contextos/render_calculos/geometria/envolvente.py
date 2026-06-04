@@ -1,7 +1,11 @@
 """Envolvente edificatoria (§2.4): huella + plantas + patios interiores.
 
-Copia desde `Modulos/puccetti-app/puccetti/envolvente.py`. Sin cambios funcionales:
-solo se elimina el import sin uso de `LadoParcela` y se mantiene la firma original.
+Desde iteración 3 cada Planta lleva dos atributos extra:
+- `computa_edif`: si la planta consume techo edificable (regla del PGOU).
+- `tipo`: "regular" | "atico" | "sotano".
+
+Esto permite a `capacidad.calcular_capacidad()` saber qué plantas suman al
+techo máximo y qué plantas son habitables/no habitables.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -27,6 +31,8 @@ class Planta:
     patios: list[Patio] = field(default_factory=list)
     area_construida_m2: float = 0.0
     area_util_m2: float = 0.0
+    computa_edif: bool = True
+    tipo: str = "regular"        # "regular" | "atico" | "sotano"
 
 
 @dataclass
@@ -77,8 +83,31 @@ def detectar_patio(interior_planta: Polygon, params: Parametros) -> Optional[Pat
     return Patio(geometry=rect, area_m2=rect.area, luz_recta_m=lr)
 
 
+def _huella_atico(huella: Polygon, retranqueo_atico: float) -> Polygon:
+    """Huella reducida del ático tras aplicar el retranqueo perimetral.
+
+    Si el buffer negativo deja huella vacía o muy degenerada, devolvemos un
+    polígono vacío (capacidad lo tratará como ático no habitable).
+    """
+    if retranqueo_atico <= 0:
+        return huella
+    reducida = huella.buffer(-retranqueo_atico).buffer(0)
+    if reducida.is_empty:
+        return Polygon()
+    # Si el polígono se convirtió en MultiPolygon (corte por estrechamientos),
+    # nos quedamos con la parte más grande.
+    if hasattr(reducida, "geoms"):
+        reducida = max(reducida.geoms, key=lambda g: g.area)
+    return reducida
+
+
 def construir_envolvente(parcela: Polygon, params: Parametros) -> Envolvente:
-    """Pipeline §2.4 completo: retranqueos → huella → N plantas → patios."""
+    """Pipeline §2.4 completo: retranqueos → huella → N plantas → patios.
+
+    Iteración 3: añade sótano (si `tiene_sotano`) y ático (si `tiene_atico`)
+    como plantas extra con su huella propia y su flag `computa_edif`. El
+    cálculo de techo consumido solo suma las plantas que computan.
+    """
     huella = aplicar_retranqueos(parcela, params)
     if huella.is_empty:
         raise ValueError("Tras retranqueos no queda espacio edificable.")
@@ -90,6 +119,26 @@ def construir_envolvente(parcela: Polygon, params: Parametros) -> Envolvente:
 
     plantas: list[Planta] = []
     edif_acumulada = 0.0
+
+    n_offset = 0
+
+    # ── Sótano (si procede) — siempre planta 0 si existe ─────────────────────
+    if params.urbanismo.tiene_sotano:
+        sotano = Planta(
+            n=-1,  # índice negativo para distinguirlo
+            footprint=huella,
+            interior=interior_base,
+            patios=[],
+            area_construida_m2=huella.area,
+            area_util_m2=interior_base.area,
+            computa_edif=params.urbanismo.sotano_computa_edificabilidad,
+            tipo="sotano",
+        )
+        plantas.append(sotano)
+        if sotano.computa_edif:
+            edif_acumulada += huella.area
+
+    # ── Plantas regulares ────────────────────────────────────────────────────
     for n in range(params.programa.n_plantas):
         f = huella
         i = interior_base
@@ -99,10 +148,35 @@ def construir_envolvente(parcela: Polygon, params: Parametros) -> Envolvente:
             i = i.difference(patio.geometry)
             patios.append(patio)
         plantas.append(Planta(
-            n=n, footprint=f, interior=i, patios=patios,
-            area_construida_m2=f.area, area_util_m2=i.area,
+            n=n + n_offset,
+            footprint=f,
+            interior=i,
+            patios=patios,
+            area_construida_m2=f.area,
+            area_util_m2=i.area,
+            computa_edif=True,
+            tipo="regular",
         ))
         edif_acumulada += f.area
+
+    # ── Ático (si procede) — encima de la última regular ────────────────────
+    if params.urbanismo.tiene_atico:
+        huella_at = _huella_atico(huella, params.urbanismo.retranqueo_atico)
+        interior_at = huella_at.buffer(-espesor) if not huella_at.is_empty else Polygon()
+        n_at = (plantas[-1].n + 1) if plantas else 0
+        atico = Planta(
+            n=n_at,
+            footprint=huella_at,
+            interior=interior_at if not interior_at.is_empty else huella_at,
+            patios=[],
+            area_construida_m2=huella_at.area,
+            area_util_m2=interior_at.area if not interior_at.is_empty else 0.0,
+            computa_edif=params.urbanismo.atico_computa_edificabilidad,
+            tipo="atico",
+        )
+        plantas.append(atico)
+        if atico.computa_edif:
+            edif_acumulada += huella_at.area
 
     edif_max = parcela.area * params.urbanismo.edificabilidad
     return Envolvente(

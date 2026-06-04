@@ -44,6 +44,8 @@ from app.plataforma.persistencia.normativa_municipal_sqlalchemy import (
 
 from ..catalogo_modulos import CATALOGO, TarjetaModulo
 from ..dependencias import (
+    catalogo_apartamentos_adapter,
+    catalogo_superficies_adapter,
     proyecto_activo,
     repositorio_proyectos,
     rol_activo,
@@ -129,7 +131,7 @@ def pantalla(
             "pgou_municipio_activo": pgou_municipio,
             "usos_edificio": [
                 {"value": "vivienda", "label": "Vivienda", "habilitado": True},
-                {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": False},
+                {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": True},
                 {"value": "hotelero", "label": "Hotelero", "habilitado": False},
             ],
         },
@@ -163,13 +165,15 @@ def preview(
     return JSONResponse(resultado)
 
 
-# ─── Cálculo completo (envolvente + macro_layout) ───────────────────────────
+# ─── Cálculo completo (capacidad numérica iter. 3) ──────────────────────────
 @router.post("/calcular")
 def calcular(
     payload: Annotated[dict[str, Any], Body(...)],
     rol: Rol = Depends(rol_activo),
     proyecto: Proyecto | None = Depends(proyecto_activo),
     repo_norm: NormativaMunicipalRepositorio = Depends(_normativa_repo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
     if proyecto is None:
@@ -179,7 +183,11 @@ def calcular(
         raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en §2.1.")
 
     params = parametros_desde_dict(payload)
-    resultado = CalcularLayout().ejecutar(parcela, params)
+    caso_uso = CalcularLayout(
+        catalogo_vivienda=catalogo_viv,
+        catalogo_apartamentos=catalogo_apt,
+    )
+    resultado = caso_uso.ejecutar(parcela, params)
 
     normativa = repo_norm.obtener(parcela.municipio, parcela.provincia) if (parcela.municipio and parcela.provincia) else None
     alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
@@ -257,6 +265,8 @@ def export_csv(
     payload: Annotated[dict[str, Any], Body(...)],
     rol: Rol = Depends(rol_activo),
     proyecto: Proyecto | None = Depends(proyecto_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
     if proyecto is None:
@@ -265,24 +275,27 @@ def export_csv(
     if parcela is None:
         raise HTTPException(409, "El proyecto no tiene parcela asociada.")
     params = parametros_desde_dict(payload.get("parametros") or payload)
-    resultado = CalcularLayout().ejecutar(parcela, params)
+    caso_uso = CalcularLayout(
+        catalogo_vivienda=catalogo_viv,
+        catalogo_apartamentos=catalogo_apt,
+    )
+    resultado = caso_uso.ejecutar(parcela, params)
 
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
     writer.writerow(["# Tabla de superficies por planta — Render y cálculos §2.7"])
-    writer.writerow(["planta", "viviendas", "construida_m2", "util_viviendas_m2",
-                     "circulacion_m2", "patios_m2", "muros_m2", "eficiencia_pct"])
+    writer.writerow(["planta", "tipo", "viviendas", "construida_m2", "util_viviendas_m2",
+                     "circulacion_m2", "muros_m2", "eficiencia_pct"])
     for r in resultado.get("tabla_planta", []):
-        writer.writerow([r["planta"], r["viviendas"], r["construida_m2"], r["util_viviendas_m2"],
-                         r["circulacion_m2"], r["patios_m2"], r["muros_m2"], r["eficiencia_pct"]])
+        writer.writerow([r["planta"], r.get("tipo", "regular"), r["viviendas"], r["construida_m2"],
+                         r["util_viviendas_m2"], r["circulacion_m2"], r.get("muros_m2", 0.0),
+                         r["eficiencia_pct"]])
     writer.writerow([])
-    writer.writerow(["# Tabla por unidad"])
-    writer.writerow(["planta", "vivienda", "dorms", "util_m2", "construida_m2", "min_m2",
-                     "cumple_min", "ventilacion", "ventila_ok", "acceso", "adaptada"])
+    writer.writerow(["# Tabla por unidad (iter. 3 — sintética desde cálculo)"])
+    writer.writerow(["planta", "vivienda", "dorms", "tipo", "util_m2_objetivo", "adaptada"])
     for r in resultado.get("tabla_unidad", []):
-        writer.writerow([r["planta"], r["vivienda"], r["dorms"], r["util_m2"], r["construida_m2"],
-                         r["min_m2"], r["cumple_min"], r["ventilacion"], r["ventila_ok"],
-                         r["acceso"], r["adaptada"]])
+        writer.writerow([r["planta"], r["vivienda"], r["dorms"], r.get("tipo", "vivienda"),
+                         r["util_m2_objetivo"], r["adaptada"]])
     return Response(
         content=buf.getvalue().encode("utf-8-sig"),
         media_type="text/csv; charset=utf-8",

@@ -160,6 +160,23 @@ def callejero_adapter(
     return CallejeroSQLAlchemy(session)
 
 
+# ── Catálogos Anexo I editables (iter. 3) ──────────────────────────────────
+def catalogo_superficies_adapter(session: Session = Depends(sesion_bbdd)):
+    """Adapter para Anexo I.5 (vivienda) editable."""
+    from app.plataforma.persistencia.catalogo_superficies_sqlalchemy import (
+        CatalogoSuperficiesSQLAlchemy,
+    )
+    return CatalogoSuperficiesSQLAlchemy(session)
+
+
+def catalogo_apartamentos_adapter(session: Session = Depends(sesion_bbdd)):
+    """Adapter para Anexo I.4 (apartamentos turísticos · Decreto 194/2010) editable."""
+    from app.plataforma.persistencia.anexo_i_apartamentos_sqlalchemy import (
+        CatalogoApartamentosSQLAlchemy,
+    )
+    return CatalogoApartamentosSQLAlchemy(session)
+
+
 def obtener_parcela_temporal(
     request: Request,
     repo: ParcelaTemporalRepositorio = Depends(parcelas_temporales),

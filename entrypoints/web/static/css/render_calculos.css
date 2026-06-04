@@ -75,6 +75,7 @@
   gap: 4px;
   font-size: 13px;
 }
+.rc-campo[hidden] { display: none; }
 .rc-campo-label {
   font-size: 12px; color: #444;
   display: inline-flex; align-items: center; gap: 6px;
@@ -336,4 +337,28 @@
 .rc-layout[data-puede-editar="false"] textarea,
 .rc-layout[data-puede-editar="false"] button:not(#rc-btn-csv) {
   pointer-events: none; opacity: 0.7;
+}
+
+/* ── Iteración 3: banner "render en desarrollo" + tipos de planta ── */
+.rc-banner-render {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--gris-medio, #6e6a60);
+  background: rgba(184, 150, 12, 0.08);
+  border-left: 3px solid #B8960C;
+  border-radius: 2px;
+  font-style: italic;
+}
+.rc-fila-tipo-sotano td {
+  background: rgba(10, 10, 10, 0.04);
+  color: #6e6a60;
+  font-style: italic;
+}
+.rc-fila-tipo-atico td {
+  background: rgba(184, 150, 12, 0.06);
+}
+.rc-fila-tipo-comunes td {
+  background: rgba(184, 150, 12, 0.10);
+  font-weight: 500;
 }

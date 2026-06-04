@@ -36,6 +36,30 @@ CATEGORIA_A_NUM_DORMS = {
 }
 
 
+class TipologiaApartamento(str, Enum):
+    """Anexo I.4 — tipologías de apartamento turístico por nº de dormitorios."""
+    ESTUDIO = "estudio"
+    UNO_D = "1d"
+    DOS_D = "2d"
+    TRES_D = "3d"
+
+
+class CategoriaApartamentos(str, Enum):
+    """Decreto 194/2010 — clasificación de apartamentos turísticos por llaves."""
+    UNA_LLAVE = "1L"
+    DOS_LLAVES = "2L"
+    TRES_LLAVES = "3L"
+    CUATRO_LLAVES = "4L"
+
+
+TIPOLOGIA_APT_A_NUM_DORMS = {
+    TipologiaApartamento.ESTUDIO: 0,
+    TipologiaApartamento.UNO_D: 1,
+    TipologiaApartamento.DOS_D: 2,
+    TipologiaApartamento.TRES_D: 3,
+}
+
+
 NivelAlerta = Literal["info", "aviso", "incumplimiento"]
 
 

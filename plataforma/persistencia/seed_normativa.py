@@ -129,7 +129,71 @@ def sembrar_anexo_i_vivienda(session: Session, forzar: bool = False) -> None:
     session.commit()
 
 
+def _filas_anexo_i_apartamentos() -> list[tuple[str, str, str, float, float]]:
+    """Anexo I.4 (Decreto 194/2010) + áreas comunes obligatorias por categoría.
+
+    Devuelve `(categoria, tipologia, estancia, min_m2, max_m2_util)`.
+    Las áreas comunes usan `categoria = "comunes_<llaves>"` y `tipologia = "comunes"`.
+    """
+    from app.contextos.render_calculos.geometria.programa_apartamentos import (
+        UTIL_MIN_APT,
+        MIN_SALON_COMEDOR_COCINA,
+        MIN_DORM_PRINCIPAL,
+        MIN_DORM_SECUNDARIO,
+        MIN_BANO_APT,
+        areas_comunes_obligatorias,
+    )
+
+    filas: list[tuple[str, str, str, float, float]] = []
+
+    for (cat, tip), util_max in UTIL_MIN_APT.items():
+        # Salón-comedor-cocina (open plan típico en apt. turísticos)
+        filas.append((cat, tip, "salon_comedor", MIN_SALON_COMEDOR_COCINA[cat], util_max))
+        if tip == "estudio":
+            filas.append((cat, tip, "bano", MIN_BANO_APT[cat], util_max))
+            continue
+        n_dorms = {"1d": 1, "2d": 2, "3d": 3}[tip]
+        for i in range(1, n_dorms + 1):
+            estancia = "dormitorio_1" if i == 1 else f"dormitorio_{i}"
+            min_m2 = MIN_DORM_PRINCIPAL[cat] if i == 1 else MIN_DORM_SECUNDARIO[cat]
+            filas.append((cat, tip, estancia, min_m2, util_max))
+        filas.append((cat, tip, "bano", MIN_BANO_APT[cat], util_max))
+        if n_dorms >= 2 and cat in ("3L", "4L"):
+            filas.append((cat, tip, "aseo", MIN_BANO_APT[cat] - 1.0, util_max))
+
+    # Áreas comunes obligatorias por categoría (referencia n_unidades = 5).
+    for cat in ("1L", "2L", "3L", "4L"):
+        comunes = areas_comunes_obligatorias(n_unidades_estimado=5, categoria=cat)
+        for servicio, m2 in comunes.items():
+            filas.append((f"comunes_{cat}", "comunes", servicio, m2, m2))
+
+    return filas
+
+
+def sembrar_anexo_i_apartamentos(session: Session, forzar: bool = False) -> None:
+    from .anexo_i_apartamentos_sqlalchemy import AnexoIApartamentosORM
+    if not forzar:
+        existe = session.scalar(select(AnexoIApartamentosORM).limit(1))
+        if existe is not None:
+            return
+    ahora = datetime.now(timezone.utc)
+    for cat, tip, estancia, min_m2, max_m2 in _filas_anexo_i_apartamentos():
+        orm = session.get(AnexoIApartamentosORM, (cat, tip, estancia))
+        if orm is None:
+            session.add(AnexoIApartamentosORM(
+                categoria=cat,
+                tipologia=tip,
+                estancia=estancia,
+                min_m2=min_m2,
+                max_m2_util=max_m2,
+                editable_por_usuario=0,
+                actualizado_en=ahora,
+            ))
+    session.commit()
+
+
 def sembrar_todo(session: Session) -> None:
     """Punto único llamado desde `init_db()`."""
     sembrar_normativa_municipal(session)
     sembrar_anexo_i_vivienda(session)
+    sembrar_anexo_i_apartamentos(session)

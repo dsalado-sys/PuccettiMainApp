@@ -26,15 +26,14 @@ from .dominio import (
     ResumenEnvolvente,
     UsoEdificio,
 )
-from .geometria import macro_layout as ml
+from .geometria.capacidad import calcular_capacidad, capacidad_a_dict
 from .geometria.envolvente import construir_envolvente
 from .geometria.parcelas import LadoParcela, orientacion_cardinal
 from .geometria.serializacion import (
-    edificio_a_dict,
     lados_a_dict,
     ring,
-    tabla_por_planta,
-    tabla_por_unidad,
+    tabla_planta_desde_capacidad,
+    tabla_unidad_desde_capacidad,
 )
 from .parametros import (
     ParametrosRender,
@@ -42,7 +41,11 @@ from .parametros import (
     parametros_a_dict,
     parametros_desde_dict,
 )
-from .puertos import NormativaMunicipalRepositorio
+from .puertos import (
+    CatalogoApartamentosRepositorio,
+    CatalogoSuperficiesRepositorio,
+    NormativaMunicipalRepositorio,
+)
 
 
 # ─── Reproyección WGS84 ↔ UTM30N (Iberia peninsular) ────────────────────────
@@ -143,7 +146,7 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
 # ─── Caso de uso 1: CalcularEnvolvente (§2.4 — preview rápido) ──────────────
 @dataclass
 class CalcularEnvolvente:
-    """req. 8 — huella + plantas + patios. Sin macro_layout (rápido)."""
+    """req. 8 — huella + plantas + patios. Sin distribución interior (rápido)."""
 
     def ejecutar(
         self,
@@ -161,7 +164,6 @@ class CalcularEnvolvente:
                 "indicadores": None,
             }
 
-        from .geometria.capacidad import calcular_capacidad
         cap = calcular_capacidad(envolvente, params_motor)
 
         indicadores = _indicadores_disenho(parcela, envolvente.plantas)
@@ -179,20 +181,7 @@ class CalcularEnvolvente:
             bbox_world=(round(bbox[0], 2), round(bbox[1], 2), round(bbox[2], 2), round(bbox[3], 2)),
         )
 
-        plantas_dict = []
-        for pl in envolvente.plantas:
-            plantas_dict.append({
-                "n": pl.n,
-                "nombre": "PB" if pl.n == 0 else f"P{pl.n}",
-                "footprint": ring(pl.footprint),
-                "patios": [
-                    {"poligono": ring(p.geometry), "area_m2": round(p.area_m2, 2),
-                     "luz_recta_m": round(p.luz_recta_m, 2)}
-                    for p in pl.patios
-                ],
-                "construida_m2": round(pl.area_construida_m2, 2),
-                "util_m2": round(pl.area_util_m2, 2),
-            })
+        plantas_dict = _plantas_envolvente_a_dict(envolvente)
 
         return {
             "envolvente": {
@@ -219,31 +208,78 @@ class CalcularEnvolvente:
         }
 
 
-# ─── Caso de uso 2: CalcularLayout (§2.4+§2.5 — completo) ───────────────────
+def _plantas_envolvente_a_dict(envolvente) -> list[dict[str, Any]]:
+    """Serializa la lista de plantas de una envolvente para el canvas.
+
+    No incluye unidades/núcleo/pasillos: el render geométrico de unidades
+    queda en backlog (ver iteración 3 — `edificio: null`).
+    """
+    out: list[dict[str, Any]] = []
+    idx_visual = 0
+    for pl in envolvente.plantas:
+        tipo = getattr(pl, "tipo", "regular")
+        if tipo == "sotano":
+            nombre = "S1"
+        elif tipo == "atico":
+            nombre = "Ático"
+        else:
+            nombre = "PB" if idx_visual == 0 else f"P{idx_visual}"
+            idx_visual += 1
+        out.append({
+            "n": pl.n,
+            "nombre": nombre,
+            "tipo": tipo,
+            "computa_edif": getattr(pl, "computa_edif", True),
+            "footprint": ring(pl.footprint),
+            "patios": [
+                {"poligono": ring(p.geometry), "area_m2": round(p.area_m2, 2),
+                 "luz_recta_m": round(p.luz_recta_m, 2)}
+                for p in pl.patios
+            ],
+            "construida_m2": round(pl.area_construida_m2, 2),
+            "util_m2": round(pl.area_util_m2, 2),
+        })
+    return out
+
+
+# ─── Caso de uso 2: CalcularLayout (§2.4+§2.5 — calculations-first iter. 3) ─
 @dataclass
 class CalcularLayout:
-    """req. 8+12 — envolvente + macro_layout + interiores + tabla."""
+    """req. 8+12 — capacidad numérica + tablas sintéticas, sin macro_layout.
+
+    Desde iteración 3 la fuente de verdad es `calcular_capacidad()`. El render
+    geométrico de unidades queda en backlog; la respuesta lleva `edificio: null`
+    explícito y los datos viven en `capacidad` + `tabla_planta` + `tabla_unidad`.
+
+    Inyectables opcionales:
+    - `catalogo_vivienda`: si está, lee `util_objetivo_vivienda` de la BBDD del
+       Anexo I.5. Si no, fallback a `programa.util_maximo` hardcoded.
+    - `catalogo_apartamentos`: idem para Anexo I.4.
+    """
+
+    catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
+    catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
 
     def ejecutar(
         self,
         parcela: ParcelaMetrica,
         params: ParametrosRender,
     ) -> dict[str, Any]:
-        # MVP: solo vivienda. Hotel y apartamentos se devuelven con aviso.
-        if params.programa.uso != UsoEdificio.VIVIENDA:
+        # Hotelero sigue como "En desarrollo" (motor pendiente).
+        if params.programa.uso == UsoEdificio.HOTELERO:
             ce = CalcularEnvolvente().ejecutar(parcela, params)
             aviso = Alerta(
                 "aviso",
                 "Alcance MVP",
-                f"La distribución interior para uso '{params.programa.uso.value}' "
-                "está en desarrollo. La envolvente sí se calcula. "
-                "Para vivienda plurifamiliar usa el modo 'Vivienda'.",
+                "La distribución interior para uso hotelero está en desarrollo. "
+                "La envolvente sí se calcula.",
             )
             ce["alertas"] = [_alerta_dict(aviso)] + list(ce.get("alertas", []))
             ce["plantas"] = []
             ce["tabla_planta"] = []
             ce["tabla_unidad"] = []
             ce["edificio"] = None
+            ce["capacidad"] = None
             return ce
 
         params_motor = params.a_parametros_motor()
@@ -253,33 +289,127 @@ class CalcularLayout:
             return {
                 "error": str(exc),
                 "edificio": None,
+                "capacidad": None,
                 "alertas": [_alerta_dict(Alerta("incumplimiento", "Geometría", str(exc)))],
                 "tabla_planta": [],
                 "tabla_unidad": [],
                 "indicadores": None,
+                "envolvente": None,
             }
 
-        n_viv_pp = params.programa.n_viviendas_por_planta_objetivo
-        edificio = ml.generar_edificio(
-            envolvente,
-            parcela.lados,
-            params_motor,
-            n_viviendas_por_planta=n_viv_pp,
-            seed=params.seed,
+        # 1) Resolver tamaño objetivo desde BBDD (con fallback a hardcoded).
+        util_objetivo = self._resolver_util_objetivo(params)
+
+        # 2) Construir programa_uso (para apartamentos: aporta áreas comunes).
+        programa_uso = self._construir_programa_uso(
+            params, envolvente, params_motor, util_objetivo
+        )
+        area_comunes = programa_uso.area_servicios_obligatorios_m2 if programa_uso else 0.0
+
+        # 3) Cálculo puro — la fuente de verdad del módulo.
+        cap = calcular_capacidad(
+            envolvente, params_motor,
+            eficiencia_planta=params_motor.diseno.eficiencia_planta,
+            util_objetivo_por_unidad=util_objetivo,
+            area_servicios_comunes_m2=area_comunes,
         )
 
-        edif_dict = edificio_a_dict(edificio, params_motor, lados=parcela.lados)
-        indicadores = _indicadores_disenho(parcela, envolvente.plantas, edificio=edificio)
+        # 4) Tablas sintéticas derivadas del cálculo (no de geometría).
+        tabla_planta = tabla_planta_desde_capacidad(cap, programa_uso=programa_uso)
+        tabla_unidad = tabla_unidad_desde_capacidad(cap, params, programa_uso=programa_uso)
+
+        # 5) Indicadores y alertas (sin edificio dispuesto).
+        indicadores = _indicadores_disenho(parcela, envolvente.plantas)
         alertas = _alertas_envolvente(envolvente, parcela, params)
-        alertas += _alertas_edificio(edificio, params)
+        alertas += _alertas_capacidad(cap, params, programa_uso)
 
         return {
-            "edificio": edif_dict,
-            "tabla_planta": tabla_por_planta(edificio),
-            "tabla_unidad": tabla_por_unidad(edificio),
+            "edificio": None,                          # render geométrico en backlog
+            "capacidad": capacidad_a_dict(cap),         # fuente de verdad
+            "tabla_planta": tabla_planta,
+            "tabla_unidad": tabla_unidad,
             "indicadores": _indicadores_dict(indicadores),
             "alertas": [_alerta_dict(a) for a in alertas],
+            "envolvente": {
+                "huella_m2": round(envolvente.plantas[0].footprint.area, 2) if envolvente.plantas else 0.0,
+                "n_plantas": len(envolvente.plantas),
+                "edificabilidad_max_m2": round(envolvente.edificabilidad_max, 2),
+                "edificabilidad_consumida_m2": round(envolvente.edificabilidad_consumida, 2),
+                "bbox": [round(v, 2) for v in envolvente.parcela.bounds],
+                "plantas": _plantas_envolvente_a_dict(envolvente),
+            },
+            "parcela": {
+                "poligono": ring(parcela.poligono_utm),
+                "area_m2": round(parcela.poligono_utm.area, 2),
+                "municipio": parcela.municipio,
+                "provincia": parcela.provincia,
+                "bbox": [round(v, 2) for v in parcela.poligono_utm.bounds],
+            },
+            "lados": lados_a_dict(parcela.lados),
         }
+
+    # ─── Helpers privados de CalcularLayout ────────────────────────────────
+    def _resolver_util_objetivo(self, params: ParametrosRender) -> float | None:
+        """Lee el m² útil objetivo por unidad desde la BBDD del Anexo I.
+
+        Vivienda: `anexo_i_vivienda.max_m2_util` para `n_dormitorios`.
+        Apartamentos: `anexo_i_apartamentos.max_m2_util` × 1.15.
+
+        Si la consulta falla o la fila no existe → None y `calcular_capacidad`
+        cae en el hardcoded `util_maximo(n_dorms)` o `util_objetivo_apartamento`.
+        """
+        from .dominio import CATEGORIA_A_NUM_DORMS
+
+        if params.programa.uso == UsoEdificio.VIVIENDA:
+            if self.catalogo_vivienda is None:
+                return None
+            n_dorms = CATEGORIA_A_NUM_DORMS.get(params.programa.categoria_vivienda, 2)
+            try:
+                return self.catalogo_vivienda.util_objetivo_vivienda(n_dorms)
+            except Exception:
+                return None
+        if params.programa.uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+            if self.catalogo_apartamentos is None:
+                return None
+            cat = params.programa.categoria_apartamentos.value
+            tip = params.programa.tipologia_apartamento.value
+            try:
+                return self.catalogo_apartamentos.util_objetivo_apartamento(cat, tip)
+            except Exception:
+                return None
+        return None
+
+    def _construir_programa_uso(
+        self,
+        params: ParametrosRender,
+        envolvente,
+        params_motor,
+        util_objetivo: float | None,
+    ):
+        """Para apartamentos turísticos: construye el descriptor con áreas comunes.
+
+        Para vivienda: None (calcular_capacidad no necesita programa_uso).
+        Hace una iteración de dos pasos para que las áreas comunes (que escalan
+        con n_unidades) salgan dimensionadas.
+        """
+        if params.programa.uso != UsoEdificio.APARTAMENTOS_TURISTICOS:
+            return None
+
+        from .geometria.programa_apartamentos import programa_uso_apartamento
+        cat = params.programa.categoria_apartamentos.value
+        tip = params.programa.tipologia_apartamento.value
+
+        # Provisional con n=4 unidades para estimar comunes.
+        provisional = programa_uso_apartamento(cat, tip, n_unidades_estimado=4)
+        util_obj_efectivo = util_objetivo if util_objetivo is not None else provisional.util_objetivo_unidad_m2
+        cap_prov = calcular_capacidad(
+            envolvente, params_motor,
+            eficiencia_planta=params_motor.diseno.eficiencia_planta,
+            util_objetivo_por_unidad=util_obj_efectivo,
+            area_servicios_comunes_m2=provisional.area_servicios_obligatorios_m2,
+        )
+        n_estim = max(2, cap_prov.n_viviendas_objetivo)
+        return programa_uso_apartamento(cat, tip, n_unidades_estimado=n_estim)
 
 
 # ─── Caso de uso 3: ValidarCumplimiento ─────────────────────────────────────
@@ -476,19 +606,52 @@ def _alertas_envolvente(envolvente, parcela: ParcelaMetrica, params: ParametrosR
     return alertas
 
 
-def _alertas_edificio(edificio, params: ParametrosRender) -> list[Alerta]:
-    """Alertas derivadas del macro_layout (§2.5)."""
-    alertas: list[Alerta] = []
-    for pl in edificio.plantas:
-        for inc in pl.incidencias:
-            nivel = "incumplimiento" if any(k in inc for k in ("A2.", "sin acceso", "sin fachada", "ciega")) else "aviso"
-            alertas.append(Alerta(nivel, "Anexo II", inc, elemento=None))
+def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Alerta]:
+    """Alertas derivadas del cálculo de capacidad (iter. 3, sin geometría).
 
-    cap = edificio.capacidad
-    if cap and edificio.viv_por_planta_dispuestas < edificio.viv_por_planta_objetivo:
+    Incluye:
+    - Factor limitante razonado.
+    - Aviso si el redondeo a truncar deja útil sobrante mayor que el objetivo
+      (sugiere que con un Anexo I más estrecho podría caber otra unidad).
+    - Decreto 194/2010 / Anexo I.4 cuando aplica.
+    """
+    alertas: list[Alerta] = []
+
+    if cap.factor_limitante != "ninguno (cumple holgado)":
         alertas.append(Alerta(
-            "aviso", "Distribución",
-            f"Se han dispuesto {edificio.viv_por_planta_dispuestas} viviendas/planta de "
-            f"{edificio.viv_por_planta_objetivo} objetivo. Factor limitante: {cap.factor_limitante}.",
+            "info", "Capacidad",
+            f"Factor limitante: {cap.factor_limitante}.",
         ))
+
+    if cap.util_objetivo_viv_m2 > 0:
+        util_total_habitable = sum(
+            u for u, t in zip(cap.util_por_planta, cap.tipo_planta) if t != "sotano"
+        )
+        sobrante = util_total_habitable - (cap.n_viviendas_objetivo * cap.util_objetivo_viv_m2)
+        if sobrante >= cap.util_objetivo_viv_m2 * 0.5:
+            alertas.append(Alerta(
+                "info", "Truncado",
+                f"Sobran {sobrante:.0f} m² útiles tras truncar — si reduces el "
+                f"objetivo del Anexo I (hoy {cap.util_objetivo_viv_m2:.0f} m²) "
+                f"podría caber 1 unidad más.",
+            ))
+
+    if programa_uso is not None and programa_uso.tipo_unidad == "apartamento":
+        cat = params.programa.categoria_apartamentos.value
+        tip = params.programa.tipologia_apartamento.value
+        if programa_uso.area_servicios_obligatorios_m2 > 0:
+            alertas.append(Alerta(
+                "info", "Decreto 194/2010",
+                f"Reservados {programa_uso.area_servicios_obligatorios_m2:.1f} m² para áreas "
+                f"comunes obligatorias (recepción, sala social, equipajes, instalaciones). "
+                f"Categoría {cat}.",
+            ))
+        if cap.util_objetivo_viv_m2 < programa_uso.util_objetivo_unidad_m2 - 1e-3:
+            alertas.append(Alerta(
+                "aviso", "Anexo I.4",
+                f"El objetivo aplicado ({cap.util_objetivo_viv_m2:.1f} m²) es inferior al "
+                f"recomendado del Decreto 194/2010 para {cat} · {tip} "
+                f"({programa_uso.util_objetivo_unidad_m2:.1f} m²). Revisa el Anexo I editable.",
+            ))
+
     return alertas

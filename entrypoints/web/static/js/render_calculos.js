@@ -106,12 +106,13 @@
       if (el) el.textContent = v;
     };
     const env = payload?.envolvente;
-    const edif = payload?.edificio;
+    const cap = payload?.capacidad;
     const ind = payload?.indicadores;
-    if (edif && edif.totales) {
-      set("construida_total_m2", fmt.m2.format(edif.totales.construida_total_m2) + " m²");
-      set("util_total_m2", fmt.m2.format(edif.totales.util_total_m2) + " m²");
-      set("n_viviendas", fmt.int.format(edif.totales.n_viviendas));
+    // Fuente de verdad iter. 3: data.capacidad. Fallback a la envolvente del preview.
+    if (cap) {
+      set("construida_total_m2", fmt.m2.format(cap.construida_total_m2) + " m²");
+      set("util_total_m2", fmt.m2.format(cap.util_total_m2) + " m²");
+      set("n_viviendas", fmt.int.format(cap.n_viviendas_objetivo));
     } else if (env) {
       set("construida_total_m2", fmt.m2.format(env.edificabilidad_consumida_m2) + " m²");
       set("util_total_m2", "—");
@@ -127,11 +128,12 @@
   function dibujarTabsPlantas(payload) {
     if (!tabsPlantasEl) return;
     let plantas = [];
+    // Iter. 3: edificio normalmente null; usamos envolvente.plantas.
     if (payload?.edificio?.plantas?.length) plantas = payload.edificio.plantas;
     else if (payload?.envolvente?.plantas?.length) plantas = payload.envolvente.plantas;
 
     if (!plantas.length) {
-      tabsPlantasEl.innerHTML = '<span class="rc-tab rc-tab-vacio">Pulsa «Distribuir viviendas» o cambia un parámetro para empezar.</span>';
+      tabsPlantasEl.innerHTML = '<span class="rc-tab rc-tab-vacio">Pulsa «Calcular capacidad» o cambia un parámetro para empezar.</span>';
       return;
     }
     tabsPlantasEl.innerHTML = "";
@@ -150,12 +152,12 @@
     });
   }
 
-  // ─── Tabla por planta ─────────────────────────────────────────────────
+  // ─── Tabla por planta (iter. 3 — derivada del cálculo, no de geometría) ─
   function repintarTablaPlanta(filas) {
     if (!tablaPlantaBody) return;
     tablaPlantaBody.innerHTML = "";
     if (!filas || !filas.length) {
-      tablaPlantaBody.innerHTML = '<tr><td colspan="8" class="rc-vacio">Sin datos. Calcula la distribución.</td></tr>';
+      tablaPlantaBody.innerHTML = '<tr><td colspan="8" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
       return;
     }
     let tot = { c: 0, u: 0, circ: 0, pat: 0, mur: 0, viv: 0 };
@@ -167,14 +169,16 @@
       tot.mur += r.muros_m2 || 0;
       tot.viv += r.viviendas || 0;
       const tr = document.createElement("tr");
+      const tipo = r.tipo || "regular";
+      tr.className = "rc-fila-tipo-" + tipo;
       tr.innerHTML = `
         <td>${r.planta}</td>
         <td>${fmt.int.format(r.viviendas)}</td>
         <td>${fmt.m2.format(r.construida_m2)}</td>
         <td>${fmt.m2.format(r.util_viviendas_m2)}</td>
         <td>${fmt.m2.format(r.circulacion_m2)}</td>
-        <td>${fmt.m2.format(r.patios_m2)}</td>
-        <td>${fmt.m2.format(r.muros_m2)}</td>
+        <td>${fmt.m2.format(r.patios_m2 || 0)}</td>
+        <td>${fmt.m2.format(r.muros_m2 || 0)}</td>
         <td>${fmt.pct.format(r.eficiencia_pct)}</td>`;
       tablaPlantaBody.appendChild(tr);
     });
@@ -197,41 +201,25 @@
     if (!tablaUnidadBody) return;
     tablaUnidadBody.innerHTML = "";
     if (!filas || !filas.length) {
-      tablaUnidadBody.innerHTML = '<tr><td colspan="9" class="rc-vacio">Sin distribución calculada.</td></tr>';
-      tablaAnexoWrap.innerHTML = '<p class="rc-vacio">Sin distribución calculada.</p>';
+      tablaUnidadBody.innerHTML = '<tr><td colspan="6" class="rc-vacio">Sin unidades calculadas.</td></tr>';
+      if (tablaAnexoWrap) {
+        tablaAnexoWrap.innerHTML = '<p class="rc-vacio">Sin datos.</p>';
+      }
       return;
     }
-    const noCumplen = [];
     filas.forEach(r => {
       const tr = document.createElement("tr");
-      if (!r.cumple_min || !r.ventila_ok || !r.acceso) {
-        tr.className = "rc-fila-incumple";
-        noCumplen.push(r);
-      }
       tr.innerHTML = `
         <td>${r.planta}</td>
         <td>${r.vivienda}</td>
         <td>${r.dorms}</td>
-        <td class="${r.cumple_min ? "" : "rc-celda-incumple"}">${fmt.m2.format(r.util_m2)}</td>
-        <td>${fmt.m2.format(r.min_m2)}</td>
-        <td>${r.cumple_min ? "✓" : "✗"}</td>
-        <td>${r.ventilacion} ${r.ventila_ok ? "" : "⚠"}</td>
-        <td>${r.acceso ? "✓" : "✗"}</td>
+        <td>${r.tipo || "vivienda"}</td>
+        <td>${fmt.m2.format(r.util_m2_objetivo)}</td>
         <td>${r.adaptada ? "✓" : "—"}</td>`;
       tablaUnidadBody.appendChild(tr);
     });
-    if (noCumplen.length) {
-      const ul = document.createElement("ul");
-      ul.style.padding = "0 16px";
-      noCumplen.forEach(r => {
-        const li = document.createElement("li");
-        li.textContent = `${r.planta} · ${r.vivienda}: ${r.util_m2} m² (mín ${r.min_m2}) · ventila: ${r.ventilacion}`;
-        ul.appendChild(li);
-      });
-      tablaAnexoWrap.innerHTML = "";
-      tablaAnexoWrap.appendChild(ul);
-    } else {
-      tablaAnexoWrap.innerHTML = '<p class="rc-vacio">Todas las unidades cumplen Anexo I.5 y ventilación.</p>';
+    if (tablaAnexoWrap) {
+      tablaAnexoWrap.innerHTML = '<p class="rc-vacio">Anexo I aplicado al cálculo. Revisa las alertas del banner para incidencias.</p>';
     }
   }
 
@@ -321,7 +309,8 @@
       }
       const data = await resp.json();
       ESTADO.fullPayload = data;
-      const n_plantas = data.edificio?.plantas?.length || 1;
+      // Iter. 3: edificio = null. Usamos envolvente.plantas para los tabs.
+      const n_plantas = (data.envolvente?.plantas?.length) || (data.edificio?.plantas?.length) || 1;
       ESTADO.plantaActiva = Math.min(ESTADO.plantaActiva, n_plantas - 1);
       dibujarTabsPlantas(data);
       renderer.dibujar(data, ESTADO.plantaActiva);
@@ -330,7 +319,7 @@
       repintarAlertas(data.alertas);
       repintarTablaPlanta(data.tabla_planta);
       repintarTablaUnidad(data.tabla_unidad);
-      mostrarToast("Distribución actualizada");
+      mostrarToast("Capacidad calculada");
     } catch (e) {
       if (e.name !== "AbortError") mostrarToast("Error de red", true);
     } finally {
@@ -342,7 +331,11 @@
   async function guardar() {
     if (!puedeEditar) return;
     const bloques = leerFormulario();
-    const resumen = ESTADO.fullPayload?.edificio?.totales || ESTADO.previewPayload?.envolvente || {};
+    // Iter. 3: el resumen ahora viene de data.capacidad (no de edificio.totales).
+    const resumen = ESTADO.fullPayload?.capacidad
+      || ESTADO.fullPayload?.edificio?.totales
+      || ESTADO.previewPayload?.envolvente
+      || {};
     try {
       const resp = await fetch("/modulos/render-calculos/guardar", {
         method: "POST",
@@ -526,8 +519,19 @@
     } catch (e) { mostrarToast("Error de red", true); }
   }
 
+  // ─── Visibilidad de campos según uso (vivienda/apartamentos) ──────────
+  function aplicarVisibilidadPorUso() {
+    const sel = form.querySelector('select[name="uso"]');
+    const usoActivo = sel ? sel.value : "vivienda";
+    form.querySelectorAll("[data-cuando-uso]").forEach(el => {
+      const usos = el.dataset.cuandoUso.split(/\s+/);
+      el.hidden = !usos.includes(usoActivo);
+    });
+  }
+
   // ─── Bindings ─────────────────────────────────────────────────────────
   function calcularConDebounce() {
+    aplicarVisibilidadPorUso();
     if (ESTADO.debounceId) clearTimeout(ESTADO.debounceId);
     ESTADO.debounceId = setTimeout(pedirPreview, 250);
   }
@@ -539,6 +543,8 @@
 
   // Brújula inicial vacía
   if (window.RcBrujula) window.RcBrujula.dibujar(brujulaEl, []);
+
+  aplicarVisibilidadPorUso();
 
   // Si hay proyecto + parcela, primer preview automático
   if (estado === "ok") {

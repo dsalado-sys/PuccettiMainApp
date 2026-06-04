@@ -36,6 +36,9 @@ class ParametrosDiseno:
     area_patio_min: float = 12.00
     profundidad_max_sin_patio: float = 12.00
 
+    # Eficiencia útil/construida (rango 0.65–0.85). 0.72 ≈ vivienda colectiva.
+    eficiencia_planta: float = 0.72
+
 
 @dataclass
 class ParametrosUrbanisticos:
@@ -47,6 +50,13 @@ class ParametrosUrbanisticos:
     retranqueo_lateral: float = 0.0
     retranqueo_trasero: float = 0.0
     altura_planta: float = 3.0
+    # Ático y sótano (iter. 3). Si el flag computa = False, la planta se construye
+    # pero no consume techo edificable (caso típico en PGOU Sevilla casco).
+    tiene_atico: bool = False
+    retranqueo_atico: float = 3.0
+    atico_computa_edificabilidad: bool = False
+    tiene_sotano: bool = False
+    sotano_computa_edificabilidad: bool = False
 
 
 @dataclass

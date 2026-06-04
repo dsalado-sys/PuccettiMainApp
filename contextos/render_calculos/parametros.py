@@ -10,7 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .dominio import CategoriaVivienda, UsoEdificio
+from .dominio import (
+    CategoriaApartamentos,
+    CategoriaVivienda,
+    TipologiaApartamento,
+    UsoEdificio,
+)
 from .geometria.config import (
     Parametros as ParametrosMotor,
     ParametrosDiseno as DisenoMotor,
@@ -55,6 +60,7 @@ class ParametrosDiseno:
     diametro_min_vestibulo_m: float = 1.50
     ancho_min_puerta_m: float = 0.80
     profundidad_max_sin_patio_m: float = 12.0
+    eficiencia_planta: float = 0.72
 
 
 @dataclass
@@ -63,7 +69,8 @@ class ParametrosPrograma:
     uso: UsoEdificio = UsoEdificio.VIVIENDA
     categoria_vivienda: CategoriaVivienda = CategoriaVivienda.DOS_D
     categoria_hotelero: str = "hotel_3"             # placeholder hasta MVP hotel
-    categoria_apartamentos: str = "2_llaves"        # placeholder hasta MVP apt.
+    categoria_apartamentos: CategoriaApartamentos = CategoriaApartamentos.DOS_LLAVES
+    tipologia_apartamento: TipologiaApartamento = TipologiaApartamento.UNO_D
     salon_cocina_open: bool = False
     n_viviendas_por_planta_objetivo: int | None = None
     pct_unidades_adaptadas: float = 5.0
@@ -78,10 +85,24 @@ class ParametrosRender:
     seed: int = 42
 
     def a_parametros_motor(self) -> ParametrosMotor:
-        """Traduce a la estructura que espera el motor de geometría."""
-        from .dominio import CATEGORIA_A_NUM_DORMS
+        """Traduce a la estructura que espera el motor de geometría.
 
-        n_dorms = CATEGORIA_A_NUM_DORMS.get(self.programa.categoria_vivienda, 2)
+        Vivienda → `n_dormitorios` viene de `categoria_vivienda` (Anexo I.5).
+        Apartamentos → `n_dormitorios` viene de `tipologia_apartamento`
+        (estudio=0, 1d=1, 2d=2, 3d=3). Esto es solo para `_evaluar_unidad`; el
+        tamaño objetivo lo aporta `ProgramaUso` desde `casos_uso.py`.
+        """
+        from .dominio import CATEGORIA_A_NUM_DORMS, TIPOLOGIA_APT_A_NUM_DORMS
+
+        if self.programa.uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+            n_dorms = TIPOLOGIA_APT_A_NUM_DORMS.get(self.programa.tipologia_apartamento, 1)
+            categoria_label = self.programa.categoria_apartamentos.value
+        else:
+            n_dorms = CATEGORIA_A_NUM_DORMS.get(self.programa.categoria_vivienda, 2)
+            categoria_label = self.programa.categoria_vivienda.value
+        # Sanitiza eficiencia (rango 0.65–0.85) — el motor lo aplica en capacidad.py
+        eficiencia = max(0.65, min(0.85, float(self.diseno.eficiencia_planta)))
+
         return ParametrosMotor(
             diseno=DisenoMotor(
                 espesor_muro_fachada=self.diseno.espesor_muro_fachada_m,
@@ -95,6 +116,7 @@ class ParametrosRender:
                 luz_recta_patio_min=self.urbanisticos.luz_recta_patio_min_m,
                 area_patio_min=self.urbanisticos.area_patio_min_m2,
                 profundidad_max_sin_patio=self.diseno.profundidad_max_sin_patio_m,
+                eficiencia_planta=eficiencia,
             ),
             urbanismo=UrbMotor(
                 edificabilidad=self.urbanisticos.edificabilidad_m2t_m2s,
@@ -104,10 +126,15 @@ class ParametrosRender:
                 retranqueo_lateral=self.urbanisticos.retranqueo_lateral_m,
                 retranqueo_trasero=self.urbanisticos.retranqueo_trasero_m,
                 altura_planta=self.urbanisticos.altura_planta_m,
+                tiene_atico=self.urbanisticos.tiene_atico,
+                retranqueo_atico=self.urbanisticos.retranqueo_atico_m,
+                atico_computa_edificabilidad=self.urbanisticos.atico_computa_edificabilidad,
+                tiene_sotano=self.urbanisticos.tiene_sotano,
+                sotano_computa_edificabilidad=self.urbanisticos.sotano_computa_edificabilidad,
             ),
             programa=ProgramaMotor(
                 uso=self.programa.uso.value,
-                categoria=self.programa.categoria_vivienda.value,
+                categoria=categoria_label,
                 n_dormitorios=n_dorms,
                 salon_cocina_open=self.programa.salon_cocina_open,
                 n_plantas=self.urbanisticos.n_plantas_max,
@@ -148,12 +175,14 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
             "diametro_min_vestibulo_m": p.diseno.diametro_min_vestibulo_m,
             "ancho_min_puerta_m": p.diseno.ancho_min_puerta_m,
             "profundidad_max_sin_patio_m": p.diseno.profundidad_max_sin_patio_m,
+            "eficiencia_planta": p.diseno.eficiencia_planta,
         },
         "programa": {
             "uso": p.programa.uso.value,
             "categoria_vivienda": p.programa.categoria_vivienda.value,
             "categoria_hotelero": p.programa.categoria_hotelero,
-            "categoria_apartamentos": p.programa.categoria_apartamentos,
+            "categoria_apartamentos": p.programa.categoria_apartamentos.value,
+            "tipologia_apartamento": p.programa.tipologia_apartamento.value,
             "salon_cocina_open": p.programa.salon_cocina_open,
             "n_viviendas_por_planta_objetivo": p.programa.n_viviendas_por_planta_objetivo,
             "pct_unidades_adaptadas": p.programa.pct_unidades_adaptadas,
@@ -218,6 +247,8 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
     )
 
     dis_in = d.get("diseno") or {}
+    ef_raw = _f(dis_in, "eficiencia_planta", base.diseno.eficiencia_planta)
+    eficiencia = max(0.65, min(0.85, ef_raw))
     diseno = ParametrosDiseno(
         espesor_muro_fachada_m=_f(dis_in, "espesor_muro_fachada_m", base.diseno.espesor_muro_fachada_m),
         espesor_muro_medianero_m=_f(dis_in, "espesor_muro_medianero_m", base.diseno.espesor_muro_medianero_m),
@@ -228,6 +259,7 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         diametro_min_vestibulo_m=_f(dis_in, "diametro_min_vestibulo_m", base.diseno.diametro_min_vestibulo_m),
         ancho_min_puerta_m=_f(dis_in, "ancho_min_puerta_m", base.diseno.ancho_min_puerta_m),
         profundidad_max_sin_patio_m=_f(dis_in, "profundidad_max_sin_patio_m", base.diseno.profundidad_max_sin_patio_m),
+        eficiencia_planta=eficiencia,
     )
 
     prog_in = d.get("programa") or {}
@@ -246,11 +278,21 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
     except (TypeError, ValueError):
         n_viv_pp = None
 
+    try:
+        cat_apt = CategoriaApartamentos(prog_in.get("categoria_apartamentos", base.programa.categoria_apartamentos.value))
+    except (ValueError, TypeError):
+        cat_apt = base.programa.categoria_apartamentos
+    try:
+        tip_apt = TipologiaApartamento(prog_in.get("tipologia_apartamento", base.programa.tipologia_apartamento.value))
+    except (ValueError, TypeError):
+        tip_apt = base.programa.tipologia_apartamento
+
     programa = ParametrosPrograma(
         uso=uso,
         categoria_vivienda=cat,
         categoria_hotelero=str(prog_in.get("categoria_hotelero", base.programa.categoria_hotelero)),
-        categoria_apartamentos=str(prog_in.get("categoria_apartamentos", base.programa.categoria_apartamentos)),
+        categoria_apartamentos=cat_apt,
+        tipologia_apartamento=tip_apt,
         salon_cocina_open=_b(prog_in, "salon_cocina_open", base.programa.salon_cocina_open),
         n_viviendas_por_planta_objetivo=n_viv_pp,
         pct_unidades_adaptadas=_f(prog_in, "pct_unidades_adaptadas", base.programa.pct_unidades_adaptadas),

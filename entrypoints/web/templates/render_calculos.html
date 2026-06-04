@@ -12,8 +12,8 @@
     <button type="button" id="rc-btn-normativa" class="boton-secundario" title="Normativa municipal del PGOU">
       Normativa municipal
     </button>
-    <button type="button" id="rc-btn-distribuir" class="boton-primario" title="Recalcular distribución (macro-layout completo)">
-      Distribuir viviendas
+    <button type="button" id="rc-btn-distribuir" class="boton-primario" title="Calcular capacidad numérica (envolvente + Anexo I)">
+      Calcular capacidad
     </button>
     <button type="button" id="rc-btn-guardar" class="boton-secundario" title="Guardar parámetros en el proyecto">
       Guardar
@@ -46,7 +46,7 @@
   <section class="rc-viz" aria-label="Plano de planta y orientaciones">
     <nav class="rc-plantas" id="rc-tabs-plantas" role="tablist" aria-label="Selector de planta">
       <!-- los tabs se inyectan desde JS tras /preview -->
-      <span class="rc-tab rc-tab-vacio">Pulsa «Distribuir viviendas» o cambia un parámetro para empezar.</span>
+      <span class="rc-tab rc-tab-vacio">Pulsa «Calcular capacidad» o cambia un parámetro para empezar.</span>
     </nav>
 
     <div class="rc-canvas-wrap">
@@ -54,9 +54,13 @@
       <div class="rc-brujula" id="rc-brujula" aria-label="Brújula y orientaciones cardinales"></div>
       <div class="rc-spinner" id="rc-spinner" hidden>
         <span class="rc-spinner-circ"></span>
-        <span>Calculando distribución…</span>
+        <span>Calculando capacidad…</span>
       </div>
     </div>
+
+    <p class="rc-banner-render" id="rc-banner-render">
+      Render gráfico de unidades en desarrollo — los números mostrados son los del cálculo.
+    </p>
 
     <footer class="rc-leyenda">
       <span class="rc-leg rc-leg-fachada">Fachada</span>
@@ -80,7 +84,7 @@
         <span class="rc-kpi-valor" data-kpi="util_total_m2">—</span>
       </article>
       <article class="rc-kpi rc-kpi-destacada">
-        <span class="rc-kpi-label">Viviendas dispuestas</span>
+        <span class="rc-kpi-label">Unidades posibles</span>
         <span class="rc-kpi-valor" data-kpi="n_viviendas">—</span>
       </article>
       <article class="rc-kpi">
@@ -112,8 +116,7 @@
         <thead class="rc-thead-sticky">
           <tr>
             <th>Planta</th><th>ID</th><th>Dorms</th>
-            <th>Útil</th><th>Mín.</th><th>Cumple</th>
-            <th>Ventila</th><th>Acceso</th><th>Adapt.</th>
+            <th>Tipo</th><th>Útil objetivo</th><th>Adapt.</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -121,7 +124,7 @@
     </div>
 
     <div class="rc-tabla-wrap" id="rc-tabla-anexo-wrap" role="tabpanel" hidden>
-      <p class="rc-vacio">Aquí aparecerán las unidades que no cumplen el Anexo I tras pulsar «Distribuir viviendas».</p>
+      <p class="rc-vacio">Aquí aparecerán los avisos del Anexo I tras pulsar «Calcular capacidad».</p>
     </div>
 
     <div class="rc-export">

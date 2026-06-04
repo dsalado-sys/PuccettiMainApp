@@ -1,5 +1,10 @@
 """Macro-layout plurifamiliar (§2.4/§2.5) — varias viviendas por planta.
 
+DEPRECATED desde iteración 3 — usar `calcular_capacidad()` como fuente de verdad.
+Este motor geométrico se mantiene en el repo hasta que se rediseñe el render
+Canvas 2D para dibujar lo que dice el cálculo (no lo que la geometría puede
+acomodar). NO se invoca desde `casos_uso.CalcularLayout` desde 2026-06-03.
+
 Copia desde `Modulos/puccetti-app/puccetti/macro_layout.py`. Sin cambios funcionales:
 solo imports relativos al paquete `geometria` y eliminación de comentarios
 sobre Streamlit (que no aplican aquí).
@@ -25,7 +30,8 @@ from shapely.affinity import rotate, translate
 from .config import Parametros
 from .parcelas import LadoParcela
 from .envolvente import Planta, Patio
-from .programa import programa_vivienda, util_maximo, MIN_COCINA, MIN_BANO
+from .programa import programa_vivienda, util_maximo, util_minimo_vivienda, MIN_COCINA, MIN_BANO
+from .programa_uso import ProgramaUso
 from .capacidad import calcular_capacidad, Capacidad
 
 # ---- dimensiones del núcleo vertical (m) ----
@@ -179,9 +185,13 @@ def _clasificar_box_edges(
     return edges
 
 
-def _unidad_min_area(n_dorms: int) -> float:
-    prog = programa_vivienda(n_dorms, util_disponible=util_maximo(n_dorms))
-    return round(sum(e.area_min_m2 for e in prog) * 1.15, 2)
+def _unidad_min_area(n_dorms: int, programa_uso: ProgramaUso | None = None) -> float:
+    """Mínimo viable por unidad. Si recibe `programa_uso`, usa su `area_min_unidad_m2`
+    (apartamentos turísticos); si no, deriva de vivienda Anexo I.5.
+    """
+    if programa_uso is not None:
+        return programa_uso.area_min_unidad_m2
+    return util_minimo_vivienda(n_dorms)
 
 
 def _poly_safe(g) -> Polygon:
@@ -245,9 +255,11 @@ def _evaluar_unidad(
     uid: str, geom_util: Polygon, geom_constr: Polygon, n_dorms: int,
     pasillo: Polygon, fach_segments: MultiLineString, patios_a: list[Polygon],
     params: Parametros,
+    programa_uso: ProgramaUso | None = None,
 ) -> Unidad:
     area_util = geom_util.area
-    area_min = _unidad_min_area(n_dorms)
+    area_min = _unidad_min_area(n_dorms, programa_uso)
+    tipo_unidad = programa_uso.tipo_unidad if programa_uso is not None else "vivienda"
 
     borde_pas = _longitud_contacto(geom_util, pasillo.boundary, tol=0.30)
     acceso = borde_pas >= params.diseno.radio_apertura_puerta
@@ -287,11 +299,15 @@ def _evaluar_unidad(
             incidencias.append(
                 f"{uid}: hueco a fachada insuficiente ({hueco_disp:.1f}/{hueco_req:.1f} m²)")
     if not cumple_min:
+        etiqueta = (
+            f"{n_dorms} dorm." if tipo_unidad == "vivienda"
+            else f"apt. {n_dorms}D" if n_dorms > 0 else "apt. estudio"
+        )
         incidencias.append(
-            f"{uid}: {area_util:.1f} m² útil < mínimo {area_min:.1f} m² ({n_dorms} dorm.)")
+            f"{uid}: {area_util:.1f} m² útil < mínimo {area_min:.1f} m² ({etiqueta})")
 
     return Unidad(
-        id=uid, tipo="vivienda", n_dorms=n_dorms,
+        id=uid, tipo=tipo_unidad, n_dorms=n_dorms,
         geometry=geom_util, geometry_construida=geom_constr,
         area_util_m2=round(area_util, 2), area_construida_m2=round(geom_constr.area, 2),
         area_min_m2=area_min, acceso_pasillo=acceso, borde_pasillo_m=round(borde_pas, 2),
@@ -346,10 +362,10 @@ def _absorber_resto(
 def _generar_candidato(
     planta: Planta, lados: list[LadoParcela], params: Parametros,
     n_viviendas: int, seed: int, rot90: bool = False, tipologia_pref: str = "double",
-    forzar_n: bool = False,
+    forzar_n: bool = False, programa_uso: ProgramaUso | None = None,
 ) -> PlantaPlurifamiliar:
     rng = random.Random(seed)
-    n_dorms = params.programa.n_dormitorios
+    n_dorms = programa_uso.n_dormitorios if programa_uso is not None else params.programa.n_dormitorios
     cw = params.diseno.ancho_min_pasillo_comun
     esp_div = params.diseno.espesor_separacion_unidades
 
@@ -424,10 +440,10 @@ def _generar_candidato(
         if not patio_a.is_empty and patio_a.area >= 0.6 * params.diseno.area_patio_min:
             patios_a = [patio_a]
 
-    util_target = util_maximo(n_dorms)
-    area_min_viv = _unidad_min_area(n_dorms)
+    util_target = programa_uso.util_objetivo_unidad_m2 if programa_uso is not None else util_maximo(n_dorms)
+    area_min_viv = _unidad_min_area(n_dorms, programa_uso)
     UEFIC = 0.88
-    util_tope = util_target * 1.25
+    util_tope = (programa_uso.util_max_unidad_m2 if programa_uso is not None else util_target * 1.25)
     slice_max = util_tope / UEFIC
     patios_union = unary_union(patios_a) if patios_a else None
 
@@ -491,7 +507,7 @@ def _generar_candidato(
     else:
         muros_div = Polygon()
 
-    area_min_viv = _unidad_min_area(n_dorms)
+    area_min_viv = _unidad_min_area(n_dorms, programa_uso)
     sliver_min = max(8.0, 0.35 * area_min_viv)
 
     unidades: list[Unidad] = []
@@ -506,6 +522,7 @@ def _generar_candidato(
         u = _evaluar_unidad(
             f"P{planta.n}-V{idx}", g_util, g_constr, n_dorms,
             pas_geom, fach_segments, patios_a, params,
+            programa_uso=programa_uso,
         )
         u.geometry = mu(g_util)
         u.geometry_construida = mu(g_constr)
@@ -588,7 +605,7 @@ def _score_planta(pl: PlantaPlurifamiliar, n_viviendas: int) -> float:
 def generar_planta_plurifamiliar(
     planta: Planta, lados: list[LadoParcela], params: Parametros,
     n_viviendas: int, seed: int | None = None, n_candidatos: int = 8,
-    forzar_n: bool = False,
+    forzar_n: bool = False, programa_uso: ProgramaUso | None = None,
 ) -> PlantaPlurifamiliar:
     base = seed if seed is not None else random.randint(0, 10 ** 6)
     estrategias = [(False, "double"), (False, "single"),
@@ -600,7 +617,7 @@ def generar_planta_plurifamiliar(
         for s in range(n_seeds):
             cand = _generar_candidato(planta, lados, params, n_viviendas,
                                       base + k * 1009, rot90=rot90, tipologia_pref=tip,
-                                      forzar_n=forzar_n)
+                                      forzar_n=forzar_n, programa_uso=programa_uso)
             cand.score = _score_planta(cand, n_viviendas)
             cands.append((cand.score, cand))
             k += 1
@@ -644,14 +661,26 @@ def generar_edificio(
     envolvente, lados: list[LadoParcela], params: Parametros,
     n_viviendas_por_planta: int | None = None,
     seed: int | None = None, n_candidatos: int = 8,
+    programa_uso: ProgramaUso | None = None,
 ) -> EdificioPlurifamiliar:
     """Pipeline completo §2.4/§2.5 plurifamiliar.
 
-    El nº de viviendas se DERIVA de la edificabilidad (`capacidad.py`) salvo que
+    El nº de unidades se DERIVA de la edificabilidad (`capacidad.py`) salvo que
     se imponga uno explícito. Genera una planta tipo (la mejor) y la replica en
     todos los niveles.
+
+    Si `programa_uso` es None, el motor opera como vivienda (Anexo I.5). Si se
+    pasa un descriptor, el motor usa su `util_objetivo_unidad_m2`, descuenta sus
+    `area_servicios_obligatorios_m2` del techo útil y etiqueta las unidades
+    según `tipo_unidad`.
     """
-    cap = calcular_capacidad(envolvente, params)
+    util_obj = programa_uso.util_objetivo_unidad_m2 if programa_uso is not None else None
+    comunes = programa_uso.area_servicios_obligatorios_m2 if programa_uso is not None else 0.0
+    cap = calcular_capacidad(
+        envolvente, params,
+        util_objetivo_por_unidad=util_obj,
+        area_servicios_comunes_m2=comunes,
+    )
     if not envolvente.plantas:
         return EdificioPlurifamiliar(
             parcela=envolvente.parcela, plantas=[],
@@ -663,7 +692,8 @@ def generar_edificio(
 
     tipo = generar_planta_plurifamiliar(
         envolvente.plantas[0], lados, params, n_viv,
-        seed=seed, n_candidatos=n_candidatos, forzar_n=forzar)
+        seed=seed, n_candidatos=n_candidatos, forzar_n=forzar,
+        programa_uso=programa_uso)
     plantas = [tipo if n == tipo.n else _clonar_planta(tipo, n)
                for n in range(cap.n_plantas_edificables)]
     _marcar_unidades_adaptadas(plantas, params.programa.pct_unidades_adaptadas)

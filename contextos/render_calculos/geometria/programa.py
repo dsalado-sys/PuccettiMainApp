@@ -78,3 +78,32 @@ def programa_vivienda(
 
 def util_maximo(n_dorms: int) -> float:
     return UTIL_MAX.get(n_dorms, 150)
+
+
+def util_minimo_vivienda(n_dorms: int, salon_cocina_open: bool = False) -> float:
+    """Mínimo viable de una vivienda (Anexo I.5 + 15% de circulación interior).
+
+    Es el `area_min_unidad_m2` que `ProgramaUso` necesita para vivienda. Se
+    expone aquí para que tanto `macro_layout._unidad_min_area` como el
+    constructor `programa_uso_vivienda` lo derive del mismo cálculo.
+    """
+    prog = programa_vivienda(n_dorms, util_disponible=util_maximo(n_dorms),
+                             salon_cocina_open=salon_cocina_open)
+    return round(sum(e.area_min_m2 for e in prog) * 1.15, 2)
+
+
+def programa_uso_vivienda(n_dorms: int, salon_cocina_open: bool = False):
+    """Constructor del descriptor `ProgramaUso` para vivienda.
+
+    Import perezoso para evitar ciclos: `programa_uso.py` no importa nada de
+    este módulo, y este módulo importa `ProgramaUso` solo cuando hace falta.
+    """
+    from .programa_uso import ProgramaUso
+    return ProgramaUso(
+        util_objetivo_unidad_m2=util_maximo(n_dorms),
+        area_min_unidad_m2=util_minimo_vivienda(n_dorms, salon_cocina_open),
+        util_max_unidad_m2=util_maximo(n_dorms) * 1.25,
+        n_dormitorios=n_dorms,
+        tipo_unidad="vivienda",
+        area_servicios_obligatorios_m2=0.0,
+    )

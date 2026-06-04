@@ -53,6 +53,7 @@ def init_db() -> None:
     from . import callejero_sqlalchemy  # noqa: F401
     from . import normativa_municipal_sqlalchemy  # noqa: F401
     from . import catalogo_superficies_sqlalchemy  # noqa: F401
+    from . import anexo_i_apartamentos_sqlalchemy  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
     # Sembrar catálogos si las tablas están vacías.

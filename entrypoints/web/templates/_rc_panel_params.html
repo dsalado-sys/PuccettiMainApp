@@ -124,14 +124,34 @@
             </option>
           {% endfor %}
         </select>
-        <small class="rc-hint">Solo "Vivienda" está totalmente implementado en esta versión.</small>
+        <small class="rc-hint">"Hotelero" sigue en desarrollo en esta versión.</small>
       </label>
-      <label class="rc-campo">
+      <label class="rc-campo" data-cuando-uso="vivienda">
         <span class="rc-campo-label">Tipología de vivienda</span>
         <select name="categoria_vivienda" data-bloque="programa">
           {% for c in ["estudio","1d","2d","3d","4d+"] %}
             <option value="{{ c }}" {% if prog.categoria_vivienda == c %}selected{% endif %}>
               {% if c == "estudio" %}Estudio{% elif c == "4d+" %}4 o más dormitorios{% else %}{{ c[0] }} dormitorio{{ "s" if c[0] != "1" }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="rc-campo" data-cuando-uso="apartamentos_turisticos">
+        <span class="rc-campo-label">Categoría (Decreto 194/2010)</span>
+        <select name="categoria_apartamentos" data-bloque="programa">
+          {% for c in ["1L","2L","3L","4L"] %}
+            <option value="{{ c }}" {% if prog.categoria_apartamentos == c %}selected{% endif %}>
+              {{ c[0] }} llave{{ "s" if c[0] != "1" }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="rc-campo" data-cuando-uso="apartamentos_turisticos">
+        <span class="rc-campo-label">Tipología de apartamento</span>
+        <select name="tipologia_apartamento" data-bloque="programa">
+          {% for c in ["estudio","1d","2d","3d"] %}
+            <option value="{{ c }}" {% if prog.tipologia_apartamento == c %}selected{% endif %}>
+              {% if c == "estudio" %}Estudio{% else %}{{ c[0] }} dormitorio{{ "s" if c[0] != "1" }}{% endif %}
             </option>
           {% endfor %}
         </select>
@@ -211,6 +231,11 @@
         <span class="rc-campo-label">Profundidad máx. sin patio (m)</span>
         <input type="number" name="profundidad_max_sin_patio_m" min="8" max="20" step="0.5"
                value="{{ d.profundidad_max_sin_patio_m }}" data-bloque="diseno">
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Eficiencia útil/construida</span>
+        <input type="number" name="eficiencia_planta" min="0.65" max="0.85" step="0.01"
+               value="{{ d.eficiencia_planta }}" data-bloque="diseno">
       </label>
     </div>
   </details>
