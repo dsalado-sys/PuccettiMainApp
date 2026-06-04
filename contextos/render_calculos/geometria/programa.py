@@ -35,7 +35,7 @@ SALON_MIN = {1: 14, 2: 16, 3: 18, 4: 20, 5: 24}
 SALON_MAS_COCINA_MIN = {1: 20, 2: 20, 3: 24, 4: 24, 5: 28}
 
 # Superficie útil máxima de referencia (VPO):
-UTIL_MAX = {0: 35, 1: 60, 2: 70, 3: 90, 4: 110, 5: 130, 6: 150}
+UTIL_MAX = {0: 25, 1: 60, 2: 70, 3: 90, 4: 110, 5: 130, 6: 150}
 
 
 def programa_vivienda(
