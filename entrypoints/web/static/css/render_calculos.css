@@ -362,3 +362,53 @@
   background: rgba(184, 150, 12, 0.10);
   font-weight: 500;
 }
+
+/* ── Iteración 4: KPI texto + filas unidad clicables + modal unidad ── */
+.rc-kpi-valor-texto { font-size: 13px; font-weight: 500; }
+.rc-fila-unidad-clicable { cursor: pointer; }
+.rc-fila-unidad-clicable:hover td { background: rgba(184, 150, 12, 0.10); }
+.rc-mu-help {
+  font-size: 12px; color: #6e6a60; margin: 0 0 6px; font-style: italic;
+}
+
+.rc-modal-unidad-card { max-width: 520px; }
+.rc-mu-cuerpo { display: flex; flex-direction: column; gap: 14px; }
+.rc-mu-meta-lista {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
+  margin: 0;
+}
+.rc-mu-meta-lista > div { display: flex; justify-content: space-between; }
+.rc-mu-meta-lista dt { font-size: 11px; color: #6e6a60; text-transform: uppercase; letter-spacing: 0.06em; }
+.rc-mu-meta-lista dd { margin: 0; font-weight: 600; }
+
+.rc-mu-reparto h3, .rc-mu-estancias h3 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #6e6a60; margin: 0 0 6px;
+}
+.rc-mu-tabla {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+.rc-mu-tabla th {
+  text-align: left; font-weight: 500; color: #444; padding: 4px 8px;
+}
+.rc-mu-tabla td {
+  text-align: right; padding: 4px 8px; font-weight: 600;
+}
+.rc-mu-tabla tr + tr { border-top: 1px solid rgba(0,0,0,0.06); }
+
+.rc-mu-estancias-lista {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.rc-mu-estancia {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 10px;
+  padding: 4px 8px; border-left: 3px solid #ccc;
+  background: var(--gris-suave, #f4f2ec); font-size: 13px;
+}
+.rc-mu-estancia-publica { border-left-color: #B8960C; }
+.rc-mu-estancia-privada { border-left-color: #6e6a60; }
+.rc-mu-estancia-servicio { border-left-color: #9b9b9b; }
+.rc-mu-est-nombre { font-weight: 600; }
+.rc-mu-est-cat { font-size: 11px; color: #6e6a60; text-transform: uppercase; }
+.rc-mu-est-m2 { font-weight: 600; }
+.rc-mu-total { font-size: 12px; color: #6e6a60; margin: 4px 0 0; text-align: right; }

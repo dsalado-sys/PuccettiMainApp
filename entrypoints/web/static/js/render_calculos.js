@@ -107,20 +107,17 @@
     };
     const env = payload?.envolvente;
     const cap = payload?.capacidad;
-    const ind = payload?.indicadores;
-    // Fuente de verdad iter. 3: data.capacidad. Fallback a la envolvente del preview.
+    // Fuente de verdad iter. 4: data.capacidad. Fallback a envolvente del preview.
     if (cap) {
       set("construida_total_m2", fmt.m2.format(cap.construida_total_m2) + " m²");
-      set("util_total_m2", fmt.m2.format(cap.util_total_m2) + " m²");
+      set("edificabilidad_m2", fmt.m2.format(cap.edificabilidad_m2) + " m²");
       set("n_viviendas", fmt.int.format(cap.n_viviendas_objetivo));
+      set("factor_limitante", cap.factor_limitante || "—");
     } else if (env) {
       set("construida_total_m2", fmt.m2.format(env.edificabilidad_consumida_m2) + " m²");
-      set("util_total_m2", "—");
+      set("edificabilidad_m2", fmt.m2.format(env.edificabilidad_max_m2) + " m²");
       set("n_viviendas", fmt.int.format(env.n_viviendas_objetivo) + " obj.");
-    }
-    if (ind) {
-      set("compacidad", fmt.pct.format(ind.compacidad));
-      set("huecos", fmt.pct.format((ind.proporcion_huecos || 0) * 100));
+      set("factor_limitante", env.factor_limitante || "—");
     }
   }
 
@@ -152,21 +149,21 @@
     });
   }
 
-  // ─── Tabla por planta (iter. 3 — derivada del cálculo, no de geometría) ─
+  // ─── Tabla por planta (iter. 4 — desglose muros/circulación/núcleo) ────
   function repintarTablaPlanta(filas) {
     if (!tablaPlantaBody) return;
     tablaPlantaBody.innerHTML = "";
     if (!filas || !filas.length) {
-      tablaPlantaBody.innerHTML = '<tr><td colspan="8" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
+      tablaPlantaBody.innerHTML = '<tr><td colspan="7" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
       return;
     }
-    let tot = { c: 0, u: 0, circ: 0, pat: 0, mur: 0, viv: 0 };
+    const tot = { c: 0, u: 0, mur: 0, circ: 0, nuc: 0, viv: 0 };
     filas.forEach(r => {
       tot.c += r.construida_m2 || 0;
       tot.u += r.util_viviendas_m2 || 0;
-      tot.circ += r.circulacion_m2 || 0;
-      tot.pat += r.patios_m2 || 0;
       tot.mur += r.muros_m2 || 0;
+      tot.circ += r.circulacion_m2 || 0;
+      tot.nuc += r.nucleo_m2 || 0;
       tot.viv += r.viviendas || 0;
       const tr = document.createElement("tr");
       const tipo = r.tipo || "regular";
@@ -176,10 +173,9 @@
         <td>${fmt.int.format(r.viviendas)}</td>
         <td>${fmt.m2.format(r.construida_m2)}</td>
         <td>${fmt.m2.format(r.util_viviendas_m2)}</td>
-        <td>${fmt.m2.format(r.circulacion_m2)}</td>
-        <td>${fmt.m2.format(r.patios_m2 || 0)}</td>
         <td>${fmt.m2.format(r.muros_m2 || 0)}</td>
-        <td>${fmt.pct.format(r.eficiencia_pct)}</td>`;
+        <td>${fmt.m2.format(r.circulacion_m2 || 0)}</td>
+        <td>${fmt.m2.format(r.nucleo_m2 || 0)}</td>`;
       tablaPlantaBody.appendChild(tr);
     });
     const trTot = document.createElement("tr");
@@ -190,10 +186,9 @@
       <td>${fmt.int.format(tot.viv)}</td>
       <td>${fmt.m2.format(tot.c)}</td>
       <td>${fmt.m2.format(tot.u)}</td>
-      <td>${fmt.m2.format(tot.circ)}</td>
-      <td>${fmt.m2.format(tot.pat)}</td>
       <td>${fmt.m2.format(tot.mur)}</td>
-      <td>${tot.c ? fmt.pct.format(100 * tot.u / tot.c) : "—"}</td>`;
+      <td>${fmt.m2.format(tot.circ)}</td>
+      <td>${fmt.m2.format(tot.nuc)}</td>`;
     tablaPlantaBody.appendChild(trTot);
   }
 
@@ -201,7 +196,7 @@
     if (!tablaUnidadBody) return;
     tablaUnidadBody.innerHTML = "";
     if (!filas || !filas.length) {
-      tablaUnidadBody.innerHTML = '<tr><td colspan="6" class="rc-vacio">Sin unidades calculadas.</td></tr>';
+      tablaUnidadBody.innerHTML = '<tr><td colspan="7" class="rc-vacio">Sin unidades calculadas.</td></tr>';
       if (tablaAnexoWrap) {
         tablaAnexoWrap.innerHTML = '<p class="rc-vacio">Sin datos.</p>';
       }
@@ -209,18 +204,81 @@
     }
     filas.forEach(r => {
       const tr = document.createElement("tr");
+      tr.className = "rc-fila-unidad-clicable";
+      tr.dataset.id = r.vivienda;
+      tr.dataset.planta = r.planta;
+      tr.dataset.tipo = r.tipo || "vivienda";
+      tr.dataset.dorms = r.dorms;
+      tr.dataset.adaptada = r.adaptada ? "1" : "0";
+      tr.dataset.construida = r.construida_por_unidad_m2 ?? 0;
+      tr.dataset.util = r.util_por_unidad_m2 ?? 0;
+      tr.dataset.muros = r.muros_por_unidad_m2 ?? 0;
+      tr.dataset.circulacion = r.circulacion_por_unidad_m2 ?? 0;
+      tr.dataset.estancias = JSON.stringify(r.estancias || []);
       tr.innerHTML = `
         <td>${r.planta}</td>
         <td>${r.vivienda}</td>
         <td>${r.dorms}</td>
         <td>${r.tipo || "vivienda"}</td>
-        <td>${fmt.m2.format(r.util_m2_objetivo)}</td>
+        <td>${fmt.m2.format(r.construida_por_unidad_m2 ?? 0)}</td>
+        <td>${fmt.m2.format(r.util_por_unidad_m2 ?? 0)}</td>
         <td>${r.adaptada ? "✓" : "—"}</td>`;
+      tr.addEventListener("click", () => abrirModalUnidad(tr));
       tablaUnidadBody.appendChild(tr);
     });
     if (tablaAnexoWrap) {
       tablaAnexoWrap.innerHTML = '<p class="rc-vacio">Anexo I aplicado al cálculo. Revisa las alertas del banner para incidencias.</p>';
     }
+  }
+
+  // ─── Modal "detalle de unidad" ─────────────────────────────────────────
+  function abrirModalUnidad(tr) {
+    const modalEl = document.getElementById("rc-modal-unidad");
+    if (!modalEl) return;
+    const ds = tr.dataset;
+    const setT = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+
+    setT("rc-mu-id", ds.id || "—");
+    setT("rc-mu-planta", ds.planta || "—");
+    setT("rc-mu-tipo", ds.tipo || "—");
+    setT("rc-mu-dorms", ds.dorms || "—");
+    setT("rc-mu-adapt", ds.adaptada === "1" ? "Sí" : "No");
+    setT("rc-mu-construida", fmt.m2.format(parseFloat(ds.construida || 0)) + " m²");
+    setT("rc-mu-util", fmt.m2.format(parseFloat(ds.util || 0)) + " m²");
+    setT("rc-mu-muros", fmt.m2.format(parseFloat(ds.muros || 0)) + " m²");
+    setT("rc-mu-circulacion", fmt.m2.format(parseFloat(ds.circulacion || 0)) + " m²");
+
+    let estancias = [];
+    try { estancias = JSON.parse(ds.estancias || "[]"); } catch (e) { estancias = []; }
+    const ul = document.getElementById("rc-mu-estancias-lista");
+    if (ul) {
+      ul.innerHTML = "";
+      if (!estancias.length) {
+        ul.innerHTML = '<li class="rc-vacio">Sin programa de estancias para esta unidad.</li>';
+      } else {
+        estancias.forEach(e => {
+          const li = document.createElement("li");
+          li.className = "rc-mu-estancia rc-mu-estancia-" + (e.categoria || "");
+          li.innerHTML = `<span class="rc-mu-est-nombre">${e.nombre}</span>
+            <span class="rc-mu-est-cat">${e.categoria || ""}</span>
+            <span class="rc-mu-est-m2">${fmt.m2.format(e.area_target_m2)} m²</span>`;
+          ul.appendChild(li);
+        });
+      }
+    }
+    const totalEst = estancias.reduce((acc, e) => acc + (e.area_target_m2 || 0), 0);
+    setT("rc-mu-total-estancias", fmt.m2.format(totalEst) + " m²");
+
+    if (typeof modalEl.showModal === "function") modalEl.showModal();
+    else modalEl.setAttribute("open", "");
+  }
+
+  const btnModalUnidadCerrar = document.getElementById("rc-modal-unidad-cerrar");
+  if (btnModalUnidadCerrar) {
+    btnModalUnidadCerrar.addEventListener("click", () => {
+      const m = document.getElementById("rc-modal-unidad");
+      if (m && m.close) m.close();
+    });
   }
 
   // ─── Alertas ──────────────────────────────────────────────────────────
@@ -389,7 +447,6 @@
       const tgt = tab.dataset.tab;
       document.getElementById("rc-tabla-planta-wrap").hidden = tgt !== "planta";
       document.getElementById("rc-tabla-unidad-wrap").hidden = tgt !== "unidad";
-      document.getElementById("rc-tabla-anexo-wrap").hidden = tgt !== "anexo";
     });
   });
 
@@ -437,13 +494,11 @@
 
   function rellenarFormNormativa(urb) {
     const map = {
-      "rc-norm-edif": urb?.edificabilidad_m2t_m2s ?? 2.5,
+      "rc-norm-coef": urb?.coeficiente_edificabilidad ?? urb?.edificabilidad_m2t_m2s ?? 2.5,
       "rc-norm-ocup": urb?.ocupacion_maxima_pct ?? 100,
       "rc-norm-plantas": urb?.n_plantas_max ?? 3,
-      "rc-norm-altura": urb?.altura_planta_m ?? 3.0,
-      "rc-norm-rfront": urb?.retranqueo_frontal_m ?? 0,
-      "rc-norm-rlat": urb?.retranqueo_lateral_m ?? 0,
-      "rc-norm-rtras": urb?.retranqueo_trasero_m ?? 0,
+      "rc-norm-rfach": urb?.retranqueo_fachada_m ?? 0,
+      "rc-norm-rlind": urb?.retranqueo_linderos_m ?? 0,
       "rc-norm-luz": urb?.luz_recta_patio_min_m ?? 3,
       "rc-norm-areapatio": urb?.area_patio_min_m2 ?? 12,
     };
@@ -451,30 +506,36 @@
       const el = document.getElementById(id);
       if (el) el.value = map[id];
     }
-    const usos = (urb?.usos_permitidos || ["vivienda"]);
-    document.getElementById("rc-norm-uso-viv").checked = usos.includes("vivienda");
-    document.getElementById("rc-norm-uso-apt").checked = usos.includes("apartamentos_turisticos");
-    document.getElementById("rc-norm-uso-hot").checked = usos.includes("hotelero");
+    const usos = (urb?.usos_permitidos || ["residencial"]);
+    const setUso = (id, val) => { const e = document.getElementById(id); if (e) e.checked = usos.includes(val); };
+    setUso("rc-norm-uso-resi", "residencial");
+    setUso("rc-norm-uso-hot", "hotelero");
+    setUso("rc-norm-uso-terc", "terciario");
+    setUso("rc-norm-uso-mixto", "mixto");
   }
 
   function leerFormNormativa() {
     const usos = [];
-    if (document.getElementById("rc-norm-uso-viv").checked) usos.push("vivienda");
-    if (document.getElementById("rc-norm-uso-apt").checked) usos.push("apartamentos_turisticos");
-    if (document.getElementById("rc-norm-uso-hot").checked) usos.push("hotelero");
+    const getUso = (id, val) => { const e = document.getElementById(id); if (e && e.checked) usos.push(val); };
+    getUso("rc-norm-uso-resi", "residencial");
+    getUso("rc-norm-uso-hot", "hotelero");
+    getUso("rc-norm-uso-terc", "terciario");
+    getUso("rc-norm-uso-mixto", "mixto");
+    const valof = (id, def) => {
+      const e = document.getElementById(id);
+      return e ? (parseFloat(e.value) || def) : def;
+    };
     return {
       municipio: document.getElementById("rc-norm-municipio").value.trim(),
       provincia: document.getElementById("rc-norm-provincia").value.trim(),
       urbanisticos: {
-        edificabilidad_m2t_m2s: parseFloat(document.getElementById("rc-norm-edif").value) || 2.5,
-        ocupacion_maxima_pct: parseFloat(document.getElementById("rc-norm-ocup").value) || 100,
+        coeficiente_edificabilidad: valof("rc-norm-coef", 2.5),
+        ocupacion_maxima_pct: valof("rc-norm-ocup", 100),
         n_plantas_max: parseInt(document.getElementById("rc-norm-plantas").value) || 3,
-        altura_planta_m: parseFloat(document.getElementById("rc-norm-altura").value) || 3.0,
-        retranqueo_frontal_m: parseFloat(document.getElementById("rc-norm-rfront").value) || 0,
-        retranqueo_lateral_m: parseFloat(document.getElementById("rc-norm-rlat").value) || 0,
-        retranqueo_trasero_m: parseFloat(document.getElementById("rc-norm-rtras").value) || 0,
-        luz_recta_patio_min_m: parseFloat(document.getElementById("rc-norm-luz").value) || 3,
-        area_patio_min_m2: parseFloat(document.getElementById("rc-norm-areapatio").value) || 12,
+        retranqueo_fachada_m: valof("rc-norm-rfach", 0),
+        retranqueo_linderos_m: valof("rc-norm-rlind", 0),
+        luz_recta_patio_min_m: valof("rc-norm-luz", 3),
+        area_patio_min_m2: valof("rc-norm-areapatio", 12),
         usos_permitidos: usos,
       },
       fuente_pgou: document.getElementById("rc-norm-fuente").value,
@@ -485,13 +546,11 @@
     const datos = leerFormNormativa();
     const urb = datos.urbanisticos;
     const map = {
-      edificabilidad_m2t_m2s: urb.edificabilidad_m2t_m2s,
+      coeficiente_edificabilidad: urb.coeficiente_edificabilidad,
       ocupacion_maxima_pct: urb.ocupacion_maxima_pct,
       n_plantas_max: urb.n_plantas_max,
-      altura_planta_m: urb.altura_planta_m,
-      retranqueo_frontal_m: urb.retranqueo_frontal_m,
-      retranqueo_lateral_m: urb.retranqueo_lateral_m,
-      retranqueo_trasero_m: urb.retranqueo_trasero_m,
+      retranqueo_fachada_m: urb.retranqueo_fachada_m,
+      retranqueo_linderos_m: urb.retranqueo_linderos_m,
       luz_recta_patio_min_m: urb.luz_recta_patio_min_m,
       area_patio_min_m2: urb.area_patio_min_m2,
     };

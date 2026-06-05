@@ -14,13 +14,11 @@ class AyudaParametro(TypedDict):
 
 TEXTOS_AYUDA: dict[str, dict[str, AyudaParametro]] = {
     "urbanisticos": {
-        "edificabilidad_m2t_m2s": {"label": "Edificabilidad"},
+        "coeficiente_edificabilidad": {"label": "Coeficiente de edificabilidad"},
         "ocupacion_maxima_pct": {"label": "Ocupación máxima"},
         "n_plantas_max": {"label": "Número máximo de plantas"},
-        "altura_planta_m": {"label": "Altura de planta"},
-        "retranqueo_frontal_m": {"label": "Retranqueo frontal"},
-        "retranqueo_lateral_m": {"label": "Retranqueo lateral"},
-        "retranqueo_trasero_m": {"label": "Retranqueo trasero"},
+        "retranqueo_fachada_m": {"label": "Retranqueo de fachada"},
+        "retranqueo_linderos_m": {"label": "Retranqueo de linderos"},
         "luz_recta_patio_min_m": {"label": "Luz mínima de patio"},
         "area_patio_min_m2": {"label": "Superficie mínima de patio"},
         "tiene_atico": {"label": "Ático"},
@@ -39,6 +37,9 @@ TEXTOS_AYUDA: dict[str, dict[str, AyudaParametro]] = {
         "diametro_min_vestibulo_m": {"label": "Diámetro de vestíbulo"},
         "ancho_min_puerta_m": {"label": "Paso libre de puerta"},
         "profundidad_max_sin_patio_m": {"label": "Profundidad máxima sin patio"},
+        "pct_muros": {"label": "% muros"},
+        "pct_circulacion": {"label": "% circulación"},
+        "pct_nucleo": {"label": "% núcleo"},
     },
     "programa": {
         "uso": {"label": "Uso destino"},

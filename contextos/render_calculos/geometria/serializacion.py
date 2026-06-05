@@ -97,8 +97,6 @@ def _planta_dict(pl: PlantaPlurifamiliar) -> dict[str, Any]:
             "circulacion_comun_m2": pl.circulacion_m2,
             "muros_m2": pl.muros_m2,
             "patios_m2": pl.patios_m2,
-            "eficiencia_util_pct": round(100 * pl.util_unidades_m2 / pl.construida_m2, 1)
-                                   if pl.construida_m2 else 0.0,
         },
         "n_viviendas": len(pl.unidades),
         "score": pl.score,
@@ -188,8 +186,6 @@ def tabla_por_planta(edif: EdificioPlurifamiliar) -> list[dict[str, Any]]:
             "circulacion_m2": p.circulacion_m2,
             "patios_m2": p.patios_m2,
             "muros_m2": p.muros_m2,
-            "eficiencia_pct": round(100 * p.util_unidades_m2 / p.construida_m2, 1)
-                              if p.construida_m2 else 0.0,
         })
     return rows
 
@@ -215,27 +211,18 @@ def tabla_por_unidad(edif: EdificioPlurifamiliar) -> list[dict[str, Any]]:
     return rows
 
 
-# ─── Tablas sintéticas iter. 3 — desde Capacidad, sin geometría ─────────────
+# ─── Tablas sintéticas iter. 4 — datos reales desde Capacidad ───────────────
 def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]:
-    """Tabla por planta derivada del cálculo puro (no de macro_layout).
-
-    Para apartamentos turísticos, si `programa_uso` está dado y tiene áreas
-    comunes obligatorias, se añade una fila agregada al final ("Comunes obligatorias")
-    con la suma de m² reservados al Decreto 194/2010.
-    """
+    """Tabla por planta derivada del cálculo (muros / circulación / núcleo separados)."""
     rows: list[dict[str, Any]] = []
     for i, nombre in enumerate(cap.nombres_planta):
         construida_i = cap.construida_por_planta[i]
         util_i = cap.util_por_planta[i]
+        muros_i = cap.muros_por_planta[i]
+        circulacion_i = cap.circulacion_por_planta[i]
+        nucleo_i = cap.nucleo_por_planta[i]
         viv_i = cap.viv_por_planta[i]
         tipo_i = cap.tipo_planta[i]
-
-        # Estimación gruesa de m² circulación + muros = construida − útil.
-        no_util = max(0.0, construida_i - util_i)
-        # Repartimos el sobrante 30/70 entre circulación y muros (heurística).
-        circulacion = round(no_util * 0.30, 2)
-        muros = round(no_util * 0.70, 2)
-        ef_pct = round(100.0 * util_i / construida_i, 1) if construida_i else 0.0
 
         rows.append({
             "planta": nombre,
@@ -243,10 +230,10 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
             "viviendas": viv_i,
             "construida_m2": round(construida_i, 2),
             "util_viviendas_m2": round(util_i, 2),
-            "circulacion_m2": circulacion,
-            "muros_m2": muros,
+            "muros_m2": round(muros_i, 2),
+            "circulacion_m2": round(circulacion_i, 2),
+            "nucleo_m2": round(nucleo_i, 2),
             "patios_m2": 0.0,
-            "eficiencia_pct": ef_pct,
         })
 
     if programa_uso is not None and getattr(programa_uso, "area_servicios_obligatorios_m2", 0.0) > 0:
@@ -257,26 +244,66 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
             "viviendas": 0,
             "construida_m2": round(comunes, 2),
             "util_viviendas_m2": 0.0,
-            "circulacion_m2": round(comunes, 2),
             "muros_m2": 0.0,
+            "circulacion_m2": round(comunes, 2),
+            "nucleo_m2": 0.0,
             "patios_m2": 0.0,
-            "eficiencia_pct": 0.0,
         })
 
     return rows
 
 
-def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[str, Any]]:
-    """Tabla por unidad sintética: una fila por unidad calculada.
+def _estancias_por_unidad(params, util_por_unidad: float, programa_uso) -> list[dict[str, Any]]:
+    """Devuelve la lista de estancias programadas para una unidad de `util_por_unidad` m².
 
-    Genera IDs sintéticos V<planta><letra>: V1A, V1B... y marca el % de adaptadas
-    según `params.programa.pct_unidades_adaptadas`.
+    Reutiliza `programa_vivienda` y `programa_apartamentos` ya existentes en
+    el motor (basados en el Anexo I.5 y I.4 respectivamente).
+    """
+    from .programa import programa_vivienda
+    from .programa_apartamentos import programa_apartamentos
+
+    if util_por_unidad <= 0:
+        return []
+
+    if programa_uso is not None and programa_uso.tipo_unidad == "apartamento":
+        cat = getattr(params.programa, "categoria_apartamentos", None)
+        tip = getattr(params.programa, "tipologia_apartamento", None)
+        cat_v = cat.value if cat is not None else "2L"
+        tip_v = tip.value if tip is not None else "1d"
+        estancias = programa_apartamentos(tip_v, cat_v, util_por_unidad)
+    else:
+        n_dorms = getattr(params.programa, "n_dormitorios", None)
+        if n_dorms is None:
+            from ..dominio import CATEGORIA_A_NUM_DORMS
+            n_dorms = CATEGORIA_A_NUM_DORMS.get(params.programa.categoria_vivienda, 2)
+        salon_open = bool(getattr(params.programa, "salon_cocina_open", False))
+        estancias = programa_vivienda(n_dorms, util_por_unidad, salon_open)
+
+    return [
+        {
+            "nombre": e.nombre,
+            "categoria": e.categoria,
+            "area_target_m2": round(e.area_target_m2, 2),
+            "area_min_m2": round(e.area_min_m2, 2),
+        }
+        for e in estancias
+    ]
+
+
+def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[str, Any]]:
+    """Una fila por unidad. Cada fila incluye:
+    - construida_por_unidad, util_por_unidad, muros_por_unidad, circulacion_por_unidad
+      → calculados como (m²_planta_del_concepto / viv_i). El NÚCLEO NO se reparte
+        por unidad (es del edificio, no de la vivienda concreta).
+      → `construida_por_unidad = util_u + muros_u + circulacion_u` — refleja el
+        ocupado por esa unidad sin sumarle ni núcleo ni comunes obligatorias.
+    - estancias: lista con `{nombre, categoria, area_target_m2, area_min_m2}`
+      derivada del Anexo I correspondiente al uso.
     """
     rows: list[dict[str, Any]] = []
     util_obj = cap.util_objetivo_viv_m2
     tipo_unidad = "apartamento" if programa_uso and programa_uso.tipo_unidad == "apartamento" else "vivienda"
 
-    # Recolectar todas las unidades para repartir % adaptadas globalmente.
     total_unidades = cap.n_viviendas_objetivo
     pct_adapt = max(0.0, float(getattr(params.programa, "pct_unidades_adaptadas", 0.0)))
     n_adaptadas = int(total_unidades * pct_adapt / 100.0 + 0.5)
@@ -286,6 +313,18 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
         viv_i = cap.viv_por_planta[i]
         if viv_i == 0:
             continue
+        util_i = cap.util_por_planta[i]
+        muros_i = cap.muros_por_planta[i]
+        circulacion_i = cap.circulacion_por_planta[i]
+
+        util_u = util_i / viv_i
+        muros_u = muros_i / viv_i
+        circ_u = circulacion_i / viv_i
+        # Construida por unidad excluye núcleo (común del edificio) y comunes obligatorias.
+        construida_u = util_u + muros_u + circ_u
+
+        estancias = _estancias_por_unidad(params, util_u, programa_uso)
+
         for j in range(viv_i):
             letra = chr(ord('A') + j) if j < 26 else f"#{j+1}"
             es_adapt = adaptadas_marcadas < n_adaptadas
@@ -297,6 +336,11 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
                 "dorms": cap.n_dormitorios,
                 "tipo": tipo_unidad,
                 "util_m2_objetivo": util_obj,
+                "construida_por_unidad_m2": round(construida_u, 2),
+                "util_por_unidad_m2": round(util_u, 2),
+                "muros_por_unidad_m2": round(muros_u, 2),
+                "circulacion_por_unidad_m2": round(circ_u, 2),
                 "adaptada": es_adapt,
+                "estancias": estancias,
             })
     return rows

@@ -1,19 +1,21 @@
 """Derivación del nº de viviendas a partir de la EDIFICABILIDAD (§2.3/§2.4).
 
-Iteración 3: el motor es ahora la **fuente de verdad** del módulo. La respuesta
-de `/calcular` se construye desde estos números, no desde la geometría dispuesta
-por `macro_layout.py` (que queda como código muerto hasta el rediseño del render).
+Iteración 4 (2026-06-04): fuente de verdad numérica. Fórmula con
+tres porcentajes explícitos (muros, circulación, núcleo).
 
-Cambios respecto a iter. 2:
-- **Truncar** en vez de redondeo half-up. Política conservadora: nunca inflar
-  capacidad prometida en prefactibilidad.
-- **Eficiencia configurable** desde `params.diseno.eficiencia_planta` (rango
-  0.65–0.85, validado en `parametros.py`).
-- **Áticos y sótanos** respetan los flags `atico_computa_edificabilidad` y
-  `sotano_computa_edificabilidad`. Las plantas que no computan no consumen techo;
-  las plantas tipo "sotano" no generan unidades habitables.
-- **Desglose por planta**: `viv_por_planta`, `construida_por_planta`,
-  `util_por_planta`, `tipo_planta` — alimentan las tablas sintéticas del módulo.
+Por planta:
+    construida_i = huella_planta (ya con retranqueos + ocupación)
+    muros_i      = construida_i × pct_muros / 100
+    circulacion_i= construida_i × pct_circulacion / 100
+    nucleo_i     = construida_i × pct_nucleo / 100
+    descuento_comunes_i = comunes_obligatorias / n_plantas_habitables (apt)
+    util_unidades_i = construida_i − muros_i − circulacion_i − nucleo_i − descuento_comunes_i
+    viv_por_planta_i = floor(util_unidades_i / util_objetivo_por_unidad)
+
+Sótanos: viv=0 forzado (no habitable). Muros y núcleo se siguen aplicando.
+Ático: si computa_edif=False, sigue generando unidades pero no consume techo.
+Plantas que excedan el techo (`construida_computable > coef × parcela`)
+quedan recortadas: viv=0 y útil=0.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -22,26 +24,19 @@ from .config import Parametros
 from .programa import util_maximo
 
 
-EFICIENCIA_PLANTA = 0.72   # default histórico, hoy override desde params.diseno
-
-
 def _truncar(x: float) -> int:
-    """Política de redondeo del módulo: hacia abajo (truncar a entero).
-
-    Si útil/objetivo = 3.5 → 3 unidades, no 4. Acordado con el usuario en
-    iteración 3 para no inflar la capacidad mostrada al inversor.
-    """
+    """Política de redondeo del módulo: hacia abajo (truncar a entero)."""
     return max(0, int(x))
 
 
 @dataclass
 class Capacidad:
     superficie_parcela_m2: float
-    edificabilidad: float
+    coeficiente_edificabilidad: float
+    edificabilidad_m2: float                # = parcela × coeficiente (KPI)
     ocupacion_maxima: float
     n_plantas_solicitadas: int
     n_plantas_edificables: int
-    techo_max_m2: float
     huella_m2: float
     ocupacion_area_m2: float
     huella_efectiva_m2: float
@@ -52,11 +47,15 @@ class Capacidad:
     util_planta_disponible_m2: float
     viv_por_planta_objetivo: int
     n_viviendas_objetivo: int
-    # Iteración 3 — desglose plantar por plantar
-    eficiencia_planta: float = 0.72
+    pct_muros: float
+    pct_circulacion: float
+    pct_nucleo: float
     viv_por_planta: list[int] = field(default_factory=list)
     construida_por_planta: list[float] = field(default_factory=list)
     util_por_planta: list[float] = field(default_factory=list)
+    muros_por_planta: list[float] = field(default_factory=list)
+    circulacion_por_planta: list[float] = field(default_factory=list)
+    nucleo_por_planta: list[float] = field(default_factory=list)
     tipo_planta: list[str] = field(default_factory=list)
     nombres_planta: list[str] = field(default_factory=list)
     area_servicios_comunes_m2: float = 0.0
@@ -73,69 +72,51 @@ def _nombre_planta(idx_visual: int, tipo: str) -> str:
 
 
 def calcular_capacidad(
-    envolvente, params: Parametros,
-    eficiencia_planta: float | None = None,
+    envolvente,
+    params: Parametros,
     *,
     util_objetivo_por_unidad: float | None = None,
     area_servicios_comunes_m2: float = 0.0,
 ) -> Capacidad:
-    """Deriva la capacidad numérica del edificio (sin generar geometría).
-
-    Parámetros:
-    - `eficiencia_planta`: si None, lee de `params.diseno.eficiencia_planta`
-      (que a su vez es configurable por el técnico). Si se pasa explícito,
-      sobreescribe — útil para tests.
-    - `util_objetivo_por_unidad`: tamaño objetivo (m² útiles) por unidad. Lo
-      resuelve `casos_uso.py` desde la BBDD del Anexo I editable, con fallback
-      a las constantes hardcoded de `programa.py` / `programa_apartamentos.py`.
-    - `area_servicios_comunes_m2`: m² del Decreto 194/2010 para apartamentos
-      turísticos. Se restan del útil disponible POR EDIFICIO antes de derivar
-      unidades/planta; el reparto se hace entre las plantas habitables.
-    """
+    """Deriva la capacidad numérica del edificio (sin geometría de unidades)."""
     parcela_area = envolvente.parcela.area
     urb = params.urbanismo
 
-    # Eficiencia: prioridad parámetro explícito → params.diseno → default módulo.
-    if eficiencia_planta is None:
-        eficiencia_planta = getattr(params.diseno, "eficiencia_planta", EFICIENCIA_PLANTA)
-    eficiencia_planta = max(0.50, min(0.95, float(eficiencia_planta)))
+    pct_muros = max(0.0, min(80.0, float(params.diseno.pct_muros)))
+    pct_circ = max(0.0, min(50.0, float(params.diseno.pct_circulacion)))
+    pct_nucl = max(0.0, min(30.0, float(params.diseno.pct_nucleo)))
+    pct_total = pct_muros + pct_circ + pct_nucl
 
     huella = envolvente.plantas[0].footprint.area if envolvente.plantas else parcela_area
-    techo_max = urb.edificabilidad * parcela_area
+    coef = urb.coeficiente_edificabilidad
+    edificabilidad_m2 = coef * parcela_area
     ocup_area = urb.ocupacion_maxima * parcela_area
-    huella_efectiva = min(huella, ocup_area)
+    huella_efectiva = min(huella, ocup_area) if ocup_area > 0 else huella
 
-    # Tamaño objetivo: lo da el caso de uso (BBDD del Anexo I), o fallback al
-    # n_dormitorios del programa.
     n_dorms = params.programa.n_dormitorios
     util_viv = (
         util_objetivo_por_unidad if util_objetivo_por_unidad is not None
         else util_maximo(n_dorms)
     )
 
-    # Plantas regulares = las que computan edif y son habitables. Las "regular"
-    # y "atico" computan según su flag; los sótanos nunca generan unidades.
     n_plantas_solicitadas = max(1, len(envolvente.plantas) or params.programa.n_plantas)
     plantas = list(envolvente.plantas)
 
-    # Plantas habitables = todas menos los sótanos.
     n_plantas_habitables = sum(1 for p in plantas if p.tipo != "sotano")
     if n_plantas_habitables <= 0:
         n_plantas_habitables = 1
 
-    # Reparto de los servicios comunes obligatorios entre plantas habitables.
     descuento_por_planta = area_servicios_comunes_m2 / n_plantas_habitables
 
     construida_computable_total = sum(p.footprint.area for p in plantas if p.computa_edif)
     n_plantas_edif_max = (
-        max(1, int(techo_max // huella_efectiva)) if huella_efectiva else 1
+        max(1, int(edificabilidad_m2 // huella_efectiva)) if huella_efectiva else 1
     )
 
-    # Recortar plantas computables si exceden el techo: las regulares de arriba
-    # abajo van perdiendo capacidad hasta encajar. Se marca el factor limitante.
-    # Plantas no computables (ático no computa, sótano no computa) sobreviven.
-    excede_techo = construida_computable_total > techo_max + 1e-3
-    techo_restante = techo_max
+    # Recorte por techo: si la suma de plantas computables excede, las de arriba
+    # quedan sin admitir (generan 0 unidades).
+    excede_techo = construida_computable_total > edificabilidad_m2 + 1e-3
+    techo_restante = edificabilidad_m2
     plantas_admitidas_idx: set[int] = set()
     for i, p in enumerate(plantas):
         if not p.computa_edif:
@@ -146,25 +127,28 @@ def calcular_capacidad(
             techo_restante -= p.footprint.area
 
     factor_limitante = "ninguno (cumple holgado)"
-    if excede_techo:
+    if pct_total >= 100.0:
+        factor_limitante = "porcentajes (no queda útil)"
+    elif excede_techo:
         factor_limitante = "edificabilidad"
     elif params.programa.n_plantas > urb.n_plantas_max:
         factor_limitante = "altura (nº plantas)"
     elif huella > ocup_area + 1e-3:
         factor_limitante = "ocupación"
 
-    # Cálculo plantar por plantar.
     viv_por_planta: list[int] = []
     construida_por_planta: list[float] = []
     util_por_planta: list[float] = []
+    muros_por_planta: list[float] = []
+    circulacion_por_planta: list[float] = []
+    nucleo_por_planta: list[float] = []
     tipo_planta: list[str] = []
     nombres_planta: list[str] = []
 
     util_total = 0.0
     construida_total = 0.0
-    idx_visual = 0  # numeración PB/P1/P2... saltándose el sótano
-
     construida_computable_efectiva = 0.0
+    idx_visual = 0
 
     for i, p in enumerate(plantas):
         construida_i = p.footprint.area
@@ -173,43 +157,56 @@ def calcular_capacidad(
         if p.computa_edif and admitida:
             construida_computable_efectiva += construida_i
 
+        muros_i = construida_i * pct_muros / 100.0
+        circ_i = construida_i * pct_circ / 100.0
+        nucl_i = construida_i * pct_nucl / 100.0
+
         if p.tipo == "sotano":
             viv_i = 0
             util_i = 0.0
             nombre = _nombre_planta(0, "sotano")
         else:
-            util_planta_bruta = construida_i * eficiencia_planta
-            util_disponible_i = max(0.0, util_planta_bruta - descuento_por_planta)
-            # Si la planta no entra en el techo edificable, no genera unidades.
-            viv_i = (
-                _truncar(util_disponible_i / util_viv) if (util_viv > 0 and admitida) else 0
+            util_disponible_i = max(
+                0.0,
+                construida_i - muros_i - circ_i - nucl_i - descuento_por_planta,
             )
-            util_i = util_disponible_i if admitida else 0.0
-            util_total += util_i
+            if not admitida or util_viv <= 0:
+                viv_i = 0
+                util_i = 0.0
+            else:
+                viv_i = _truncar(util_disponible_i / util_viv)
+                util_i = util_disponible_i
+                util_total += util_disponible_i
             nombre = _nombre_planta(idx_visual, p.tipo)
             idx_visual += 1
 
         viv_por_planta.append(viv_i)
         construida_por_planta.append(round(construida_i, 2))
         util_por_planta.append(round(util_i, 2))
+        muros_por_planta.append(round(muros_i, 2))
+        circulacion_por_planta.append(round(circ_i, 2))
+        nucleo_por_planta.append(round(nucl_i, 2))
         tipo_planta.append(p.tipo)
         nombres_planta.append(nombre)
 
     n_total = sum(viv_por_planta)
-    # viv_por_planta_objetivo = el valor más común entre las plantas regulares
-    # (mejor representación para "X viviendas por planta" mostrado al técnico).
     viv_pp_regulares = [v for v, t in zip(viv_por_planta, tipo_planta) if t == "regular"]
-    viv_pp_obj = max(viv_pp_regulares) if viv_pp_regulares else (max(viv_por_planta) if viv_por_planta else 0)
+    viv_pp_obj = (
+        max(viv_pp_regulares) if viv_pp_regulares
+        else (max(viv_por_planta) if viv_por_planta else 0)
+    )
 
-    util_planta_promedio = (util_total / max(1, n_plantas_habitables)) if n_plantas_habitables else 0.0
+    util_planta_promedio = (
+        util_total / max(1, n_plantas_habitables) if n_plantas_habitables else 0.0
+    )
 
     return Capacidad(
         superficie_parcela_m2=round(parcela_area, 2),
-        edificabilidad=urb.edificabilidad,
+        coeficiente_edificabilidad=coef,
+        edificabilidad_m2=round(edificabilidad_m2, 2),
         ocupacion_maxima=urb.ocupacion_maxima,
         n_plantas_solicitadas=n_plantas_solicitadas,
         n_plantas_edificables=n_plantas_edif_max,
-        techo_max_m2=round(techo_max, 2),
         huella_m2=round(huella, 2),
         ocupacion_area_m2=round(ocup_area, 2),
         huella_efectiva_m2=round(huella_efectiva, 2),
@@ -220,10 +217,15 @@ def calcular_capacidad(
         util_planta_disponible_m2=round(util_planta_promedio, 2),
         viv_por_planta_objetivo=viv_pp_obj,
         n_viviendas_objetivo=n_total,
-        eficiencia_planta=eficiencia_planta,
+        pct_muros=pct_muros,
+        pct_circulacion=pct_circ,
+        pct_nucleo=pct_nucl,
         viv_por_planta=viv_por_planta,
         construida_por_planta=construida_por_planta,
         util_por_planta=util_por_planta,
+        muros_por_planta=muros_por_planta,
+        circulacion_por_planta=circulacion_por_planta,
+        nucleo_por_planta=nucleo_por_planta,
         tipo_planta=tipo_planta,
         nombres_planta=nombres_planta,
         area_servicios_comunes_m2=round(area_servicios_comunes_m2, 2),
@@ -233,19 +235,21 @@ def calcular_capacidad(
 
 
 def capacidad_a_dict(cap: Capacidad) -> dict:
-    """Serializa Capacidad a JSON-friendly dict (consumido por el frontend)."""
+    """Serializa Capacidad a JSON-friendly dict."""
     return {
         "superficie_parcela_m2": cap.superficie_parcela_m2,
-        "edificabilidad": cap.edificabilidad,
+        "coeficiente_edificabilidad": cap.coeficiente_edificabilidad,
+        "edificabilidad_m2": cap.edificabilidad_m2,
         "ocupacion_maxima": cap.ocupacion_maxima,
-        "techo_max_m2": cap.techo_max_m2,
+        "ocupacion_area_m2": cap.ocupacion_area_m2,
         "huella_m2": cap.huella_m2,
         "huella_efectiva_m2": cap.huella_efectiva_m2,
-        "ocupacion_area_m2": cap.ocupacion_area_m2,
         "n_plantas_solicitadas": cap.n_plantas_solicitadas,
         "n_plantas_edificables": cap.n_plantas_edificables,
         "n_plantas_habitables": cap.n_plantas_habitables,
-        "eficiencia_planta": round(cap.eficiencia_planta, 3),
+        "pct_muros": cap.pct_muros,
+        "pct_circulacion": cap.pct_circulacion,
+        "pct_nucleo": cap.pct_nucleo,
         "util_objetivo_viv_m2": cap.util_objetivo_viv_m2,
         "util_planta_disponible_m2": cap.util_planta_disponible_m2,
         "n_dormitorios": cap.n_dormitorios,
@@ -254,8 +258,14 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "n_viviendas_objetivo": cap.n_viviendas_objetivo,
         "construida_total_m2": round(sum(cap.construida_por_planta), 2),
         "util_total_m2": round(sum(cap.util_por_planta), 2),
+        "muros_total_m2": round(sum(cap.muros_por_planta), 2),
+        "circulacion_total_m2": round(sum(cap.circulacion_por_planta), 2),
+        "nucleo_total_m2": round(sum(cap.nucleo_por_planta), 2),
         "construida_por_planta": list(cap.construida_por_planta),
         "util_por_planta": list(cap.util_por_planta),
+        "muros_por_planta": list(cap.muros_por_planta),
+        "circulacion_por_planta": list(cap.circulacion_por_planta),
+        "nucleo_por_planta": list(cap.nucleo_por_planta),
         "tipo_planta": list(cap.tipo_planta),
         "nombres_planta": list(cap.nombres_planta),
         "construida_computable_m2": cap.construida_computable_m2,

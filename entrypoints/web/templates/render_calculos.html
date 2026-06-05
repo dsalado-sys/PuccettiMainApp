@@ -80,31 +80,30 @@
         <span class="rc-kpi-valor" data-kpi="construida_total_m2">—</span>
       </article>
       <article class="rc-kpi">
-        <span class="rc-kpi-label">Superficie útil</span>
-        <span class="rc-kpi-valor" data-kpi="util_total_m2">—</span>
+        <span class="rc-kpi-label">Edificabilidad (m²)</span>
+        <span class="rc-kpi-valor" data-kpi="edificabilidad_m2">—</span>
       </article>
       <article class="rc-kpi rc-kpi-destacada">
-        <span class="rc-kpi-label">Unidades posibles</span>
+        <span class="rc-kpi-label">Unidades calculadas</span>
         <span class="rc-kpi-valor" data-kpi="n_viviendas">—</span>
       </article>
       <article class="rc-kpi">
-        <span class="rc-kpi-label">Compacidad / huecos</span>
-        <span class="rc-kpi-valor"><span data-kpi="compacidad">—</span> · <span data-kpi="huecos">—</span>%</span>
+        <span class="rc-kpi-label">Factor limitante</span>
+        <span class="rc-kpi-valor rc-kpi-valor-texto" data-kpi="factor_limitante">—</span>
       </article>
     </div>
 
     <div class="rc-tabla-tabs" role="tablist">
       <button type="button" class="rc-tabla-tab rc-tabla-tab-activo" data-tab="planta" role="tab" aria-selected="true">Por planta</button>
       <button type="button" class="rc-tabla-tab" data-tab="unidad" role="tab" aria-selected="false">Por unidad</button>
-      <button type="button" class="rc-tabla-tab" data-tab="anexo" role="tab" aria-selected="false">Anexo I</button>
     </div>
 
     <div class="rc-tabla-wrap" id="rc-tabla-planta-wrap" role="tabpanel">
       <table class="rc-tabla-tabla" id="rc-tabla-planta">
         <thead class="rc-thead-sticky">
           <tr>
-            <th>Planta</th><th>Viv.</th><th>Construida</th><th>Útil</th>
-            <th>Circul.</th><th>Patios</th><th>Muros</th><th>Ef.%</th>
+            <th>Planta</th><th>Uds.</th><th>Construida</th><th>Útil</th>
+            <th>Muros</th><th>Circul.</th><th>Núcleo</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -112,11 +111,12 @@
     </div>
 
     <div class="rc-tabla-wrap" id="rc-tabla-unidad-wrap" role="tabpanel" hidden>
+      <p class="rc-mu-help">Pulsa una fila para ver el detalle por estancia.</p>
       <table class="rc-tabla-tabla" id="rc-tabla-unidad">
         <thead class="rc-thead-sticky">
           <tr>
             <th>Planta</th><th>ID</th><th>Dorms</th>
-            <th>Tipo</th><th>Útil objetivo</th><th>Adapt.</th>
+            <th>Tipo</th><th>Construida</th><th>Útil</th><th>Adapt.</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -139,6 +139,7 @@
 </section>
 
 {% include "_rc_modal_normativa.html" %}
+{% include "_rc_modal_unidad.html" %}
 
 <script src="/static/js/rc_brujula.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_canvas.js?v={{ estaticos_version }}" defer></script>

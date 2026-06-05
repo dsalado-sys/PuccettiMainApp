@@ -1,17 +1,18 @@
 """Envolvente edificatoria (§2.4): huella + plantas + patios interiores.
 
-Desde iteración 3 cada Planta lleva dos atributos extra:
-- `computa_edif`: si la planta consume techo edificable (regla del PGOU).
-- `tipo`: "regular" | "atico" | "sotano".
-
-Esto permite a `capacidad.calcular_capacidad()` saber qué plantas suman al
-techo máximo y qué plantas son habitables/no habitables.
+Iteración 4 (2026-06-04):
+- Retranqueos direccionales: fachada se aplica solo a lados tipo "fachada",
+  linderos solo a lados tipo "medianera". Excluyentes (cada lado lleva uno).
+- Ocupación máxima se aplica a la huella final (no solo al cálculo): si la
+  huella tras retranqueos excede `ocupacion × parcela`, se erosiona
+  uniformemente hasta encajar.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from shapely.geometry import Polygon, box, Point
+from shapely.geometry import LineString, Polygon, box, Point
+from shapely.ops import unary_union
 
 from .config import Parametros
 
@@ -43,18 +44,84 @@ class Envolvente:
     edificabilidad_max: float
 
 
-def aplicar_retranqueos(parcela: Polygon, params: Parametros) -> Polygon:
-    """Aplica retranqueos diferenciados (frontal/lateral/trasero).
+def _restar_franja_lado(huella: Polygon, p1, p2, retranqueo: float) -> Polygon:
+    """Resta del polígono una franja de grosor `retranqueo` hacia el interior
+    del polígono, partiendo del segmento p1→p2.
 
-    Si los tres son 0 (caso Sevilla casco), devuelve la parcela tal cual. Para
-    el MVP se aplica el máximo como buffer uniforme; una versión más precisa
-    requeriría mover cada lado individualmente según su tipo.
+    Estrategia: buffer del segmento con ambos lados (`single_sided=False`), de
+    grosor `retranqueo`. Eso da un rectángulo angosto centrado en el segmento;
+    al restarlo del polígono, solo afecta a la parte interior (el exterior
+    queda fuera del polígono igualmente).
     """
-    p = params.urbanismo
-    if p.retranqueo_frontal == 0 and p.retranqueo_lateral == 0 and p.retranqueo_trasero == 0:
+    if retranqueo <= 0:
+        return huella
+    seg = LineString([p1, p2])
+    franja = seg.buffer(retranqueo, cap_style=2)  # cap_style=2 = flat (sin redondeo)
+    nueva = huella.difference(franja).buffer(0)
+    if nueva.is_empty:
+        return huella
+    if hasattr(nueva, "geoms"):
+        # Si la diferencia partió el polígono, conservamos la pieza más grande.
+        nueva = max(nueva.geoms, key=lambda g: g.area)
+    return nueva
+
+
+def _aplicar_ocupacion_maxima(huella: Polygon, ocup_area: float) -> Polygon:
+    """Erosiona uniformemente la huella hasta que su área ≤ ocup_area.
+
+    Bisección numérica: prueba buffer(-delta) con delta creciente hasta encajar.
+    Para parcelas pequeñas suele converger en <8 iteraciones.
+    """
+    if huella.area <= ocup_area + 1e-3:
+        return huella
+    lo, hi = 0.0, max(huella.area ** 0.5, 1.0)
+    mejor = huella
+    for _ in range(20):
+        mid = (lo + hi) / 2.0
+        candidato = huella.buffer(-mid).buffer(0)
+        if candidato.is_empty:
+            hi = mid
+            continue
+        if hasattr(candidato, "geoms"):
+            candidato = max(candidato.geoms, key=lambda g: g.area)
+        if candidato.area <= ocup_area + 1e-3:
+            mejor = candidato
+            hi = mid
+        else:
+            lo = mid
+        if hi - lo < 1e-3:
+            break
+    return mejor
+
+
+def aplicar_retranqueos(parcela: Polygon, params: Parametros, lados=None) -> Polygon:
+    """Aplica retranqueos direccionales:
+    - Lados tipo "fachada" reciben `retranqueo_fachada`.
+    - Lados tipo "medianera" reciben `retranqueo_linderos`.
+
+    Si `lados` es None, no hay clasificación: se aplica `retranqueo_linderos`
+    como buffer uniforme negativo (comportamiento conservador).
+    """
+    u = params.urbanismo
+    r_fach = float(u.retranqueo_fachada)
+    r_lind = float(u.retranqueo_linderos)
+
+    if r_fach <= 0 and r_lind <= 0:
         return parcela
-    max_retr = max(p.retranqueo_frontal, p.retranqueo_lateral, p.retranqueo_trasero)
-    return parcela.buffer(-max_retr).buffer(0)
+
+    if not lados:
+        # Sin lados clasificados, aplicamos el mayor de los dos como uniforme.
+        retranqueo = max(r_fach, r_lind)
+        return parcela.buffer(-retranqueo).buffer(0) if retranqueo > 0 else parcela
+
+    huella = parcela
+    for lado in lados:
+        tipo = getattr(lado, "tipo", "fachada")
+        if tipo == "fachada" and r_fach > 0:
+            huella = _restar_franja_lado(huella, lado.p1, lado.p2, r_fach)
+        elif tipo == "medianera" and r_lind > 0:
+            huella = _restar_franja_lado(huella, lado.p1, lado.p2, r_lind)
+    return huella
 
 
 def detectar_patio(interior_planta: Polygon, params: Parametros) -> Optional[Patio]:
@@ -84,48 +151,47 @@ def detectar_patio(interior_planta: Polygon, params: Parametros) -> Optional[Pat
 
 
 def _huella_atico(huella: Polygon, retranqueo_atico: float) -> Polygon:
-    """Huella reducida del ático tras aplicar el retranqueo perimetral.
-
-    Si el buffer negativo deja huella vacía o muy degenerada, devolvemos un
-    polígono vacío (capacidad lo tratará como ático no habitable).
-    """
+    """Huella reducida del ático tras aplicar el retranqueo perimetral."""
     if retranqueo_atico <= 0:
         return huella
     reducida = huella.buffer(-retranqueo_atico).buffer(0)
     if reducida.is_empty:
         return Polygon()
-    # Si el polígono se convirtió en MultiPolygon (corte por estrechamientos),
-    # nos quedamos con la parte más grande.
     if hasattr(reducida, "geoms"):
         reducida = max(reducida.geoms, key=lambda g: g.area)
     return reducida
 
 
-def construir_envolvente(parcela: Polygon, params: Parametros) -> Envolvente:
-    """Pipeline §2.4 completo: retranqueos → huella → N plantas → patios.
+def construir_envolvente(parcela: Polygon, params: Parametros, lados=None) -> Envolvente:
+    """Pipeline §2.4 completo: retranqueos direccionales → ocupación → N plantas → patios.
 
-    Iteración 3: añade sótano (si `tiene_sotano`) y ático (si `tiene_atico`)
-    como plantas extra con su huella propia y su flag `computa_edif`. El
-    cálculo de techo consumido solo suma las plantas que computan.
+    Iteración 4: acepta `lados: list[LadoParcela] | None`. Si se pasan, los
+    retranqueos se aplican direccionalmente según el tipo de cada lado.
     """
-    huella = aplicar_retranqueos(parcela, params)
+    huella = aplicar_retranqueos(parcela, params, lados)
     if huella.is_empty:
         raise ValueError("Tras retranqueos no queda espacio edificable.")
+
+    # Aplicar ocupación máxima: si la huella excede `ocupacion × parcela`, recortar.
+    ocup_area = params.urbanismo.ocupacion_maxima * parcela.area
+    if ocup_area > 0:
+        huella = _aplicar_ocupacion_maxima(huella, ocup_area)
+        if huella.is_empty:
+            raise ValueError("Tras aplicar ocupación máxima no queda huella construible.")
 
     espesor = params.diseno.espesor_muro_fachada
     interior_base = huella.buffer(-espesor)
     if interior_base.is_empty:
-        raise ValueError("Huella demasiado pequeña para los espesores configurados.")
+        # Para parcelas muy pequeñas, fallback: interior = huella sin offset.
+        interior_base = huella
 
     plantas: list[Planta] = []
     edif_acumulada = 0.0
 
-    n_offset = 0
-
-    # ── Sótano (si procede) — siempre planta 0 si existe ─────────────────────
+    # ── Sótano ───────────────────────────────────────────────────────────────
     if params.urbanismo.tiene_sotano:
         sotano = Planta(
-            n=-1,  # índice negativo para distinguirlo
+            n=-1,
             footprint=huella,
             interior=interior_base,
             patios=[],
@@ -148,7 +214,7 @@ def construir_envolvente(parcela: Polygon, params: Parametros) -> Envolvente:
             i = i.difference(patio.geometry)
             patios.append(patio)
         plantas.append(Planta(
-            n=n + n_offset,
+            n=n,
             footprint=f,
             interior=i,
             patios=patios,
@@ -159,7 +225,7 @@ def construir_envolvente(parcela: Polygon, params: Parametros) -> Envolvente:
         ))
         edif_acumulada += f.area
 
-    # ── Ático (si procede) — encima de la última regular ────────────────────
+    # ── Ático ────────────────────────────────────────────────────────────────
     if params.urbanismo.tiene_atico:
         huella_at = _huella_atico(huella, params.urbanismo.retranqueo_atico)
         interior_at = huella_at.buffer(-espesor) if not huella_at.is_empty else Polygon()
@@ -178,7 +244,7 @@ def construir_envolvente(parcela: Polygon, params: Parametros) -> Envolvente:
         if atico.computa_edif:
             edif_acumulada += huella_at.area
 
-    edif_max = parcela.area * params.urbanismo.edificabilidad
+    edif_max = parcela.area * params.urbanismo.coeficiente_edificabilidad
     return Envolvente(
         parcela=parcela,
         plantas=plantas,

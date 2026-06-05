@@ -90,7 +90,6 @@ class ResumenEnvolvente:
     """Resumen del cálculo de envolvente (§2.4) — usado por `/preview`."""
     huella_m2: float
     n_plantas: int
-    altura_planta_m: float
     edificabilidad_max_m2: float
     edificabilidad_consumida_m2: float
     n_viviendas_objetivo: int

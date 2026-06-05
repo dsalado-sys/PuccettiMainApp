@@ -34,14 +34,12 @@ from .normativa_municipal_sqlalchemy import NormativaMunicipalORM
 SEED_SEVILLA = {
     "municipio": "Sevilla",
     "provincia": "Sevilla",
-    "edificabilidad_m2t_m2s": 2.5,
+    "coeficiente_edificabilidad": 2.5,
     "ocupacion_maxima_pct": 100.0,
     "n_plantas_max": 3,
-    "retranqueo_frontal_m": 0.0,
-    "retranqueo_lateral_m": 0.0,
-    "retranqueo_trasero_m": 0.0,
-    "altura_planta_m": 3.0,
-    "usos_permitidos": ["vivienda", "apartamentos_turisticos", "hotelero"],
+    "retranqueo_fachada_m": 0.0,
+    "retranqueo_linderos_m": 0.0,
+    "usos_permitidos": ["residencial", "hotelero", "mixto"],
     "luz_recta_patio_min_m": 3.0,
     "area_patio_min_m2": 12.0,
     "tiene_atico_default": 0,
@@ -66,13 +64,11 @@ def sembrar_normativa_municipal(session: Session, forzar: bool = False) -> None:
             actualizado_en=datetime.now(timezone.utc),
         )
         session.add(orm)
-    orm.edificabilidad_m2t_m2s = SEED_SEVILLA["edificabilidad_m2t_m2s"]
+    orm.coeficiente_edificabilidad = SEED_SEVILLA["coeficiente_edificabilidad"]
     orm.ocupacion_maxima_pct = SEED_SEVILLA["ocupacion_maxima_pct"]
     orm.n_plantas_max = SEED_SEVILLA["n_plantas_max"]
-    orm.retranqueo_frontal_m = SEED_SEVILLA["retranqueo_frontal_m"]
-    orm.retranqueo_lateral_m = SEED_SEVILLA["retranqueo_lateral_m"]
-    orm.retranqueo_trasero_m = SEED_SEVILLA["retranqueo_trasero_m"]
-    orm.altura_planta_m = SEED_SEVILLA["altura_planta_m"]
+    orm.retranqueo_fachada_m = SEED_SEVILLA["retranqueo_fachada_m"]
+    orm.retranqueo_linderos_m = SEED_SEVILLA["retranqueo_linderos_m"]
     orm.usos_permitidos_json = json.dumps(SEED_SEVILLA["usos_permitidos"])
     orm.luz_recta_patio_min_m = SEED_SEVILLA["luz_recta_patio_min_m"]
     orm.area_patio_min_m2 = SEED_SEVILLA["area_patio_min_m2"]

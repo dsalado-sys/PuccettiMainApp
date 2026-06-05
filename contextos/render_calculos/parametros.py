@@ -1,9 +1,16 @@
 """Parámetros del proyecto vistos desde el módulo Render y cálculos.
 
-Diferencia importante: aquí vive el modelo "rico" que el técnico edita en la
-UI (§2.3 urbanismo + §2.6 diseño + §2.5 programa + ático/sótano). El motor de
-geometría sigue trabajando con `geometria.config.Parametros` (estructura más
-compacta); el método `a_parametros_motor()` traduce de uno al otro.
+Iteración 4 (2026-06-04):
+- Renombrado `edificabilidad_m2t_m2s` → `coeficiente_edificabilidad`.
+- Eliminado `altura_planta_m` (no se usaba en cálculos).
+- Tres retranqueos antiguos (frontal/lateral/trasero) reemplazados por dos
+  direccionales: `retranqueo_fachada_m` (resta solo desde lados tipo "fachada")
+  y `retranqueo_linderos_m` (resta solo desde lados tipo "medianera").
+- `usos_permitidos` pasa de `list[UsoEdificio]` a `list[str]` con valores
+  fijos del PGOU: "residencial" | "hotelero" | "terciario" | "mixto".
+  Hoy es decorativo (sin mapeo al uso del programa).
+- Tres porcentajes explícitos: `pct_muros`, `pct_circulacion` y `pct_nucleo`
+  (porcentajes 0-100). Suma ≤ 90% (validado en motor).
 """
 from __future__ import annotations
 
@@ -24,20 +31,19 @@ from .geometria.config import (
 )
 
 
+USOS_PGOU_VALIDOS: tuple[str, ...] = ("residencial", "hotelero", "terciario", "mixto")
+
+
 @dataclass
 class ParametrosUrbanisticos:
     """§2.3 — gestionado por el técnico o leído de la BBDD de normativa municipal."""
-    edificabilidad_m2t_m2s: float = 2.5
+    coeficiente_edificabilidad: float = 2.5
     ocupacion_maxima_pct: float = 100.0     # 0..100
     n_plantas_max: int = 3
-    retranqueo_frontal_m: float = 0.0
-    retranqueo_lateral_m: float = 0.0
-    retranqueo_trasero_m: float = 0.0
-    altura_planta_m: float = 3.0
-    usos_permitidos: list[UsoEdificio] = field(default_factory=lambda: [
-        UsoEdificio.VIVIENDA,
-        UsoEdificio.APARTAMENTOS_TURISTICOS,
-        UsoEdificio.HOTELERO,
+    retranqueo_fachada_m: float = 0.0
+    retranqueo_linderos_m: float = 0.0
+    usos_permitidos: list[str] = field(default_factory=lambda: [
+        "residencial", "hotelero", "mixto",
     ])
     luz_recta_patio_min_m: float = 3.0
     area_patio_min_m2: float = 12.0
@@ -50,7 +56,11 @@ class ParametrosUrbanisticos:
 
 @dataclass
 class ParametrosDiseno:
-    """§2.6 — defaults del Anexo II A2.x."""
+    """§2.6 — defaults del Anexo II A2.x.
+
+    Iteración 4: tres porcentajes explícitos para muros, circulación y núcleo.
+    Suma de los tres ≤ 90% (validado en motor).
+    """
     espesor_muro_fachada_m: float = 0.25
     espesor_muro_medianero_m: float = 0.25
     espesor_separacion_unidades_m: float = 0.20
@@ -60,7 +70,9 @@ class ParametrosDiseno:
     diametro_min_vestibulo_m: float = 1.50
     ancho_min_puerta_m: float = 0.80
     profundidad_max_sin_patio_m: float = 12.0
-    eficiencia_planta: float = 0.72
+    pct_muros: float = 20.0
+    pct_circulacion: float = 8.0
+    pct_nucleo: float = 5.0
 
 
 @dataclass
@@ -85,13 +97,7 @@ class ParametrosRender:
     seed: int = 42
 
     def a_parametros_motor(self) -> ParametrosMotor:
-        """Traduce a la estructura que espera el motor de geometría.
-
-        Vivienda → `n_dormitorios` viene de `categoria_vivienda` (Anexo I.5).
-        Apartamentos → `n_dormitorios` viene de `tipologia_apartamento`
-        (estudio=0, 1d=1, 2d=2, 3d=3). Esto es solo para `_evaluar_unidad`; el
-        tamaño objetivo lo aporta `ProgramaUso` desde `casos_uso.py`.
-        """
+        """Traduce a la estructura que espera el motor de geometría."""
         from .dominio import CATEGORIA_A_NUM_DORMS, TIPOLOGIA_APT_A_NUM_DORMS
 
         if self.programa.uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
@@ -100,8 +106,11 @@ class ParametrosRender:
         else:
             n_dorms = CATEGORIA_A_NUM_DORMS.get(self.programa.categoria_vivienda, 2)
             categoria_label = self.programa.categoria_vivienda.value
-        # Sanitiza eficiencia (rango 0.65–0.85) — el motor lo aplica en capacidad.py
-        eficiencia = max(0.65, min(0.85, float(self.diseno.eficiencia_planta)))
+
+        # Sanitiza porcentajes 0..100; suma se valida en el motor.
+        pct_muros = max(0.0, min(80.0, float(self.diseno.pct_muros)))
+        pct_circulacion = max(0.0, min(50.0, float(self.diseno.pct_circulacion)))
+        pct_nucleo = max(0.0, min(30.0, float(self.diseno.pct_nucleo)))
 
         return ParametrosMotor(
             diseno=DisenoMotor(
@@ -116,16 +125,16 @@ class ParametrosRender:
                 luz_recta_patio_min=self.urbanisticos.luz_recta_patio_min_m,
                 area_patio_min=self.urbanisticos.area_patio_min_m2,
                 profundidad_max_sin_patio=self.diseno.profundidad_max_sin_patio_m,
-                eficiencia_planta=eficiencia,
+                pct_muros=pct_muros,
+                pct_circulacion=pct_circulacion,
+                pct_nucleo=pct_nucleo,
             ),
             urbanismo=UrbMotor(
-                edificabilidad=self.urbanisticos.edificabilidad_m2t_m2s,
+                coeficiente_edificabilidad=self.urbanisticos.coeficiente_edificabilidad,
                 ocupacion_maxima=max(0.0, min(1.0, self.urbanisticos.ocupacion_maxima_pct / 100.0)),
                 n_plantas_max=self.urbanisticos.n_plantas_max,
-                retranqueo_frontal=self.urbanisticos.retranqueo_frontal_m,
-                retranqueo_lateral=self.urbanisticos.retranqueo_lateral_m,
-                retranqueo_trasero=self.urbanisticos.retranqueo_trasero_m,
-                altura_planta=self.urbanisticos.altura_planta_m,
+                retranqueo_fachada=self.urbanisticos.retranqueo_fachada_m,
+                retranqueo_linderos=self.urbanisticos.retranqueo_linderos_m,
                 tiene_atico=self.urbanisticos.tiene_atico,
                 retranqueo_atico=self.urbanisticos.retranqueo_atico_m,
                 atico_computa_edificabilidad=self.urbanisticos.atico_computa_edificabilidad,
@@ -149,14 +158,12 @@ class ParametrosRender:
 def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
     return {
         "urbanisticos": {
-            "edificabilidad_m2t_m2s": p.urbanisticos.edificabilidad_m2t_m2s,
+            "coeficiente_edificabilidad": p.urbanisticos.coeficiente_edificabilidad,
             "ocupacion_maxima_pct": p.urbanisticos.ocupacion_maxima_pct,
             "n_plantas_max": p.urbanisticos.n_plantas_max,
-            "retranqueo_frontal_m": p.urbanisticos.retranqueo_frontal_m,
-            "retranqueo_lateral_m": p.urbanisticos.retranqueo_lateral_m,
-            "retranqueo_trasero_m": p.urbanisticos.retranqueo_trasero_m,
-            "altura_planta_m": p.urbanisticos.altura_planta_m,
-            "usos_permitidos": [u.value for u in p.urbanisticos.usos_permitidos],
+            "retranqueo_fachada_m": p.urbanisticos.retranqueo_fachada_m,
+            "retranqueo_linderos_m": p.urbanisticos.retranqueo_linderos_m,
+            "usos_permitidos": list(p.urbanisticos.usos_permitidos),
             "luz_recta_patio_min_m": p.urbanisticos.luz_recta_patio_min_m,
             "area_patio_min_m2": p.urbanisticos.area_patio_min_m2,
             "tiene_atico": p.urbanisticos.tiene_atico,
@@ -175,7 +182,9 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
             "diametro_min_vestibulo_m": p.diseno.diametro_min_vestibulo_m,
             "ancho_min_puerta_m": p.diseno.ancho_min_puerta_m,
             "profundidad_max_sin_patio_m": p.diseno.profundidad_max_sin_patio_m,
-            "eficiencia_planta": p.diseno.eficiencia_planta,
+            "pct_muros": p.diseno.pct_muros,
+            "pct_circulacion": p.diseno.pct_circulacion,
+            "pct_nucleo": p.diseno.pct_nucleo,
         },
         "programa": {
             "uso": p.programa.uso.value,
@@ -192,7 +201,13 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
 
 
 def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
-    """Parser tolerante: campos faltantes / inválidos caen a los defaults."""
+    """Parser tolerante: campos faltantes / inválidos caen a los defaults.
+
+    Compatibilidad iter. 4 con JSON antiguos:
+    - `edificabilidad_m2t_m2s` → `coeficiente_edificabilidad`
+    - retranqueos frontal/lateral/trasero → linderos = max de los tres
+    - claves obsoletas (`eficiencia_planta`, `altura_planta_m`) → ignoradas
+    """
     base = ParametrosRender()
     if not d:
         return base
@@ -218,24 +233,35 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         return bool(v)
 
     urb_in = d.get("urbanisticos") or {}
-    usos = urb_in.get("usos_permitidos") or [u.value for u in base.urbanisticos.usos_permitidos]
-    usos_validos: list[UsoEdificio] = []
-    for v in usos:
-        try:
-            usos_validos.append(UsoEdificio(v))
-        except (ValueError, TypeError):
-            continue
+
+    # Compat con JSON antiguo: edificabilidad_m2t_m2s → coeficiente_edificabilidad
+    coef = _f(urb_in, "coeficiente_edificabilidad",
+              _f(urb_in, "edificabilidad_m2t_m2s", base.urbanisticos.coeficiente_edificabilidad))
+
+    # Compat retranqueos: si vienen los 3 viejos, linderos = max
+    if "retranqueo_fachada_m" in urb_in or "retranqueo_linderos_m" in urb_in:
+        retr_fachada = _f(urb_in, "retranqueo_fachada_m", base.urbanisticos.retranqueo_fachada_m)
+        retr_linderos = _f(urb_in, "retranqueo_linderos_m", base.urbanisticos.retranqueo_linderos_m)
+    else:
+        r_old = max(
+            _f(urb_in, "retranqueo_frontal_m", 0.0),
+            _f(urb_in, "retranqueo_lateral_m", 0.0),
+            _f(urb_in, "retranqueo_trasero_m", 0.0),
+        )
+        retr_fachada = 0.0
+        retr_linderos = r_old
+
+    usos_raw = urb_in.get("usos_permitidos") or list(base.urbanisticos.usos_permitidos)
+    usos_validos = [str(v) for v in usos_raw if isinstance(v, str) and v in USOS_PGOU_VALIDOS]
     if not usos_validos:
         usos_validos = list(base.urbanisticos.usos_permitidos)
 
     urb = ParametrosUrbanisticos(
-        edificabilidad_m2t_m2s=_f(urb_in, "edificabilidad_m2t_m2s", base.urbanisticos.edificabilidad_m2t_m2s),
+        coeficiente_edificabilidad=coef,
         ocupacion_maxima_pct=_f(urb_in, "ocupacion_maxima_pct", base.urbanisticos.ocupacion_maxima_pct),
         n_plantas_max=_i(urb_in, "n_plantas_max", base.urbanisticos.n_plantas_max),
-        retranqueo_frontal_m=_f(urb_in, "retranqueo_frontal_m", base.urbanisticos.retranqueo_frontal_m),
-        retranqueo_lateral_m=_f(urb_in, "retranqueo_lateral_m", base.urbanisticos.retranqueo_lateral_m),
-        retranqueo_trasero_m=_f(urb_in, "retranqueo_trasero_m", base.urbanisticos.retranqueo_trasero_m),
-        altura_planta_m=_f(urb_in, "altura_planta_m", base.urbanisticos.altura_planta_m),
+        retranqueo_fachada_m=retr_fachada,
+        retranqueo_linderos_m=retr_linderos,
         usos_permitidos=usos_validos,
         luz_recta_patio_min_m=_f(urb_in, "luz_recta_patio_min_m", base.urbanisticos.luz_recta_patio_min_m),
         area_patio_min_m2=_f(urb_in, "area_patio_min_m2", base.urbanisticos.area_patio_min_m2),
@@ -247,8 +273,9 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
     )
 
     dis_in = d.get("diseno") or {}
-    ef_raw = _f(dis_in, "eficiencia_planta", base.diseno.eficiencia_planta)
-    eficiencia = max(0.65, min(0.85, ef_raw))
+    pct_muros = max(0.0, min(80.0, _f(dis_in, "pct_muros", base.diseno.pct_muros)))
+    pct_circulacion = max(0.0, min(50.0, _f(dis_in, "pct_circulacion", base.diseno.pct_circulacion)))
+    pct_nucleo = max(0.0, min(30.0, _f(dis_in, "pct_nucleo", base.diseno.pct_nucleo)))
     diseno = ParametrosDiseno(
         espesor_muro_fachada_m=_f(dis_in, "espesor_muro_fachada_m", base.diseno.espesor_muro_fachada_m),
         espesor_muro_medianero_m=_f(dis_in, "espesor_muro_medianero_m", base.diseno.espesor_muro_medianero_m),
@@ -259,7 +286,9 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         diametro_min_vestibulo_m=_f(dis_in, "diametro_min_vestibulo_m", base.diseno.diametro_min_vestibulo_m),
         ancho_min_puerta_m=_f(dis_in, "ancho_min_puerta_m", base.diseno.ancho_min_puerta_m),
         profundidad_max_sin_patio_m=_f(dis_in, "profundidad_max_sin_patio_m", base.diseno.profundidad_max_sin_patio_m),
-        eficiencia_planta=eficiencia,
+        pct_muros=pct_muros,
+        pct_circulacion=pct_circulacion,
+        pct_nucleo=pct_nucleo,
     )
 
     prog_in = d.get("programa") or {}

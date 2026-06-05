@@ -155,7 +155,7 @@ class CalcularEnvolvente:
     ) -> dict[str, Any]:
         params_motor = params.a_parametros_motor()
         try:
-            envolvente = construir_envolvente(parcela.poligono_utm, params_motor)
+            envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
         except ValueError as exc:
             return {
                 "error": str(exc),
@@ -173,7 +173,6 @@ class CalcularEnvolvente:
         resumen = ResumenEnvolvente(
             huella_m2=round(envolvente.plantas[0].footprint.area, 2) if envolvente.plantas else 0.0,
             n_plantas=len(envolvente.plantas),
-            altura_planta_m=params.urbanisticos.altura_planta_m,
             edificabilidad_max_m2=round(envolvente.edificabilidad_max, 2),
             edificabilidad_consumida_m2=round(envolvente.edificabilidad_consumida, 2),
             n_viviendas_objetivo=cap.n_viviendas_objetivo,
@@ -187,7 +186,6 @@ class CalcularEnvolvente:
             "envolvente": {
                 "huella_m2": resumen.huella_m2,
                 "n_plantas": resumen.n_plantas,
-                "altura_planta_m": resumen.altura_planta_m,
                 "edificabilidad_max_m2": resumen.edificabilidad_max_m2,
                 "edificabilidad_consumida_m2": resumen.edificabilidad_consumida_m2,
                 "n_viviendas_objetivo": resumen.n_viviendas_objetivo,
@@ -284,7 +282,7 @@ class CalcularLayout:
 
         params_motor = params.a_parametros_motor()
         try:
-            envolvente = construir_envolvente(parcela.poligono_utm, params_motor)
+            envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
         except ValueError as exc:
             return {
                 "error": str(exc),
@@ -309,7 +307,6 @@ class CalcularLayout:
         # 3) Cálculo puro — la fuente de verdad del módulo.
         cap = calcular_capacidad(
             envolvente, params_motor,
-            eficiencia_planta=params_motor.diseno.eficiencia_planta,
             util_objetivo_por_unidad=util_objetivo,
             area_servicios_comunes_m2=area_comunes,
         )
@@ -404,7 +401,6 @@ class CalcularLayout:
         util_obj_efectivo = util_objetivo if util_objetivo is not None else provisional.util_objetivo_unidad_m2
         cap_prov = calcular_capacidad(
             envolvente, params_motor,
-            eficiencia_planta=params_motor.diseno.eficiencia_planta,
             util_objetivo_por_unidad=util_obj_efectivo,
             area_servicios_comunes_m2=provisional.area_servicios_obligatorios_m2,
         )
@@ -426,11 +422,11 @@ class ValidarCumplimiento:
         alertas: list[Alerta] = []
 
         if normativa is not None:
-            if params.urbanisticos.edificabilidad_m2t_m2s > normativa.edificabilidad_m2t_m2s + 1e-6:
+            if params.urbanisticos.coeficiente_edificabilidad > normativa.coeficiente_edificabilidad + 1e-6:
                 alertas.append(Alerta(
                     "incumplimiento", "PGOU",
-                    f"Edificabilidad {params.urbanisticos.edificabilidad_m2t_m2s:.2f} > "
-                    f"{normativa.edificabilidad_m2t_m2s:.2f} (PGOU {parcela.municipio}).",
+                    f"Coeficiente de edificabilidad {params.urbanisticos.coeficiente_edificabilidad:.2f} > "
+                    f"{normativa.coeficiente_edificabilidad:.2f} (PGOU {parcela.municipio}).",
                 ))
             if params.urbanisticos.n_plantas_max > normativa.n_plantas_max:
                 alertas.append(Alerta(
@@ -438,12 +434,9 @@ class ValidarCumplimiento:
                     f"Plantas máximas {params.urbanisticos.n_plantas_max} > "
                     f"{normativa.n_plantas_max} (PGOU {parcela.municipio}).",
                 ))
-            if params.programa.uso not in normativa.usos_permitidos:
-                alertas.append(Alerta(
-                    "incumplimiento", "PGOU",
-                    f"Uso '{params.programa.uso.value}' no permitido por el PGOU de "
-                    f"{parcela.municipio}.",
-                ))
+            # Iter. 4: alerta "uso no permitido" desactivada. Los checkboxes PGOU
+            # (Residencial/Hotelero/Terciario/Mixto) son decorativos — no se mapean
+            # al uso del programa (vivienda/apartamentos_turisticos/hotelero).
 
         if params.urbanisticos.area_patio_min_m2 < 12.0 - 1e-6:
             alertas.append(Alerta(
@@ -506,12 +499,17 @@ def parametros_desde_proyecto(proyecto: Proyecto | None) -> ParametrosRender:
         return parametros_desde_dict(datos_render["parametros"])
 
     # Si no se ha guardado nada todavía, intentamos heredar la edificabilidad
-    # introducida en §2.9 viabilidad.
+    # introducida en §2.9 viabilidad. Compat con la clave antigua.
     base = ParametrosRender()
     datos_viab = proyecto.datos_por_modulo.get(ModuloPuccetti.VIABILIDAD.value) or {}
     try:
-        base.urbanisticos.edificabilidad_m2t_m2s = float(
-            datos_viab.get("edificabilidad_m2t_m2s", base.urbanisticos.edificabilidad_m2t_m2s)
+        clave = (
+            "coeficiente_edificabilidad"
+            if "coeficiente_edificabilidad" in datos_viab
+            else "edificabilidad_m2t_m2s"
+        )
+        base.urbanisticos.coeficiente_edificabilidad = float(
+            datos_viab.get(clave, base.urbanisticos.coeficiente_edificabilidad)
         )
     except (TypeError, ValueError):
         pass
