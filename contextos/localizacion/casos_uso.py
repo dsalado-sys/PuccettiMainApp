@@ -10,7 +10,6 @@ from .dominio import (
     Lado,
     ORIENTACIONES,
     Parcela,
-    ParcelaError,
     ParcelaNoEncontrada,
     RateLimitCatastro,
     Subreferencia,

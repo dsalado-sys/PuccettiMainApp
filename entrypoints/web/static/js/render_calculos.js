@@ -107,17 +107,18 @@
     };
     const env = payload?.envolvente;
     const cap = payload?.capacidad;
+    const parcelaArea = payload?.parcela?.area_m2;
     // Fuente de verdad iter. 4: data.capacidad. Fallback a envolvente del preview.
     if (cap) {
       set("construida_total_m2", fmt.m2.format(cap.construida_total_m2) + " m²");
+      set("superficie_parcela_m2", fmt.m2.format(cap.superficie_parcela_m2) + " m²");
       set("edificabilidad_m2", fmt.m2.format(cap.edificabilidad_m2) + " m²");
       set("n_viviendas", fmt.int.format(cap.n_viviendas_objetivo));
-      set("factor_limitante", cap.factor_limitante || "—");
     } else if (env) {
       set("construida_total_m2", fmt.m2.format(env.edificabilidad_consumida_m2) + " m²");
+      set("superficie_parcela_m2", fmt.m2.format(parcelaArea ?? 0) + " m²");
       set("edificabilidad_m2", fmt.m2.format(env.edificabilidad_max_m2) + " m²");
       set("n_viviendas", fmt.int.format(env.n_viviendas_objetivo) + " obj.");
-      set("factor_limitante", env.factor_limitante || "—");
     }
   }
 
@@ -604,6 +605,16 @@
   if (window.RcBrujula) window.RcBrujula.dibujar(brujulaEl, []);
 
   aplicarVisibilidadPorUso();
+
+  // Toggle visual del input "coeficiente" según el checkbox "usar coef".
+  const chkUsarCoef = document.getElementById("rc-chk-usar-coef");
+  const inpCoef = document.getElementById("rc-input-coef");
+  function aplicarToggleCoef() {
+    if (!chkUsarCoef || !inpCoef) return;
+    inpCoef.disabled = !chkUsarCoef.checked;
+  }
+  if (chkUsarCoef) chkUsarCoef.addEventListener("change", aplicarToggleCoef);
+  aplicarToggleCoef();
 
   // Si hay proyecto + parcela, primer preview automático
   if (estado === "ok") {

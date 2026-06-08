@@ -48,6 +48,7 @@ class ParametrosUrbanisticos:
     `linderos`.
     """
     coeficiente_edificabilidad: float = 2.5
+    usar_coeficiente_edificabilidad: bool = True
     ocupacion_maxima: float = 1.00
     n_plantas_max: int = 3
     retranqueo_fachada: float = 0.0

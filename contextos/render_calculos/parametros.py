@@ -38,6 +38,7 @@ USOS_PGOU_VALIDOS: tuple[str, ...] = ("residencial", "hotelero", "terciario", "m
 class ParametrosUrbanisticos:
     """§2.3 — gestionado por el técnico o leído de la BBDD de normativa municipal."""
     coeficiente_edificabilidad: float = 2.5
+    usar_coeficiente_edificabilidad: bool = True
     ocupacion_maxima_pct: float = 100.0     # 0..100
     n_plantas_max: int = 3
     retranqueo_fachada_m: float = 0.0
@@ -131,6 +132,7 @@ class ParametrosRender:
             ),
             urbanismo=UrbMotor(
                 coeficiente_edificabilidad=self.urbanisticos.coeficiente_edificabilidad,
+                usar_coeficiente_edificabilidad=self.urbanisticos.usar_coeficiente_edificabilidad,
                 ocupacion_maxima=max(0.0, min(1.0, self.urbanisticos.ocupacion_maxima_pct / 100.0)),
                 n_plantas_max=self.urbanisticos.n_plantas_max,
                 retranqueo_fachada=self.urbanisticos.retranqueo_fachada_m,
@@ -159,6 +161,7 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
     return {
         "urbanisticos": {
             "coeficiente_edificabilidad": p.urbanisticos.coeficiente_edificabilidad,
+            "usar_coeficiente_edificabilidad": p.urbanisticos.usar_coeficiente_edificabilidad,
             "ocupacion_maxima_pct": p.urbanisticos.ocupacion_maxima_pct,
             "n_plantas_max": p.urbanisticos.n_plantas_max,
             "retranqueo_fachada_m": p.urbanisticos.retranqueo_fachada_m,
@@ -258,6 +261,7 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
 
     urb = ParametrosUrbanisticos(
         coeficiente_edificabilidad=coef,
+        usar_coeficiente_edificabilidad=_b(urb_in, "usar_coeficiente_edificabilidad", base.urbanisticos.usar_coeficiente_edificabilidad),
         ocupacion_maxima_pct=_f(urb_in, "ocupacion_maxima_pct", base.urbanisticos.ocupacion_maxima_pct),
         n_plantas_max=_i(urb_in, "n_plantas_max", base.urbanisticos.n_plantas_max),
         retranqueo_fachada_m=retr_fachada,

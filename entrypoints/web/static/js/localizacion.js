@@ -401,8 +401,6 @@
     }
     box.classList.remove("oculto");
     document.getElementById("loc-agg-n").textContent = p.agregados.num_referencias;
-    document.getElementById("loc-agg-sum").textContent =
-      formatoNum(p.agregados.suma_superficie_construida_m2, 1) + " m²";
     document.getElementById("loc-agg-edif").textContent =
       p.agregados.edificabilidad_m2t_m2s > 0
         ? p.agregados.edificabilidad_m2t_m2s.toFixed(2) + " m²t/m²s" : "—";
