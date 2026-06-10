@@ -36,9 +36,9 @@ TEXTOS_AYUDA: dict[str, dict[str, AyudaParametro]] = {
         "ancho_min_pasillo_vivienda_m": {"label": "Pasillo de vivienda"},
         "diametro_min_vestibulo_m": {"label": "Diámetro de vestíbulo"},
         "ancho_min_puerta_m": {"label": "Paso libre de puerta"},
-        "profundidad_max_sin_patio_m": {"label": "Profundidad máxima sin patio"},
         "pct_muros": {"label": "% muros"},
-        "pct_circulacion": {"label": "% circulación"},
+        "pct_circulacion_pb": {"label": "% circulación en planta baja"},
+        "pct_circulacion_tipo": {"label": "% circulación en planta tipo"},
         "pct_nucleo": {"label": "% núcleo"},
     },
     "programa": {
@@ -46,6 +46,7 @@ TEXTOS_AYUDA: dict[str, dict[str, AyudaParametro]] = {
         "categoria_vivienda": {"label": "Tipología de vivienda"},
         "pct_unidades_adaptadas": {"label": "% unidades adaptadas"},
         "salon_cocina_open": {"label": "Salón-cocina integrado"},
-        "n_viviendas_por_planta_objetivo": {"label": "Viviendas por planta (forzar)"},
+        "tipologias_extra": {"label": "Tipologías adicionales"},
+        "pct_local_pb": {"label": "% local en planta baja"},
     },
 }

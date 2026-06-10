@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
+
+{% block contenido %}
+<link rel="stylesheet" href="/static/css/normativa_municipal.css?v={{ estaticos_version }}" />
+
+<section class="hero nm-hero">
+  <div class="nm-hero-titulo">
+    <h1>{{ tarjeta.titulo }}</h1>
+    <p class="nm-hero-sub">{{ tarjeta.descripcion }}</p>
+  </div>
+  <div class="nm-hero-acciones">
+    <span id="nm-toast" class="nm-toast" role="status" aria-live="polite"></span>
+  </div>
+</section>
+
+<section class="nm-layout"
+         data-puede-editar="{{ 'true' if puede_editar else 'false' }}">
+
+  <!-- ─── Columna izquierda: carpetas + normativas archivadas ─── -->
+  <aside class="nm-col-carpetas" aria-label="Carpetas de normativas">
+    <header class="nm-col-header">
+      <h2>Carpetas</h2>
+      <div class="nm-col-acciones">
+        <label class="nm-buscador-lupa" aria-label="Buscar carpeta">
+          <span class="nm-icono-lupa" aria-hidden="true">⌕</span>
+          <input type="text" id="nm-buscar" placeholder="Buscar…" autocomplete="off">
+        </label>
+        {% if puede_editar %}
+        <button type="button" id="nm-btn-nueva-carpeta" class="boton-secundario">
+          + Carpeta
+        </button>
+        {% endif %}
+      </div>
+    </header>
+    <div id="nm-lista" class="nm-lista">
+      <p class="nm-vacio">Cargando…</p>
+    </div>
+  </aside>
+
+  <!-- ─── Columna derecha: datos de la normativa seleccionada ─── -->
+  <section class="nm-col-datos" aria-label="Datos de la normativa">
+    <header class="nm-col-header">
+      <h2 id="nm-detalle-titulo">Selecciona una normativa</h2>
+      <div class="nm-col-acciones" id="nm-detalle-acciones" hidden>
+        {% if puede_editar %}
+        <button type="button" id="nm-btn-guardar" class="boton-primario">Guardar cambios</button>
+        {% endif %}
+      </div>
+    </header>
+
+    <div id="nm-detalle-vacio" class="nm-detalle-vacio">
+      <p>Selecciona una normativa en la columna izquierda para ver y editar sus parámetros.</p>
+    </div>
+
+    <form id="nm-detalle-form" class="nm-detalle-form" hidden autocomplete="off">
+      <div class="nm-bloque">
+        <h3>Identificación</h3>
+        <div class="nm-fila">
+          <label class="nm-campo">
+            <span class="nm-campo-label">Nombre</span>
+            <input type="text" id="nm-f-nombre" maxlength="160"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Dirección</span>
+            <input type="text" id="nm-f-direccion" maxlength="200"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+        </div>
+      </div>
+
+      <div class="nm-bloque">
+        <h3>Parámetros del PGOU</h3>
+
+        <div class="nm-fila">
+          <label class="nm-campo">
+            <span class="nm-campo-label">Coef. edificabilidad (m²t/m²s)</span>
+            <input type="number" id="nm-f-coef" min="0.1" max="8" step="0.05"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Ocupación máx. (%)</span>
+            <input type="number" id="nm-f-ocup" min="30" max="100" step="1"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Plantas máx.</span>
+            <input type="number" id="nm-f-plantas" min="1" max="20" step="1"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+        </div>
+
+        <div class="nm-fila">
+          <label class="nm-campo">
+            <span class="nm-campo-label">Retranq. fachada (m)</span>
+            <input type="number" id="nm-f-rfach" min="0" max="10" step="0.1"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Retranq. linderos (m)</span>
+            <input type="number" id="nm-f-rlind" min="0" max="10" step="0.1"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+        </div>
+
+        <div class="nm-fila">
+          <label class="nm-campo">
+            <span class="nm-campo-label">Retranq. ático (m) · fijo</span>
+            <input type="number" id="nm-f-ratico" min="0" max="10" step="0.1"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Ancho mín. fachada (m)</span>
+            <input type="number" id="nm-f-anchofach" min="0" max="50" step="0.5"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">% adaptadas mín.</span>
+            <input type="number" id="nm-f-adapt" min="0" max="100" step="1"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+        </div>
+
+        <div class="nm-fila">
+          <label class="nm-campo">
+            <span class="nm-campo-label">Luz patio (m) · máx</span>
+            <input type="number" id="nm-f-luz" min="0" max="20" step="0.1"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Área mín. patio (m²)</span>
+            <input type="number" id="nm-f-areapatio" min="0" max="80" step="0.5"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Vestíbulo Ø (m) · máx</span>
+            <input type="number" id="nm-f-vest" min="0" max="5" step="0.05"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+        </div>
+      </div>
+
+      <div class="nm-bloque">
+        <h3>Espesores y anchos · normativa de diseño</h3>
+        <div class="nm-fila">
+          <label class="nm-campo">
+            <span class="nm-campo-label">Muro medianero (m) · máx</span>
+            <input type="number" id="nm-f-emurom" min="0" max="1" step="0.01"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Separación unidades (m) · máx</span>
+            <input type="number" id="nm-f-eseppu" min="0" max="1" step="0.01"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Tabique interior (m) · mín</span>
+            <input type="number" id="nm-f-etab" min="0" max="0.5" step="0.01"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+        </div>
+        <div class="nm-fila">
+          <label class="nm-campo">
+            <span class="nm-campo-label">Pasillo común (m) · mín</span>
+            <input type="number" id="nm-f-pasc" min="0" max="3" step="0.05"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Pasillo vivienda (m) · mín</span>
+            <input type="number" id="nm-f-pasv" min="0" max="2" step="0.05"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">Puerta paso libre (m) · mín</span>
+            <input type="number" id="nm-f-puerta" min="0" max="2" step="0.05"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+          <label class="nm-campo">
+            <span class="nm-campo-label">% muros (estimado) · máx</span>
+            <input type="number" id="nm-f-pctmuros" min="0" max="60" step="1"
+                   {% if not puede_editar %}readonly{% endif %}>
+          </label>
+        </div>
+
+        <fieldset class="nm-usos">
+          <legend>Usos permitidos</legend>
+          {% for u, label in [("residencial", "Residencial"), ("hotelero", "Hotelero"), ("terciario", "Terciario"), ("mixto", "Mixto")] %}
+            <label class="nm-checkbox">
+              <input type="checkbox" class="nm-f-uso" value="{{ u }}"
+                     {% if not puede_editar %}disabled{% endif %}>
+              <span>{{ label }}</span>
+            </label>
+          {% endfor %}
+        </fieldset>
+      </div>
+    </form>
+  </section>
+</section>
+
+{# Submodal: crear carpeta #}
+<dialog id="nm-submodal-carpeta" class="nm-submodal">
+  <article class="nm-submodal-card">
+    <header class="nm-submodal-header">
+      <h3>Nueva carpeta</h3>
+      <button type="button" class="nm-modal-cerrar" data-cerrar="nm-submodal-carpeta">×</button>
+    </header>
+    <div class="nm-submodal-cuerpo">
+      <label class="nm-campo">
+        <span class="nm-campo-label">Nombre</span>
+        <input type="text" id="nm-submodal-carpeta-nombre" maxlength="120" autocomplete="off">
+      </label>
+    </div>
+    <footer class="nm-submodal-acciones">
+      <button type="button" class="boton-secundario" data-cerrar="nm-submodal-carpeta">Cancelar</button>
+      <button type="button" id="nm-submodal-carpeta-guardar" class="boton-primario">Guardar</button>
+    </footer>
+  </article>
+</dialog>
+
+{# Submodal: nueva normativa dentro de carpeta #}
+<dialog id="nm-submodal-nueva-norma" class="nm-submodal">
+  <article class="nm-submodal-card">
+    <header class="nm-submodal-header">
+      <h3>Nueva normativa</h3>
+      <button type="button" class="nm-modal-cerrar" data-cerrar="nm-submodal-nueva-norma">×</button>
+    </header>
+    <div class="nm-submodal-cuerpo">
+      <label class="nm-campo">
+        <span class="nm-campo-label">Nombre</span>
+        <input type="text" id="nm-submodal-nueva-nombre" maxlength="160" autocomplete="off"
+               placeholder="Ej. Sevilla casco histórico">
+      </label>
+      <label class="nm-campo">
+        <span class="nm-campo-label">Dirección</span>
+        <input type="text" id="nm-submodal-nueva-direccion" maxlength="200" autocomplete="off"
+               placeholder="Ej. C/ Mayor 12, Sevilla">
+      </label>
+    </div>
+    <footer class="nm-submodal-acciones">
+      <button type="button" class="boton-secundario" data-cerrar="nm-submodal-nueva-norma">Cancelar</button>
+      <button type="button" id="nm-submodal-nueva-guardar" class="boton-primario">Crear</button>
+    </footer>
+  </article>
+</dialog>
+
+{# Submodal: confirmar eliminación #}
+<dialog id="nm-submodal-confirmar" class="nm-submodal">
+  <article class="nm-submodal-card">
+    <header class="nm-submodal-header">
+      <h3>Confirmar eliminación</h3>
+      <button type="button" class="nm-modal-cerrar" data-cerrar="nm-submodal-confirmar">×</button>
+    </header>
+    <div class="nm-submodal-cuerpo">
+      <p id="nm-submodal-confirmar-msg">¿Estás seguro?</p>
+    </div>
+    <footer class="nm-submodal-acciones">
+      <button type="button" class="boton-secundario" data-cerrar="nm-submodal-confirmar">Cancelar</button>
+      <button type="button" id="nm-submodal-confirmar-ok" class="boton-primario nm-boton-peligro">Eliminar</button>
+    </footer>
+  </article>
+</dialog>
+
+<script src="/static/js/normativa_municipal.js?v={{ estaticos_version }}" defer></script>
+{% endblock %}

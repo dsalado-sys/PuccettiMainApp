@@ -54,11 +54,43 @@ def init_db() -> None:
     from . import normativa_municipal_sqlalchemy  # noqa: F401
     from . import catalogo_superficies_sqlalchemy  # noqa: F401
     from . import anexo_i_apartamentos_sqlalchemy  # noqa: F401
+    from . import anexo_i_apartamentos_conjuntos_sqlalchemy  # noqa: F401
+    from . import anexo_i_hotel_apartamento_sqlalchemy  # noqa: F401
+    from . import anexo_i_hotelero_sqlalchemy  # noqa: F401
+    from . import carpetas_normativa_sqlalchemy  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
-    # Sembrar catálogos si las tablas están vacías.
+    if _es_sqlite:
+        _migracion_sqlite_idempotente()
+
     from .callejero_seed import sembrar_callejero
     from .seed_normativa import sembrar_todo
     with SessionLocal() as session:
         sembrar_callejero(session)
         sembrar_todo(session)
+
+
+def _migracion_sqlite_idempotente() -> None:
+    """Aplica ALTER TABLE para columnas añadidas tras la creación de la BBDD.
+
+    SQLAlchemy `create_all` solo crea tablas que no existen; no altera tablas
+    existentes. Esta función añade columnas nuevas a tablas ya creadas, sin
+    fallar si la columna ya existe.
+    """
+    from sqlalchemy import text
+    columnas_nuevas: list[tuple[str, str, str]] = [
+        # (tabla, nombre_columna, tipo SQL)
+        ("anexo_i_vivienda", "area_target_m2", "REAL"),
+    ]
+    with engine.begin() as conn:
+        for tabla, columna, tipo in columnas_nuevas:
+            try:
+                existe = conn.execute(
+                    text(f"SELECT {columna} FROM {tabla} LIMIT 1")
+                )
+                existe.close()
+            except Exception:
+                try:
+                    conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}"))
+                except Exception:
+                    pass

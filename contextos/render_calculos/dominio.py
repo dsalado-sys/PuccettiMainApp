@@ -12,10 +12,11 @@ from typing import Literal
 
 
 class UsoEdificio(str, Enum):
-    """§2.5 — usos contemplados. MVP: solo VIVIENDA está totalmente implementado."""
-    VIVIENDA = "vivienda"
-    HOTELERO = "hotelero"
-    APARTAMENTOS_TURISTICOS = "apartamentos_turisticos"
+    """§2.5 — usos contemplados (cálculo matemático)."""
+    VIVIENDA = "vivienda"                              # Anexo I.5
+    HOTELERO = "hotelero"                              # Anexo I.1
+    APARTAMENTOS_TURISTICOS = "apartamentos_turisticos"  # Anexo I.3 / I.4
+    HOTEL_APARTAMENTO = "hotel_apartamento"            # Anexo I.2
 
 
 class CategoriaVivienda(str, Enum):
@@ -37,11 +38,17 @@ CATEGORIA_A_NUM_DORMS = {
 
 
 class TipologiaApartamento(str, Enum):
-    """Anexo I.4 — tipologías de apartamento turístico por nº de dormitorios."""
+    """Anexo I.2/I.3/I.4 — tipologías de apartamento turístico y hotel-apartamento.
+
+    Salvo la vivienda (que va por nº de dormitorios), apartamentos turísticos y
+    hoteles-apartamento se clasifican por la OCUPACIÓN del dormitorio
+    (individual/doble/triple/cuádruple), más el estudio.
+    """
     ESTUDIO = "estudio"
-    UNO_D = "1d"
-    DOS_D = "2d"
-    TRES_D = "3d"
+    INDIVIDUAL = "individual"
+    DOBLE = "doble"
+    TRIPLE = "triple"
+    CUADRUPLE = "cuadruple"
 
 
 class CategoriaApartamentos(str, Enum):
@@ -54,10 +61,78 @@ class CategoriaApartamentos(str, Enum):
 
 TIPOLOGIA_APT_A_NUM_DORMS = {
     TipologiaApartamento.ESTUDIO: 0,
-    TipologiaApartamento.UNO_D: 1,
-    TipologiaApartamento.DOS_D: 2,
-    TipologiaApartamento.TRES_D: 3,
+    TipologiaApartamento.INDIVIDUAL: 1,
+    TipologiaApartamento.DOBLE: 1,
+    TipologiaApartamento.TRIPLE: 1,
+    TipologiaApartamento.CUADRUPLE: 1,
 }
+
+# Plazas (ocupación) por tipología de apartamento / hotel-apartamento.
+TIPOLOGIA_APT_A_PLAZAS = {
+    TipologiaApartamento.ESTUDIO: 2,
+    TipologiaApartamento.INDIVIDUAL: 1,
+    TipologiaApartamento.DOBLE: 2,
+    TipologiaApartamento.TRIPLE: 3,
+    TipologiaApartamento.CUADRUPLE: 4,
+}
+
+
+class GrupoApartamentos(str, Enum):
+    """Decreto 194/2010 — grupo del apartamento turístico.
+
+    `edificios` = grupo "edificios / complejos" (Anexo I.3, admite 1L-4L).
+    `conjuntos` = grupo "conjuntos" (Anexo I.4, solo 1L/2L, mínimos menores).
+    """
+    EDIFICIOS = "edificios"
+    CONJUNTOS = "conjuntos"
+
+
+class CategoriaHotelApartamento(str, Enum):
+    """Anexo I.2 — Hoteles-Apartamento por número de estrellas."""
+    CINCO_E = "5E"
+    CUATRO_E = "4E"
+    TRES_E = "3E"
+    DOS_E = "2E"
+    UNA_E = "1E"
+
+
+class CategoriaHotelero(str, Enum):
+    """Anexo I.1 — establecimientos hoteleros por tipo y categoría.
+
+    Hotel y hostal llevan estrellas; pensión y albergue no.
+    """
+    HOTEL_5 = "hotel_5"
+    HOTEL_4 = "hotel_4"
+    HOTEL_3 = "hotel_3"
+    HOTEL_2 = "hotel_2"
+    HOTEL_1 = "hotel_1"
+    HOSTAL_2 = "hostal_2"
+    HOSTAL_1 = "hostal_1"
+    PENSION = "pension"
+    ALBERGUE = "albergue"
+
+
+class TipologiaHabitacion(str, Enum):
+    """Anexo I.1 — tipos de habitación (unidad de alojamiento hotelera)."""
+    INDIVIDUAL = "individual"
+    DOBLE = "doble"
+    TRIPLE = "triple"
+    CUADRUPLE = "cuadruple"
+    MULTIPLE = "multiple"          # solo albergue
+
+
+# Plazas (camas) por tipología de habitación: escala las áreas sociales por
+# plaza (albergue) y decide el 2º baño obligatorio (>5 usuarios) en A1.4.
+TIPOLOGIA_HABITACION_A_PLAZAS = {
+    TipologiaHabitacion.INDIVIDUAL: 1,
+    TipologiaHabitacion.DOBLE: 2,
+    TipologiaHabitacion.TRIPLE: 3,
+    TipologiaHabitacion.CUADRUPLE: 4,
+    TipologiaHabitacion.MULTIPLE: 6,
+}
+
+# Hotel-apartamento comparte el espacio de tipologías del apartamento turístico.
+TIPOLOGIA_HAP_A_NUM_DORMS = TIPOLOGIA_APT_A_NUM_DORMS
 
 
 NivelAlerta = Literal["info", "aviso", "incumplimiento"]

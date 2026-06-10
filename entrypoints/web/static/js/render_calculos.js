@@ -20,7 +20,6 @@
   const tabsPlantasEl = document.getElementById("rc-tabs-plantas");
   const tablaPlantaBody = document.querySelector("#rc-tabla-planta tbody");
   const tablaUnidadBody = document.querySelector("#rc-tabla-unidad tbody");
-  const tablaAnexoWrap = document.getElementById("rc-tabla-anexo-wrap");
   const alertasBox = document.getElementById("rc-alertas");
   const alertasUl = alertasBox.querySelector("ul");
   const toast = document.getElementById("rc-toast");
@@ -53,6 +52,10 @@
     const bloques = { urbanisticos: {}, diseno: {}, programa: {} };
     const inputs = form.querySelectorAll("[data-bloque]");
     inputs.forEach(inp => {
+      // Los bloques de otro uso están ocultos → no deben entrar al payload
+      // (cada uso tiene su categoría/tipología y su propia lista de extras).
+      const bloqueUso = inp.closest("[data-cuando-uso]");
+      if (bloqueUso && bloqueUso.hidden) return;
       const bloque = inp.dataset.bloque;
       const nombre = inp.name;
       if (!bloque || !nombre) return;
@@ -66,14 +69,22 @@
           bloques[bloque][nombre] = inp.checked;
         }
       } else if (inp.tagName === "SELECT") {
-        bloques[bloque][nombre] = inp.value;
+        if (nombre === "tipologias_extra") {
+          if (!Array.isArray(bloques[bloque].tipologias_extra)) {
+            bloques[bloque].tipologias_extra = [];
+          }
+          if (inp.value) bloques[bloque].tipologias_extra.push(inp.value);
+        } else {
+          bloques[bloque][nombre] = inp.value;
+        }
       } else {
         const valor = inp.value === "" ? null : (inp.type === "number" ? Number(inp.value) : inp.value);
         bloques[bloque][nombre] = valor;
       }
     });
-    // Aseguramos que usos_permitidos exista aunque ninguna casilla esté marcada
+    // Aseguramos que los arrays existan aunque ninguna casilla esté marcada
     if (!bloques.urbanisticos.usos_permitidos) bloques.urbanisticos.usos_permitidos = [];
+    if (!bloques.programa.tipologias_extra) bloques.programa.tipologias_extra = [];
     return bloques;
   }
 
@@ -145,9 +156,11 @@
         ESTADO.plantaActiva = i;
         dibujarTabsPlantas(payload);
         renderer.dibujar(payload, i);
+        aplicarVisibilidadPorPlanta(payload);
       });
       tabsPlantasEl.appendChild(b);
     });
+    aplicarVisibilidadPorPlanta(payload);
   }
 
   // ─── Tabla por planta (iter. 4 — desglose muros/circulación/núcleo) ────
@@ -155,28 +168,37 @@
     if (!tablaPlantaBody) return;
     tablaPlantaBody.innerHTML = "";
     if (!filas || !filas.length) {
-      tablaPlantaBody.innerHTML = '<tr><td colspan="7" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
+      tablaPlantaBody.innerHTML = '<tr><td colspan="10" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
       return;
     }
-    const tot = { c: 0, u: 0, mur: 0, circ: 0, nuc: 0, viv: 0 };
+    const tot = { c: 0, u: 0, mur: 0, murEst: 0, circ: 0, nuc: 0, pat: 0, loc: 0, viv: 0 };
     filas.forEach(r => {
       tot.c += r.construida_m2 || 0;
       tot.u += r.util_viviendas_m2 || 0;
       tot.mur += r.muros_m2 || 0;
+      tot.murEst += r.muros_estimados_m2 || 0;
       tot.circ += r.circulacion_m2 || 0;
       tot.nuc += r.nucleo_m2 || 0;
+      tot.pat += r.patios_m2 || 0;
+      tot.loc += r.local_m2 || 0;
       tot.viv += r.viviendas || 0;
       const tr = document.createElement("tr");
       const tipo = r.tipo || "regular";
       tr.className = "rc-fila-tipo-" + tipo;
+      const mixStr = r.mix_tipologia && Object.keys(r.mix_tipologia).length
+        ? " title=\"" + Object.entries(r.mix_tipologia).map(([k, v]) => `${v}×${/^\d+$/.test(k) ? k + "d" : k}`).join(", ") + "\""
+        : "";
       tr.innerHTML = `
         <td>${r.planta}</td>
-        <td>${fmt.int.format(r.viviendas)}</td>
+        <td${mixStr}>${fmt.int.format(r.viviendas)}</td>
         <td>${fmt.m2.format(r.construida_m2)}</td>
         <td>${fmt.m2.format(r.util_viviendas_m2)}</td>
         <td>${fmt.m2.format(r.muros_m2 || 0)}</td>
+        <td>${fmt.m2.format(r.muros_estimados_m2 || 0)}</td>
         <td>${fmt.m2.format(r.circulacion_m2 || 0)}</td>
-        <td>${fmt.m2.format(r.nucleo_m2 || 0)}</td>`;
+        <td>${fmt.m2.format(r.nucleo_m2 || 0)}</td>
+        <td>${fmt.m2.format(r.patios_m2 || 0)}</td>
+        <td>${fmt.m2.format(r.local_m2 || 0)}</td>`;
       tablaPlantaBody.appendChild(tr);
     });
     const trTot = document.createElement("tr");
@@ -188,9 +210,21 @@
       <td>${fmt.m2.format(tot.c)}</td>
       <td>${fmt.m2.format(tot.u)}</td>
       <td>${fmt.m2.format(tot.mur)}</td>
+      <td>${fmt.m2.format(tot.murEst)}</td>
       <td>${fmt.m2.format(tot.circ)}</td>
-      <td>${fmt.m2.format(tot.nuc)}</td>`;
+      <td>${fmt.m2.format(tot.nuc)}</td>
+      <td>${fmt.m2.format(tot.pat)}</td>
+      <td>${fmt.m2.format(tot.loc)}</td>`;
     tablaPlantaBody.appendChild(trTot);
+  }
+
+  // Etiqueta legible de una tipología (busca en todos los conjuntos de opciones).
+  function _labelTipologia(slug) {
+    if (!slug) return null;
+    for (const set of Object.values(OPCIONES_TIPOLOGIA)) {
+      if (set[slug]) return set[slug];
+    }
+    return slug;
   }
 
   function repintarTablaUnidad(filas) {
@@ -198,38 +232,41 @@
     tablaUnidadBody.innerHTML = "";
     if (!filas || !filas.length) {
       tablaUnidadBody.innerHTML = '<tr><td colspan="7" class="rc-vacio">Sin unidades calculadas.</td></tr>';
-      if (tablaAnexoWrap) {
-        tablaAnexoWrap.innerHTML = '<p class="rc-vacio">Sin datos.</p>';
-      }
       return;
     }
     filas.forEach(r => {
       const tr = document.createElement("tr");
-      tr.className = "rc-fila-unidad-clicable";
+      const esLocal = r.tipo === "local";
+      tr.className = esLocal ? "rc-fila-unidad-local" : "rc-fila-unidad-clicable";
       tr.dataset.id = r.vivienda;
       tr.dataset.planta = r.planta;
       tr.dataset.tipo = r.tipo || "vivienda";
       tr.dataset.dorms = r.dorms;
+      tr.dataset.tipologia = r.tipologia || "";
       tr.dataset.adaptada = r.adaptada ? "1" : "0";
       tr.dataset.construida = r.construida_por_unidad_m2 ?? 0;
       tr.dataset.util = r.util_por_unidad_m2 ?? 0;
+      tr.dataset.circ = r.circulacion_interior_por_unidad_m2 ?? 0;
       tr.dataset.muros = r.muros_por_unidad_m2 ?? 0;
-      tr.dataset.circulacion = r.circulacion_por_unidad_m2 ?? 0;
       tr.dataset.estancias = JSON.stringify(r.estancias || []);
+      const utilCelda = esLocal
+        ? `${fmt.m2.format(r.util_por_unidad_m2 ?? 0)} <small>(${fmt.pct.format(r.pct_util_destinado ?? 0)}% útil)</small>`
+        : fmt.m2.format(r.util_por_unidad_m2 ?? 0);
+      // En vivienda la columna muestra nº de dormitorios; en el resto, la tipología.
+      const dormsCelda = (r.tipo && r.tipo !== "vivienda" && r.tipologia)
+        ? _labelTipologia(r.tipologia)
+        : r.dorms;
       tr.innerHTML = `
         <td>${r.planta}</td>
         <td>${r.vivienda}</td>
-        <td>${r.dorms}</td>
+        <td>${dormsCelda}</td>
         <td>${r.tipo || "vivienda"}</td>
         <td>${fmt.m2.format(r.construida_por_unidad_m2 ?? 0)}</td>
-        <td>${fmt.m2.format(r.util_por_unidad_m2 ?? 0)}</td>
+        <td>${utilCelda}</td>
         <td>${r.adaptada ? "✓" : "—"}</td>`;
-      tr.addEventListener("click", () => abrirModalUnidad(tr));
+      if (!esLocal) tr.addEventListener("click", () => abrirModalUnidad(tr));
       tablaUnidadBody.appendChild(tr);
     });
-    if (tablaAnexoWrap) {
-      tablaAnexoWrap.innerHTML = '<p class="rc-vacio">Anexo I aplicado al cálculo. Revisa las alertas del banner para incidencias.</p>';
-    }
   }
 
   // ─── Modal "detalle de unidad" ─────────────────────────────────────────
@@ -242,12 +279,15 @@
     setT("rc-mu-id", ds.id || "—");
     setT("rc-mu-planta", ds.planta || "—");
     setT("rc-mu-tipo", ds.tipo || "—");
-    setT("rc-mu-dorms", ds.dorms || "—");
+    const dormsLabel = (ds.tipo && ds.tipo !== "vivienda" && ds.tipologia)
+      ? _labelTipologia(ds.tipologia)
+      : (ds.dorms || "—");
+    setT("rc-mu-dorms", dormsLabel);
     setT("rc-mu-adapt", ds.adaptada === "1" ? "Sí" : "No");
     setT("rc-mu-construida", fmt.m2.format(parseFloat(ds.construida || 0)) + " m²");
     setT("rc-mu-util", fmt.m2.format(parseFloat(ds.util || 0)) + " m²");
+    setT("rc-mu-circ", fmt.m2.format(parseFloat(ds.circ || 0)) + " m²");
     setT("rc-mu-muros", fmt.m2.format(parseFloat(ds.muros || 0)) + " m²");
-    setT("rc-mu-circulacion", fmt.m2.format(parseFloat(ds.circulacion || 0)) + " m²");
 
     let estancias = [];
     try { estancias = JSON.parse(ds.estancias || "[]"); } catch (e) { estancias = []; }
@@ -260,7 +300,11 @@
         estancias.forEach(e => {
           const li = document.createElement("li");
           li.className = "rc-mu-estancia rc-mu-estancia-" + (e.categoria || "");
-          li.innerHTML = `<span class="rc-mu-est-nombre">${e.nombre}</span>
+          const warn = (e.cabe_diametro === false)
+            ? `<span class="rc-mu-est-warn" title="No cabe Ø ${e.diametro_min_m} m">⚠</span>`
+            : "";
+          if (e.cabe_diametro === false) li.classList.add("rc-mu-estancia-warn");
+          li.innerHTML = `${warn}<span class="rc-mu-est-nombre">${e.nombre}</span>
             <span class="rc-mu-est-cat">${e.categoria || ""}</span>
             <span class="rc-mu-est-m2">${fmt.m2.format(e.area_target_m2)} m²</span>`;
           ul.appendChild(li);
@@ -282,7 +326,8 @@
     });
   }
 
-  // ─── Alertas ──────────────────────────────────────────────────────────
+  // ─── Alertas — agrupadas por regla en acordeón ────────────────────────
+  const NIVEL_PESO = { error: 0, aviso: 1, info: 2 };
   function repintarAlertas(alertas) {
     if (!alertasBox || !alertasUl) return;
     if (!alertas || !alertas.length) {
@@ -292,14 +337,53 @@
     }
     alertasBox.hidden = false;
     alertasUl.innerHTML = "";
+
+    const grupos = new Map();
     alertas.forEach(a => {
+      const key = a.regla || "general";
+      if (!grupos.has(key)) grupos.set(key, []);
+      grupos.get(key).push(a);
+    });
+
+    const reglas = Array.from(grupos.keys()).sort((a, b) => {
+      const pa = Math.min(...grupos.get(a).map(x => NIVEL_PESO[x.nivel] ?? 1));
+      const pb = Math.min(...grupos.get(b).map(x => NIVEL_PESO[x.nivel] ?? 1));
+      return pa - pb;
+    });
+
+    reglas.forEach(regla => {
+      const items = grupos.get(regla);
+      const nivelTop = items.reduce(
+        (acc, x) => (NIVEL_PESO[x.nivel] ?? 1) < (NIVEL_PESO[acc] ?? 1) ? x.nivel : acc,
+        "info"
+      );
       const li = document.createElement("li");
-      li.className = "rc-alerta-" + a.nivel;
-      const regla = document.createElement("span");
-      regla.className = "rc-alerta-regla";
-      regla.textContent = a.regla;
-      li.appendChild(regla);
-      li.appendChild(document.createTextNode(a.mensaje));
+      li.className = "rc-alerta-grupo rc-alerta-" + nivelTop;
+
+      if (items.length === 1) {
+        const span = document.createElement("span");
+        span.className = "rc-alerta-regla";
+        span.textContent = regla;
+        li.appendChild(span);
+        li.appendChild(document.createTextNode(items[0].mensaje));
+      } else {
+        const det = document.createElement("details");
+        det.className = "rc-alerta-detalles";
+        const sum = document.createElement("summary");
+        sum.innerHTML = `<span class="rc-alerta-regla">${regla}</span>
+          <span class="rc-alerta-contador">${items.length} avisos</span>`;
+        det.appendChild(sum);
+        const ul = document.createElement("ul");
+        ul.className = "rc-alerta-sublista";
+        items.forEach(a => {
+          const sli = document.createElement("li");
+          sli.className = "rc-alerta-" + a.nivel;
+          sli.textContent = a.mensaje;
+          ul.appendChild(sli);
+        });
+        det.appendChild(ul);
+        li.appendChild(det);
+      }
       alertasUl.appendChild(li);
     });
   }
@@ -311,6 +395,13 @@
   }
 
   // ─── Fetch /preview (rápido) ──────────────────────────────────────────
+  function payloadConNormativa(bloques) {
+    if (ESTADO_NORM.aplicada && ESTADO_NORM.aplicada.urbanisticos) {
+      return { ...bloques, normativa_referencia: { urbanisticos: ESTADO_NORM.aplicada.urbanisticos } };
+    }
+    return bloques;
+  }
+
   async function pedirPreview() {
     if (estado !== "ok") return;
     const bloques = leerFormulario();
@@ -321,7 +412,7 @@
       const resp = await fetch("/modulos/render-calculos/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bloques),
+        body: JSON.stringify(payloadConNormativa(bloques)),
         signal: ESTADO.abortPreview.signal,
       });
       if (resp.status === 409) { mostrarToast("Localiza primero la parcela", true); return; }
@@ -357,7 +448,7 @@
       const resp = await fetch("/modulos/render-calculos/calcular", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bloques),
+        body: JSON.stringify(payloadConNormativa(bloques)),
         signal: ESTADO.abortCalcular.signal,
       });
       if (resp.status === 409) { mostrarToast("Localiza primero la parcela", true); return; }
@@ -451,101 +542,141 @@
     });
   });
 
-  // ─── Modal normativa ──────────────────────────────────────────────────
+  // ─── Modal "Elegir normativa a aplicar" ───────────────────────────────
+  // Render ya NO gestiona carpetas/normativas (eso vive en /modulos/normativa-municipal).
+  // Aquí solo se elige una normativa archivada y se inyecta al form del proyecto.
+  const API_NORM = "/modulos/normativa-municipal";
+  const ESTADO_NORM = { carpetas: [], filtro: "", seleccionada: null, aplicada: null };
+
   if (btnNormativa && modal) {
     btnNormativa.addEventListener("click", () => {
       if (typeof modal.showModal === "function") modal.showModal();
       else modal.setAttribute("open", "");
+      ocultarResumenNormativa();
+      refrescarCarpetasNormativa();
     });
     document.getElementById("rc-modal-cerrar").addEventListener("click", () => modal.close());
 
-    document.querySelectorAll(".rc-norm-item").forEach(b => {
-      b.addEventListener("click", () => cargarNormativa(b.dataset.municipio, b.dataset.provincia));
-    });
-    document.getElementById("rc-norm-cargar").addEventListener("click", () => {
-      const mun = document.getElementById("rc-norm-municipio").value.trim();
-      const prov = document.getElementById("rc-norm-provincia").value.trim();
-      if (mun && prov) cargarNormativa(mun, prov);
-    });
-
     document.getElementById("rc-norm-aplicar").addEventListener("click", () => {
-      aplicarNormativaAlForm();
-      modal.close();
-      mostrarToast("Normativa aplicada al proyecto");
-      pedirPreview();
-    });
-    document.getElementById("rc-norm-guardar").addEventListener("click", guardarNormativaMunicipal);
-  }
-
-  async function cargarNormativa(mun, prov) {
-    try {
-      const resp = await fetch(`/modulos/render-calculos/normativa/${encodeURIComponent(prov)}/${encodeURIComponent(mun)}`);
-      if (resp.ok) {
-        const data = await resp.json();
-        document.getElementById("rc-norm-municipio").value = mun;
-        document.getElementById("rc-norm-provincia").value = prov;
-        rellenarFormNormativa(data.urbanisticos);
-      } else if (resp.status === 404) {
-        document.getElementById("rc-norm-municipio").value = mun;
-        document.getElementById("rc-norm-provincia").value = prov;
-        rellenarFormNormativa(null);
+      if (!ESTADO_NORM.seleccionada) {
+        mostrarToast("Selecciona una normativa primero", true); return;
       }
-    } catch (e) { mostrarToast("Error al cargar normativa", true); }
+      aplicarNormativaAlProyecto(ESTADO_NORM.seleccionada);
+    });
+
+    const inpBuscar = document.getElementById("rc-carpeta-buscar");
+    if (inpBuscar) inpBuscar.addEventListener("input", () => {
+      ESTADO_NORM.filtro = inpBuscar.value.trim();
+      repintarCarpetasNormativa();
+    });
   }
 
-  function rellenarFormNormativa(urb) {
-    const map = {
-      "rc-norm-coef": urb?.coeficiente_edificabilidad ?? urb?.edificabilidad_m2t_m2s ?? 2.5,
-      "rc-norm-ocup": urb?.ocupacion_maxima_pct ?? 100,
-      "rc-norm-plantas": urb?.n_plantas_max ?? 3,
-      "rc-norm-rfach": urb?.retranqueo_fachada_m ?? 0,
-      "rc-norm-rlind": urb?.retranqueo_linderos_m ?? 0,
-      "rc-norm-luz": urb?.luz_recta_patio_min_m ?? 3,
-      "rc-norm-areapatio": urb?.area_patio_min_m2 ?? 12,
-    };
-    for (const id in map) {
-      const el = document.getElementById(id);
-      if (el) el.value = map[id];
+  async function refrescarCarpetasNormativa() {
+    try {
+      const resp = await fetch(`${API_NORM}/carpetas`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      ESTADO_NORM.carpetas = data.carpetas || [];
+      repintarCarpetasNormativa();
+    } catch (e) { /* silencioso */ }
+  }
+
+  function repintarCarpetasNormativa() {
+    const cont = document.getElementById("rc-carpetas-lista");
+    if (!cont) return;
+    const filtro = (ESTADO_NORM.filtro || "").toLowerCase();
+    const items = filtro
+      ? ESTADO_NORM.carpetas.filter(c => c.nombre.toLowerCase().includes(filtro))
+      : ESTADO_NORM.carpetas;
+    cont.innerHTML = "";
+    if (!items.length) {
+      cont.innerHTML = filtro
+        ? '<p class="rc-vacio">Ninguna carpeta coincide.</p>'
+        : '<p class="rc-vacio">Aún no hay carpetas. Crea normativas en el módulo «Normativa municipal».</p>';
+      return;
     }
-    const usos = (urb?.usos_permitidos || ["residencial"]);
-    const setUso = (id, val) => { const e = document.getElementById(id); if (e) e.checked = usos.includes(val); };
-    setUso("rc-norm-uso-resi", "residencial");
-    setUso("rc-norm-uso-hot", "hotelero");
-    setUso("rc-norm-uso-terc", "terciario");
-    setUso("rc-norm-uso-mixto", "mixto");
+    for (const c of items) {
+      const det = document.createElement("details");
+      det.className = "rc-carpeta";
+      det.dataset.id = c.id;
+      const sum = document.createElement("summary");
+      sum.innerHTML = `<span class="rc-carpeta-nombre">${c.nombre}</span>`;
+      det.appendChild(sum);
+      const ul = document.createElement("ul");
+      ul.className = "rc-carpeta-normativas";
+      ul.innerHTML = '<li class="rc-vacio">Cargando…</li>';
+      det.appendChild(ul);
+      det.addEventListener("toggle", () => {
+        if (det.open) cargarNormativasParaSeleccion(c.id, ul);
+      });
+      cont.appendChild(det);
+    }
   }
 
-  function leerFormNormativa() {
-    const usos = [];
-    const getUso = (id, val) => { const e = document.getElementById(id); if (e && e.checked) usos.push(val); };
-    getUso("rc-norm-uso-resi", "residencial");
-    getUso("rc-norm-uso-hot", "hotelero");
-    getUso("rc-norm-uso-terc", "terciario");
-    getUso("rc-norm-uso-mixto", "mixto");
-    const valof = (id, def) => {
-      const e = document.getElementById(id);
-      return e ? (parseFloat(e.value) || def) : def;
-    };
-    return {
-      municipio: document.getElementById("rc-norm-municipio").value.trim(),
-      provincia: document.getElementById("rc-norm-provincia").value.trim(),
-      urbanisticos: {
-        coeficiente_edificabilidad: valof("rc-norm-coef", 2.5),
-        ocupacion_maxima_pct: valof("rc-norm-ocup", 100),
-        n_plantas_max: parseInt(document.getElementById("rc-norm-plantas").value) || 3,
-        retranqueo_fachada_m: valof("rc-norm-rfach", 0),
-        retranqueo_linderos_m: valof("rc-norm-rlind", 0),
-        luz_recta_patio_min_m: valof("rc-norm-luz", 3),
-        area_patio_min_m2: valof("rc-norm-areapatio", 12),
-        usos_permitidos: usos,
-      },
-      fuente_pgou: document.getElementById("rc-norm-fuente").value,
-    };
+  async function cargarNormativasParaSeleccion(carpetaId, ul) {
+    try {
+      const resp = await fetch(`${API_NORM}/carpetas/${carpetaId}/normativas`);
+      if (!resp.ok) { ul.innerHTML = '<li class="rc-vacio">Error.</li>'; return; }
+      const data = await resp.json();
+      const items = data.normativas || [];
+      ul.innerHTML = "";
+      if (!items.length) {
+        ul.innerHTML = '<li class="rc-vacio">Carpeta vacía.</li>';
+        return;
+      }
+      for (const n of items) {
+        const li = document.createElement("li");
+        li.className = "rc-carpeta-normativa-item";
+        if (ESTADO_NORM.seleccionada && ESTADO_NORM.seleccionada.id === n.id) {
+          li.classList.add("rc-norm-seleccionada");
+        }
+        li.dataset.id = n.id;
+        li.innerHTML = `<button type="button" class="rc-carpeta-cargar">
+            <strong>${n.nombre}</strong>
+            <small>${n.direccion || "—"}</small>
+          </button>`;
+        li.querySelector(".rc-carpeta-cargar").addEventListener("click", () =>
+          seleccionarNormativa(n.id)
+        );
+        ul.appendChild(li);
+      }
+    } catch (e) { ul.innerHTML = '<li class="rc-vacio">Error de red.</li>'; }
   }
 
-  function aplicarNormativaAlForm() {
-    const datos = leerFormNormativa();
-    const urb = datos.urbanisticos;
+  async function seleccionarNormativa(normativaId) {
+    try {
+      const r = await fetch(`${API_NORM}/normativas/${normativaId}`);
+      if (!r.ok) { mostrarToast("No se pudo cargar", true); return; }
+      const data = await r.json();
+      ESTADO_NORM.seleccionada = data;
+      pintarResumenNormativa(data);
+      // marcar visualmente
+      document.querySelectorAll(".rc-norm-seleccionada").forEach(li => li.classList.remove("rc-norm-seleccionada"));
+      const li = document.querySelector(`.rc-carpeta-normativa-item[data-id="${normativaId}"]`);
+      if (li) li.classList.add("rc-norm-seleccionada");
+    } catch (e) { mostrarToast("Error de red", true); }
+  }
+
+  function pintarResumenNormativa(data) {
+    const urb = data.urbanisticos || {};
+    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    set("rc-norm-resumen-nombre", data.nombre || "—");
+    set("rc-norm-resumen-direccion", data.direccion || "—");
+    set("rc-norm-resumen-coef", urb.coeficiente_edificabilidad != null ? urb.coeficiente_edificabilidad : "—");
+    set("rc-norm-resumen-ocup", urb.ocupacion_maxima_pct != null ? `${urb.ocupacion_maxima_pct} %` : "—");
+    set("rc-norm-resumen-plantas", urb.n_plantas_max != null ? urb.n_plantas_max : "—");
+    set("rc-norm-resumen-rfach", urb.retranqueo_fachada_m != null ? `${urb.retranqueo_fachada_m} m` : "—");
+    set("rc-norm-resumen-rlind", urb.retranqueo_linderos_m != null ? `${urb.retranqueo_linderos_m} m` : "—");
+    document.getElementById("rc-norm-resumen").hidden = false;
+  }
+  function ocultarResumenNormativa() {
+    ESTADO_NORM.seleccionada = null;
+    const r = document.getElementById("rc-norm-resumen");
+    if (r) r.hidden = true;
+  }
+
+  function aplicarNormativaAlProyecto(data) {
+    const urb = data.urbanisticos || {};
     const map = {
       coeficiente_edificabilidad: urb.coeficiente_edificabilidad,
       ocupacion_maxima_pct: urb.ocupacion_maxima_pct,
@@ -556,27 +687,22 @@
       area_patio_min_m2: urb.area_patio_min_m2,
     };
     for (const k in map) {
+      if (map[k] == null) continue;
       const inp = form.querySelector(`[name="${k}"]`);
       if (inp) inp.value = map[k];
     }
-    form.querySelectorAll('[name="usos_permitidos"]').forEach(c => {
-      c.checked = urb.usos_permitidos.includes(c.value);
-    });
-  }
-
-  async function guardarNormativaMunicipal() {
-    const datos = leerFormNormativa();
-    if (!datos.municipio || !datos.provincia) {
-      mostrarToast("Municipio y provincia son obligatorios", true); return;
+    const usos = urb.usos_permitidos || [];
+    if (usos.length) {
+      form.querySelectorAll('[name="usos_permitidos"]').forEach(c => {
+        c.checked = usos.includes(c.value);
+      });
     }
-    try {
-      const resp = await fetch(
-        `/modulos/render-calculos/normativa/${encodeURIComponent(datos.provincia)}/${encodeURIComponent(datos.municipio)}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(datos) }
-      );
-      if (resp.ok) mostrarToast("Normativa guardada");
-      else mostrarToast("No se pudo guardar la normativa", true);
-    } catch (e) { mostrarToast("Error de red", true); }
+    // Guardar la normativa aplicada para que el backend la use como referencia
+    // al calcular avisos (incumplimientos / valores inferiores a la normativa).
+    ESTADO_NORM.aplicada = { id: data.id, nombre: data.nombre, urbanisticos: urb };
+    modal.close();
+    mostrarToast(`Normativa "${data.nombre}" aplicada`);
+    pedirPreview();
   }
 
   // ─── Visibilidad de campos según uso (vivienda/apartamentos) ──────────
@@ -589,9 +715,113 @@
     });
   }
 
+  // ─── Opciones condicionales dentro del panel ──────────────────────────
+  function _toggleOpcion(select, valor, permitido, fallback) {
+    if (!select) return;
+    const opt = Array.from(select.options).find(o => o.value === valor);
+    if (!opt) return;
+    opt.hidden = !permitido;
+    opt.disabled = !permitido;
+    if (!permitido && select.value === valor) select.value = fallback;
+  }
+
+  // Conjuntos (apartamentos turísticos) solo admite 1L y 2L.
+  function _filtrarCategoriaApartamentos() {
+    const grupoSel = form.querySelector('select[name="grupo_apartamentos"]');
+    const catSel = form.querySelector('select[name="categoria_apartamentos"]');
+    if (!grupoSel || !catSel) return;
+    const soloDos = grupoSel.value === "conjuntos";
+    _toggleOpcion(catSel, "3L", !soloDos, "2L");
+    _toggleOpcion(catSel, "4L", !soloDos, "2L");
+  }
+
+  // "Múltiple" solo existe en albergue (resto: individual/doble/triple/cuádruple).
+  function _filtrarTipologiaHotelero() {
+    const catSel = form.querySelector('select[name="categoria_hotelero"]');
+    const cont = document.getElementById("rc-tip-hotelero");
+    if (!catSel || !cont) return;
+    const permite = catSel.value === "albergue";
+    cont.querySelectorAll("select").forEach(sel => _toggleOpcion(sel, "multiple", permite, "doble"));
+  }
+
+  function actualizarOpcionesCondicionales() {
+    _filtrarCategoriaApartamentos();
+    _filtrarTipologiaHotelero();
+  }
+
+  // ─── Visibilidad según planta activa (PB vs tipo vs sótano) ───────────
+  function categoriaPlantaActiva(payload) {
+    const plantas = payload?.envolvente?.plantas
+      || payload?.edificio?.plantas || [];
+    const idx = Math.min(ESTADO.plantaActiva, plantas.length - 1);
+    if (!plantas.length || idx < 0) return "tipo";
+    const pl = plantas[idx];
+    if (!pl) return "tipo";
+    if (pl.tipo === "sotano") return "sotano";
+    if (pl.tipo === "atico") return "tipo";
+    // primera planta regular = PB
+    let primeraRegular = -1;
+    for (let i = 0; i < plantas.length; i++) {
+      if (plantas[i].tipo === "regular") { primeraRegular = i; break; }
+    }
+    return idx === primeraRegular ? "pb" : "tipo";
+  }
+
+  function aplicarVisibilidadPorPlanta(payload) {
+    const cat = categoriaPlantaActiva(payload);
+    form.querySelectorAll("[data-visible-en-planta]").forEach(el => {
+      const dest = el.dataset.visibleEnPlanta.split(/\s+/);
+      el.hidden = !dest.includes(cat);
+    });
+  }
+
+  // ─── Selector dinámico de tipologías extra (por uso) ──────────────────
+  const OPCIONES_TIPOLOGIA = {
+    vivienda: { "estudio": "Estudio", "1d": "1 dormitorio", "2d": "2 dormitorios", "3d": "3 dormitorios", "4d+": "4 o más dormitorios" },
+    apartamento: { "estudio": "Estudio", "individual": "Individual", "doble": "Doble", "triple": "Triple", "cuadruple": "Cuádruple" },
+    hotelero: { "individual": "Individual", "doble": "Doble", "triple": "Triple", "cuadruple": "Cuádruple", "multiple": "Múltiple (albergue)" },
+  };
+  const DEFAULT_TIPOLOGIA = { vivienda: "1d", apartamento: "doble", hotelero: "doble" };
+
+  function _opcionesTipologia(opciones, seleccionado) {
+    const labels = OPCIONES_TIPOLOGIA[opciones] || OPCIONES_TIPOLOGIA.vivienda;
+    return Object.entries(labels).map(([v, label]) =>
+      `<option value="${v}"${v === seleccionado ? " selected" : ""}>${label}</option>`
+    ).join("");
+  }
+
+  function anadirTipologia(contenedor) {
+    if (!contenedor) return;
+    const opciones = contenedor.dataset.opciones || "vivienda";
+    const inicial = DEFAULT_TIPOLOGIA[opciones] || Object.keys(OPCIONES_TIPOLOGIA[opciones])[0];
+    const wrap = document.createElement("div");
+    wrap.className = "rc-tipologia-extra";
+    wrap.innerHTML = `<select name="tipologias_extra" data-bloque="programa">${_opcionesTipologia(opciones, inicial)}</select>
+      <button type="button" class="rc-tip-quitar" aria-label="Eliminar tipología">−</button>`;
+    contenedor.appendChild(wrap);
+  }
+
+  // "+ Tipología" en cualquier bloque de uso (cada botón apunta a su contenedor).
+  form.querySelectorAll(".rc-btn-add-tipologia").forEach(btn => {
+    btn.addEventListener("click", () => {
+      anadirTipologia(document.getElementById(btn.dataset.target));
+      calcularConDebounce();
+    });
+  });
+
+  // Delegación global: click en − elimina la fila de tipología extra.
+  form.addEventListener("click", ev => {
+    const btn = ev.target.closest(".rc-tip-quitar");
+    if (!btn) return;
+    const wrap = btn.closest(".rc-tipologia-extra");
+    if (wrap) wrap.remove();
+    calcularConDebounce();
+  });
+
   // ─── Bindings ─────────────────────────────────────────────────────────
   function calcularConDebounce() {
     aplicarVisibilidadPorUso();
+    actualizarOpcionesCondicionales();
     if (ESTADO.debounceId) clearTimeout(ESTADO.debounceId);
     ESTADO.debounceId = setTimeout(pedirPreview, 250);
   }
@@ -601,10 +831,18 @@
   if (btnGuardar) btnGuardar.addEventListener("click", guardar);
   if (btnCsv) btnCsv.addEventListener("click", exportCsv);
 
-  // Brújula inicial vacía
-  if (window.RcBrujula) window.RcBrujula.dibujar(brujulaEl, []);
+  // Brújula inicial vacía + handler de rotación → render
+  if (window.RcBrujula) {
+    window.RcBrujula.dibujar(brujulaEl, []);
+    window.RcBrujula.onRotate(deg => {
+      if (renderer && typeof renderer.setRotation === "function") {
+        renderer.setRotation(deg);
+      }
+    });
+  }
 
   aplicarVisibilidadPorUso();
+  actualizarOpcionesCondicionales();
 
   // Toggle visual del input "coeficiente" según el checkbox "usar coef".
   const chkUsarCoef = document.getElementById("rc-chk-usar-coef");

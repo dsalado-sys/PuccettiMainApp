@@ -170,11 +170,27 @@ def catalogo_superficies_adapter(session: Session = Depends(sesion_bbdd)):
 
 
 def catalogo_apartamentos_adapter(session: Session = Depends(sesion_bbdd)):
-    """Adapter para Anexo I.4 (apartamentos turísticos · Decreto 194/2010) editable."""
+    """Adapter para Anexo I.3/I.4 (apartamentos turísticos · Decreto 194/2010) editable."""
     from app.plataforma.persistencia.anexo_i_apartamentos_sqlalchemy import (
         CatalogoApartamentosSQLAlchemy,
     )
     return CatalogoApartamentosSQLAlchemy(session)
+
+
+def catalogo_hotel_apartamento_adapter(session: Session = Depends(sesion_bbdd)):
+    """Adapter para Anexo I.2 (hoteles-apartamento) editable."""
+    from app.plataforma.persistencia.anexo_i_hotel_apartamento_sqlalchemy import (
+        CatalogoHotelApartamentoSQLAlchemy,
+    )
+    return CatalogoHotelApartamentoSQLAlchemy(session)
+
+
+def catalogo_hotelero_adapter(session: Session = Depends(sesion_bbdd)):
+    """Adapter para Anexo I.1 (hoteles / hostales / pensiones / albergues) editable."""
+    from app.plataforma.persistencia.anexo_i_hotelero_sqlalchemy import (
+        CatalogoHoteleroSQLAlchemy,
+    )
+    return CatalogoHoteleroSQLAlchemy(session)
 
 
 def obtener_parcela_temporal(

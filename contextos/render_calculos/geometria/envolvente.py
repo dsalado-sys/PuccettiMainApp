@@ -125,7 +125,12 @@ def aplicar_retranqueos(parcela: Polygon, params: Parametros, lados=None) -> Pol
 
 
 def detectar_patio(interior_planta: Polygon, params: Parametros) -> Optional[Patio]:
-    """Si la planta es demasiado profunda, abrimos un patio interior."""
+    """Abre un patio interior si la luz mínima cabe en la planta.
+
+    El patio se intenta colocar en el "polo de inaccesibilidad" (el punto más
+    interior). Solo se genera si su área alcanza al menos el 60% del área
+    mínima normativa.
+    """
     if interior_planta.is_empty:
         return None
 
@@ -135,12 +140,10 @@ def detectar_patio(interior_planta: Polygon, params: Parametros) -> Optional[Pat
     except Exception:
         p_int = interior_planta.representative_point()
 
-    d_max = p_int.distance(interior_planta.exterior)
-    if d_max <= params.diseno.profundidad_max_sin_patio / 2:
-        return None
-
     lr = params.diseno.luz_recta_patio_min
     area_target = params.diseno.area_patio_min
+    if lr <= 0 or area_target <= 0:
+        return None
     lado_b = max(lr, area_target / lr)
     rect = box(p_int.x - lr / 2, p_int.y - lado_b / 2,
                p_int.x + lr / 2, p_int.y + lado_b / 2)
@@ -244,7 +247,17 @@ def construir_envolvente(parcela: Polygon, params: Parametros, lados=None) -> En
         if atico.computa_edif:
             edif_acumulada += huella_at.area
 
-    edif_max = parcela.area * params.urbanismo.coeficiente_edificabilidad
+    # El techo máximo debe respetar el mismo criterio que `calcular_capacidad`:
+    # por coeficiente (parcela × coef) o, si no se usa el coeficiente, por
+    # ocupación × nº de plantas. Antes se calculaba siempre por coeficiente, lo
+    # que hacía saltar una falsa alerta de edificabilidad cuando el proyecto se
+    # dimensionaba por ocupación.
+    urb = params.urbanismo
+    if getattr(urb, "usar_coeficiente_edificabilidad", True):
+        edif_max = parcela.area * urb.coeficiente_edificabilidad
+    else:
+        ocup_area_max = urb.ocupacion_maxima * parcela.area
+        edif_max = ocup_area_max * max(1, urb.n_plantas_max)
     return Envolvente(
         parcela=parcela,
         plantas=plantas,

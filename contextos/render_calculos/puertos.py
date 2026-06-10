@@ -53,13 +53,59 @@ class CatalogoSuperficiesRepositorio(Protocol):
 
 
 class CatalogoApartamentosRepositorio(Protocol):
-    """Anexo I.4 editable (apartamentos turísticos · Decreto 194/2010)."""
+    """Anexo I.3/I.4 editable (apartamentos turísticos · Decreto 194/2010).
 
-    def superficies_apartamento(self, categoria: str, tipologia: str) -> dict[str, float]: ...
+    `grupo` distingue "edificios" (A1.3, 1L-4L) de "conjuntos" (A1.4, 1L/2L).
+    """
 
-    def util_objetivo_apartamento(self, categoria: str, tipologia: str) -> float | None: ...
+    def superficies_apartamento(self, categoria: str, tipologia: str, grupo: str = "edificios") -> dict[str, float]: ...
 
-    def areas_comunes(self, categoria: str) -> dict[str, float]: ...
+    def util_objetivo_apartamento(self, categoria: str, tipologia: str, grupo: str = "edificios") -> float | None: ...
+
+    def areas_comunes(self, categoria: str, grupo: str = "edificios") -> dict[str, float]: ...
+
+    def actualizar(
+        self,
+        categoria: str,
+        tipologia: str,
+        estancia: str,
+        valor: float,
+        usuario: str | None = None,
+        grupo: str = "edificios",
+    ) -> None: ...
+
+    def reset(self) -> None: ...
+
+
+class CatalogoHotelApartamentoRepositorio(Protocol):
+    """Anexo I.2 editable (hoteles-apartamento, categorías por estrellas)."""
+
+    def superficies(self, categoria: str, tipologia: str) -> dict[str, float]: ...
+
+    def util_objetivo(self, categoria: str, tipologia: str) -> float | None: ...
+
+    def areas_sociales(self, categoria: str) -> dict[str, float]: ...
+
+    def actualizar(
+        self,
+        categoria: str,
+        tipologia: str,
+        estancia: str,
+        valor: float,
+        usuario: str | None = None,
+    ) -> None: ...
+
+    def reset(self) -> None: ...
+
+
+class CatalogoHoteleroRepositorio(Protocol):
+    """Anexo I.1 editable (hoteles / hostales / pensiones / albergues)."""
+
+    def superficies_habitacion(self, categoria: str, tipologia: str) -> dict[str, float]: ...
+
+    def util_objetivo_habitacion(self, categoria: str, tipologia: str) -> float | None: ...
+
+    def areas_sociales(self, categoria: str) -> dict[str, float]: ...
 
     def actualizar(
         self,

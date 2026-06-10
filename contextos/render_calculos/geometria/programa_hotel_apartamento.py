@@ -1,0 +1,132 @@
+"""Programa arquitectónico de Hoteles-Apartamento (Anexo I.2 del PDF).
+
+Comportamiento análogo al apartamento turístico pero con **categorías por
+estrellas** (5E–1E) y superficies más generosas. La unidad se clasifica por la
+**ocupación del dormitorio** (individual/doble/triple/cuádruple) o es un estudio.
+
+Cada hotel-apartamento se compone de salón-comedor-cocina (open-plan, A1.2 no
+tabula cocina por separado) + 1 dormitorio + baño (derivado). Las áreas sociales
+vinculadas son las mismas que para el Hotel del mismo nº de estrellas (A1.1):
+4 / 3,2 / 3 / 2 / 2 m² por unidad de alojamiento.
+"""
+from __future__ import annotations
+
+from .programa import Estancia
+from .programa_uso import ProgramaUso, TipologiaUnidadDescriptor
+
+
+ESTRELLAS = ("5E", "4E", "3E", "2E", "1E")
+TIPOLOGIAS = ("estudio", "individual", "doble", "triple", "cuadruple")
+
+# Anexo I.2 — m² mínimos por estrella.
+MIN_DORMITORIO_HAP: dict[str, dict[str, float]] = {
+    "individual": {"5E": 15.0, "4E": 13.0, "3E": 12.0, "2E": 10.0, "1E": 10.0},
+    "doble":      {"5E": 18.0, "4E": 16.0, "3E": 15.0, "2E": 14.0, "1E": 14.0},
+    "triple":     {"5E": 22.0, "4E": 19.0, "3E": 18.0, "2E": 17.0, "1E": 17.0},
+    "cuadruple":  {"5E": 25.0, "4E": 22.0, "3E": 21.0, "2E": 20.0, "1E": 20.0},
+}
+MIN_ESTUDIO_HAP: dict[str, float] = {"5E": 33.0, "4E": 28.0, "3E": 27.0, "2E": 23.0, "1E": 23.0}
+MIN_SALON_COMEDOR_HAP: dict[str, float] = {"5E": 17.0, "4E": 16.0, "3E": 12.0, "2E": 10.0, "1E": 10.0}  # hasta 4 personas
+# Baño DERIVADO (A1.2 no lo tabula); editable desde BBDD.
+MIN_BANO_HAP: dict[str, float] = {"5E": 4.5, "4E": 4.0, "3E": 3.5, "2E": 3.0, "1E": 3.0}
+
+# Áreas sociales por u.a. = Hotel del mismo nº de estrellas (Anexo I.1).
+AREA_SOCIAL_POR_UA_HAP: dict[str, float] = {"5E": 4.0, "4E": 3.2, "3E": 3.0, "2E": 2.0, "1E": 2.0}
+
+PLAZAS: dict[str, int] = {"estudio": 2, "individual": 1, "doble": 2, "triple": 3, "cuadruple": 4}
+
+
+def _cat_validada(categoria: str) -> str:
+    return categoria if categoria in MIN_SALON_COMEDOR_HAP else "3E"
+
+
+def _tip_validada(tipologia: str) -> str:
+    return tipologia if tipologia in TIPOLOGIAS else "doble"
+
+
+def programa_hotel_apartamento(
+    tipologia: str,
+    categoria: str,
+    util_disponible: float,
+) -> list[Estancia]:
+    """Lista de `Estancia` de un hotel-apartamento (salón-comedor-cocina + dormitorio + baño)."""
+    cat = _cat_validada(categoria)
+    tip = _tip_validada(tipologia)
+    bano_min = MIN_BANO_HAP[cat]
+
+    if tip == "estudio":
+        est = MIN_ESTUDIO_HAP[cat]
+        return [
+            Estancia("salon_comedor", "publica", est, max(est, util_disponible * 0.78)),
+            Estancia("bano", "servicio", bano_min, bano_min + 1.0),
+        ]
+
+    salon_min = MIN_SALON_COMEDOR_HAP[cat]
+    dorm_min = MIN_DORMITORIO_HAP[tip][cat]
+    return [
+        Estancia("salon_comedor", "publica", salon_min, max(salon_min, util_disponible * 0.40)),
+        Estancia("dormitorio_1", "privada", dorm_min, dorm_min + 2.0),
+        Estancia("bano", "servicio", bano_min, bano_min + 1.0),
+    ]
+
+
+def _base_util(categoria: str, tipologia: str) -> float:
+    return sum(e.area_min_m2 for e in programa_hotel_apartamento(tipologia, categoria, 0.0))
+
+
+def util_objetivo_hotel_apartamento(categoria: str, tipologia: str) -> float:
+    return round(_base_util(categoria, tipologia) * 1.15, 2)
+
+
+def util_minimo_hotel_apartamento(categoria: str, tipologia: str) -> float:
+    return round(_base_util(categoria, tipologia), 2)
+
+
+def areas_sociales_obligatorias_hap(n_unidades_estimado: int, categoria: str) -> dict[str, float]:
+    """Áreas sociales vinculadas (m² por u.a., como el Hotel equivalente, A1.1)."""
+    cat = _cat_validada(categoria)
+    por_ua = AREA_SOCIAL_POR_UA_HAP[cat]
+    if por_ua <= 0:
+        return {}
+    return {"areas_sociales": round(por_ua * n_unidades_estimado, 2)}
+
+
+def total_sociales_obligatorias_m2(n_unidades_estimado: int, categoria: str) -> float:
+    return sum(areas_sociales_obligatorias_hap(n_unidades_estimado, categoria).values())
+
+
+def descriptor_tipologia_hotel_apartamento(
+    categoria: str,
+    tipologia: str,
+) -> TipologiaUnidadDescriptor:
+    tip = _tip_validada(tipologia)
+    util_obj = util_objetivo_hotel_apartamento(categoria, tip)
+    util_min = util_minimo_hotel_apartamento(categoria, tip)
+    return TipologiaUnidadDescriptor(
+        slug=tip,
+        util_objetivo=util_obj,
+        util_minimo=util_min,
+        util_maximo=round(util_obj * 1.25, 2),
+        n_dorms_label=PLAZAS.get(tip, 2),
+        tipo_unidad="hotel_apartamento",
+        plazas=PLAZAS.get(tip, 2),
+    )
+
+
+def programa_uso_hotel_apartamento(
+    categoria: str,
+    tipologia: str,
+    n_unidades_estimado: int = 1,
+) -> ProgramaUso:
+    tip = _tip_validada(tipologia)
+    util_obj = util_objetivo_hotel_apartamento(categoria, tip)
+    util_min = util_minimo_hotel_apartamento(categoria, tip)
+    sociales = total_sociales_obligatorias_m2(n_unidades_estimado, categoria)
+    return ProgramaUso(
+        util_objetivo_unidad_m2=util_obj,
+        area_min_unidad_m2=util_min,
+        util_max_unidad_m2=round(util_obj * 1.25, 2),
+        n_dormitorios=0 if tip == "estudio" else 1,
+        tipo_unidad="hotel_apartamento",
+        area_servicios_obligatorios_m2=sociales,
+    )

@@ -31,12 +31,13 @@ class ParametrosDiseno:
     # Patios interiores (A2.5)
     luz_recta_patio_min: float = 3.00
     area_patio_min: float = 12.00
-    profundidad_max_sin_patio: float = 12.00
 
-    # Porcentajes (iter. 4). Suma de los tres ≤ 90% (validado en capacidad).
+    # Porcentajes. Suma ≤ 90% por planta (validado en capacidad).
     pct_muros: float = 20.0
-    pct_circulacion: float = 8.0
+    pct_circulacion_pb: float = 8.0      # % circulación en planta baja
+    pct_circulacion_tipo: float = 8.0    # % circulación en planta tipo / ático
     pct_nucleo: float = 5.0
+    pct_muros_normativo: float = 20.0    # referencia normativa para "Muros estimado"
 
 
 @dataclass
@@ -69,8 +70,9 @@ class ParametrosPrograma:
     n_dormitorios: int = 2                    # 0 = estudio
     salon_cocina_open: bool = False
     n_plantas: int = 3
-    n_viviendas_por_planta: int = 1           # 0 = derivar automáticamente
-    pct_unidades_adaptadas: float = 5.0       # DB SUA ≥5%
+    pct_unidades_adaptadas: float = 5.0       # mínimo accesibilidad
+    tipologias_extra: list[int] = field(default_factory=list)  # nº dormitorios adicionales
+    pct_local_pb: float = 0.0                 # % útil PB destinado a local no residencial
 
 
 @dataclass

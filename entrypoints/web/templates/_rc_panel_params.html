@@ -29,7 +29,7 @@
 
       <label class="rc-campo">
         <span class="rc-campo-label">Ocupación máxima (%)</span>
-        <input type="number" name="ocupacion_maxima_pct" min="30" max="100" step="1"
+        <input type="number" name="ocupacion_maxima_pct" min="10" max="100" step="1"
                value="{{ urb.ocupacion_maxima_pct }}" data-bloque="urbanisticos">
       </label>
 
@@ -121,20 +121,41 @@
             </option>
           {% endfor %}
         </select>
-        <small class="rc-hint">"Hotelero" sigue en desarrollo en esta versión.</small>
       </label>
-      <label class="rc-campo" data-cuando-uso="vivienda">
-        <span class="rc-campo-label">Tipología de vivienda</span>
-        <select name="categoria_vivienda" data-bloque="programa">
-          {% for c in ["estudio","1d","2d","3d","4d+"] %}
-            <option value="{{ c }}" {% if prog.categoria_vivienda == c %}selected{% endif %}>
-              {% if c == "estudio" %}Estudio{% elif c == "4d+" %}4 o más dormitorios{% else %}{{ c[0] }} dormitorio{{ "s" if c[0] != "1" }}{% endif %}
-            </option>
-          {% endfor %}
-        </select>
-      </label>
+
+      {# ── Etiquetas reutilizables de tipología ── #}
+      {% set lbl_viv = {"estudio":"Estudio","1d":"1 dormitorio","2d":"2 dormitorios","3d":"3 dormitorios","4d+":"4 o más dormitorios"} %}
+      {% set lbl_apt = {"estudio":"Estudio","individual":"Individual","doble":"Doble","triple":"Triple","cuadruple":"Cuádruple"} %}
+      {% set lbl_hab = {"individual":"Individual","doble":"Doble","triple":"Triple","cuadruple":"Cuádruple","multiple":"Múltiple (albergue)"} %}
+      {% set lbl_hotelero = {"hotel_5":"Hotel 5★","hotel_4":"Hotel 4★","hotel_3":"Hotel 3★","hotel_2":"Hotel 2★","hotel_1":"Hotel 1★","hostal_2":"Hostal 2★","hostal_1":"Hostal 1★","pension":"Pensión","albergue":"Albergue"} %}
+
+      {# ── VIVIENDA (Anexo I.5) ── #}
+      <div class="rc-campo" data-cuando-uso="vivienda">
+        <span class="rc-campo-label">Tipologías</span>
+        <div class="rc-tipologias" id="rc-tip-vivienda" data-opciones="vivienda">
+          <select name="categoria_vivienda" data-bloque="programa">
+            {% for c, label in lbl_viv.items() %}
+              <option value="{{ c }}" {% if prog.categoria_vivienda == c %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {% if prog.uso == "vivienda" %}{% for slug in prog.tipologias_extra %}
+            <div class="rc-tipologia-extra">
+              <select name="tipologias_extra" data-bloque="programa">
+                {% for c, label in lbl_viv.items() %}
+                  <option value="{{ c }}" {% if slug == c %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button type="button" class="rc-tip-quitar" aria-label="Eliminar tipología">−</button>
+            </div>
+          {% endfor %}{% endif %}
+        </div>
+        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-add-tipologia" data-target="rc-tip-vivienda">+ Tipología</button>
+        <small class="rc-hint">Una unidad mínima de cada; sobrante con la más pequeña.</small>
+      </div>
+
+      {# ── APARTAMENTOS TURÍSTICOS (Anexo I.3/I.4 · Decreto 194/2010) ── #}
       <label class="rc-campo" data-cuando-uso="apartamentos_turisticos">
-        <span class="rc-campo-label">Categoría (Decreto 194/2010)</span>
+        <span class="rc-campo-label">Categoría</span>
         <select name="categoria_apartamentos" data-bloque="programa">
           {% for c in ["1L","2L","3L","4L"] %}
             <option value="{{ c }}" {% if prog.categoria_apartamentos == c %}selected{% endif %}>
@@ -144,32 +165,114 @@
         </select>
       </label>
       <label class="rc-campo" data-cuando-uso="apartamentos_turisticos">
-        <span class="rc-campo-label">Tipología de apartamento</span>
-        <select name="tipologia_apartamento" data-bloque="programa">
-          {% for c in ["estudio","1d","2d","3d"] %}
-            <option value="{{ c }}" {% if prog.tipologia_apartamento == c %}selected{% endif %}>
-              {% if c == "estudio" %}Estudio{% else %}{{ c[0] }} dormitorio{{ "s" if c[0] != "1" }}{% endif %}
+        <span class="rc-campo-label">Grupo</span>
+        <select name="grupo_apartamentos" data-bloque="programa">
+          <option value="edificios" {% if prog.grupo_apartamentos == "edificios" %}selected{% endif %}>Edificios / complejos (1L–4L)</option>
+          <option value="conjuntos" {% if prog.grupo_apartamentos == "conjuntos" %}selected{% endif %}>Conjuntos (solo 1L/2L)</option>
+        </select>
+        <small class="rc-hint">"Conjuntos" acota a 1L/2L con mínimos menores.</small>
+      </label>
+      <div class="rc-campo" data-cuando-uso="apartamentos_turisticos">
+        <span class="rc-campo-label">Tipo de espacio</span>
+        <div class="rc-tipologias" id="rc-tip-apartamentos" data-opciones="apartamento">
+          <select name="tipologia_apartamento" data-bloque="programa">
+            {% for c, label in lbl_apt.items() %}
+              <option value="{{ c }}" {% if prog.tipologia_apartamento == c %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {% if prog.uso == "apartamentos_turisticos" %}{% for slug in prog.tipologias_extra %}
+            <div class="rc-tipologia-extra">
+              <select name="tipologias_extra" data-bloque="programa">
+                {% for c, label in lbl_apt.items() %}
+                  <option value="{{ c }}" {% if slug == c %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button type="button" class="rc-tip-quitar" aria-label="Eliminar tipología">−</button>
+            </div>
+          {% endfor %}{% endif %}
+        </div>
+        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-add-tipologia" data-target="rc-tip-apartamentos">+ Tipología</button>
+      </div>
+
+      {# ── HOTEL-APARTAMENTO (Anexo I.2) ── #}
+      <label class="rc-campo" data-cuando-uso="hotel_apartamento">
+        <span class="rc-campo-label">Categoría</span>
+        <select name="categoria_hotel_apartamento" data-bloque="programa">
+          {% for c in ["5E","4E","3E","2E","1E"] %}
+            <option value="{{ c }}" {% if prog.categoria_hotel_apartamento == c %}selected{% endif %}>
+              {{ c[0] }} estrella{{ "s" if c[0] != "1" }}
             </option>
           {% endfor %}
         </select>
       </label>
+      <div class="rc-campo" data-cuando-uso="hotel_apartamento">
+        <span class="rc-campo-label">Tipo de espacio</span>
+        <div class="rc-tipologias" id="rc-tip-hotel-apartamento" data-opciones="apartamento">
+          <select name="tipologia_apartamento" data-bloque="programa">
+            {% for c, label in lbl_apt.items() %}
+              <option value="{{ c }}" {% if prog.tipologia_apartamento == c %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {% if prog.uso == "hotel_apartamento" %}{% for slug in prog.tipologias_extra %}
+            <div class="rc-tipologia-extra">
+              <select name="tipologias_extra" data-bloque="programa">
+                {% for c, label in lbl_apt.items() %}
+                  <option value="{{ c }}" {% if slug == c %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button type="button" class="rc-tip-quitar" aria-label="Eliminar tipología">−</button>
+            </div>
+          {% endfor %}{% endif %}
+        </div>
+        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-add-tipologia" data-target="rc-tip-hotel-apartamento">+ Tipología</button>
+      </div>
+
+      {# ── HOTELERO: hotel / hostal / pensión / albergue (Anexo I.1) ── #}
+      <label class="rc-campo" data-cuando-uso="hotelero">
+        <span class="rc-campo-label">Categoría</span>
+        <select name="categoria_hotelero" data-bloque="programa">
+          {% for c, label in lbl_hotelero.items() %}
+            <option value="{{ c }}" {% if prog.categoria_hotelero == c %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="rc-campo" data-cuando-uso="hotelero">
+        <span class="rc-campo-label">Tipo de unidad</span>
+        <div class="rc-tipologias" id="rc-tip-hotelero" data-opciones="hotelero">
+          <select name="tipologia_habitacion" data-bloque="programa">
+            {% for c, label in lbl_hab.items() %}
+              <option value="{{ c }}" {% if prog.tipologia_habitacion == c %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {% if prog.uso == "hotelero" %}{% for slug in prog.tipologias_extra %}
+            <div class="rc-tipologia-extra">
+              <select name="tipologias_extra" data-bloque="programa">
+                {% for c, label in lbl_hab.items() %}
+                  <option value="{{ c }}" {% if slug == c %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button type="button" class="rc-tip-quitar" aria-label="Eliminar tipología">−</button>
+            </div>
+          {% endfor %}{% endif %}
+        </div>
+        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-add-tipologia" data-target="rc-tip-hotelero">+ Tipología</button>
+        <small class="rc-hint">Pensión y albergue admiten baño compartido.</small>
+      </div>
       <label class="rc-campo">
         <span class="rc-campo-label">% unidades adaptadas (DB SUA)</span>
         <input type="number" name="pct_unidades_adaptadas" min="0" max="100" step="1"
                value="{{ prog.pct_unidades_adaptadas }}" data-bloque="programa">
-        <small class="rc-hint">DB SUA exige ≥5%. Las primeras plantas absorben el cupo.</small>
       </label>
       <label class="rc-checkbox">
         <input type="checkbox" name="salon_cocina_open"
                {% if prog.salon_cocina_open %}checked{% endif %} data-bloque="programa">
         <span>Salón-cocina integrado</span>
       </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Viviendas/planta (forzar)</span>
-        <input type="number" name="n_viviendas_por_planta_objetivo" min="0" max="20" step="1"
-               value="{{ prog.n_viviendas_por_planta_objetivo or '' }}" placeholder="auto"
-               data-bloque="programa">
-        <small class="rc-hint">Vacío = derivar de la edificabilidad.</small>
+      <label class="rc-campo" data-visible-en-planta="pb">
+        <span class="rc-campo-label">% local en planta baja</span>
+        <input type="number" name="pct_local_pb" min="0" max="100" step="1"
+               value="{{ prog.pct_local_pb }}" data-bloque="programa">
+        <small class="rc-hint">Reduce útiles de PB para uso no residencial.</small>
       </label>
     </div>
   </details>
@@ -211,7 +314,7 @@
       </label>
       <label class="rc-campo">
         <span class="rc-campo-label">Pasillo en vivienda (m)</span>
-        <input type="number" name="ancho_min_pasillo_vivienda_m" min="0.80" max="1.50" step="0.05"
+        <input type="number" name="ancho_min_pasillo_vivienda_m" min="1.00" max="1.50" step="0.05"
                value="{{ d.ancho_min_pasillo_vivienda_m }}" data-bloque="diseno">
       </label>
       <label class="rc-campo">
@@ -224,21 +327,21 @@
         <input type="number" name="ancho_min_puerta_m" min="0.60" max="1.20" step="0.05"
                value="{{ d.ancho_min_puerta_m }}" data-bloque="diseno">
       </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Profundidad máx. sin patio (m)</span>
-        <input type="number" name="profundidad_max_sin_patio_m" min="8" max="20" step="0.5"
-               value="{{ d.profundidad_max_sin_patio_m }}" data-bloque="diseno">
-      </label>
       <div class="rc-fila">
         <label class="rc-campo">
           <span class="rc-campo-label">% muros</span>
           <input type="number" name="pct_muros" min="0" max="60" step="1"
                  value="{{ d.pct_muros }}" data-bloque="diseno">
         </label>
-        <label class="rc-campo">
-          <span class="rc-campo-label">% circulación</span>
-          <input type="number" name="pct_circulacion" min="0" max="40" step="1"
-                 value="{{ d.pct_circulacion }}" data-bloque="diseno">
+        <label class="rc-campo" data-visible-en-planta="pb">
+          <span class="rc-campo-label">% circ PB</span>
+          <input type="number" name="pct_circulacion_pb" min="0" max="40" step="1"
+                 value="{{ d.pct_circulacion_pb }}" data-bloque="diseno">
+        </label>
+        <label class="rc-campo" data-visible-en-planta="tipo">
+          <span class="rc-campo-label">% circ tipo</span>
+          <input type="number" name="pct_circulacion_tipo" min="0" max="40" step="1"
+                 value="{{ d.pct_circulacion_tipo }}" data-bloque="diseno">
         </label>
         <label class="rc-campo">
           <span class="rc-campo-label">% núcleo</span>
@@ -248,15 +351,4 @@
       </div>
     </div>
   </details>
-
-  <div class="rc-resumen-activos" id="rc-resumen-activos" aria-live="polite">
-    <h3>Parámetros activos</h3>
-    <ul>
-      <li><strong>Uso:</strong> <span data-resumen="uso">{{ parametros.programa.uso }}</span></li>
-      <li><strong>Edificabilidad:</strong> <span data-resumen="edif">{{ parametros.urbanisticos.edificabilidad_m2t_m2s }}</span> m²t/m²s</li>
-      <li><strong>Plantas máx.:</strong> <span data-resumen="plantas">{{ parametros.urbanisticos.n_plantas_max }}</span></li>
-      <li><strong>Ocupación:</strong> <span data-resumen="ocupacion">{{ parametros.urbanisticos.ocupacion_maxima_pct }}</span> %</li>
-      <li><strong>% adaptadas:</strong> <span data-resumen="adapt">{{ parametros.programa.pct_unidades_adaptadas }}</span> %</li>
-    </ul>
-  </div>
 </aside>

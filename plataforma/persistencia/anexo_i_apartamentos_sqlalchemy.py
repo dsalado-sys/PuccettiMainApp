@@ -31,16 +31,31 @@ class AnexoIApartamentosORM(Base):
 
 
 class CatalogoApartamentosSQLAlchemy:
-    """Implementación del puerto CatalogoApartamentosRepositorio."""
+    """Implementación del puerto CatalogoApartamentosRepositorio.
+
+    Enruta por `grupo`: "edificios" (A1.3, tabla `anexo_i_apartamentos`) o
+    "conjuntos" (A1.4, tabla `anexo_i_apartamentos_conjuntos`).
+    """
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def superficies_apartamento(self, categoria: str, tipologia: str) -> dict[str, float]:
+    def _orm(self, grupo: str):
+        if grupo == "conjuntos":
+            from .anexo_i_apartamentos_conjuntos_sqlalchemy import (
+                AnexoIApartamentosConjuntosORM,
+            )
+            return AnexoIApartamentosConjuntosORM
+        return AnexoIApartamentosORM
+
+    def superficies_apartamento(
+        self, categoria: str, tipologia: str, grupo: str = "edificios",
+    ) -> dict[str, float]:
+        orm = self._orm(grupo)
         filas = self._session.scalars(
-            select(AnexoIApartamentosORM)
-            .where(AnexoIApartamentosORM.categoria == categoria)
-            .where(AnexoIApartamentosORM.tipologia == tipologia)
+            select(orm)
+            .where(orm.categoria == categoria)
+            .where(orm.tipologia == tipologia)
         ).all()
         out: dict[str, float] = {}
         for f in filas:
@@ -48,29 +63,31 @@ class CatalogoApartamentosSQLAlchemy:
             out[f.estancia + "_max"] = f.max_m2_util
         return out
 
-    def util_objetivo_apartamento(self, categoria: str, tipologia: str) -> float | None:
-        """m² útiles objetivo por unidad (tope superior Anexo I.4, +15% sobre mínimo).
+    def util_objetivo_apartamento(
+        self, categoria: str, tipologia: str, grupo: str = "edificios",
+    ) -> float | None:
+        """m² útiles objetivo por unidad (mínimo del Anexo × 1.15).
 
         Las filas del mismo `(categoria, tipologia)` comparten `max_m2_util`
-        (corresponde al mínimo del Anexo I.4 de esa combinación). Devolvemos
-        ese valor × 1.15 para alinear con `util_objetivo_apartamento` del motor.
-        Si no hay filas → None y el motor usa fallback.
+        (mínimo del Anexo de esa combinación). Si no hay filas → None y el motor
+        usa fallback.
         """
+        orm = self._orm(grupo)
         fila = self._session.scalar(
-            select(AnexoIApartamentosORM)
-            .where(AnexoIApartamentosORM.categoria == categoria)
-            .where(AnexoIApartamentosORM.tipologia == tipologia)
+            select(orm)
+            .where(orm.categoria == categoria)
+            .where(orm.tipologia == tipologia)
             .limit(1)
         )
         if fila is None:
             return None
         return round(float(fila.max_m2_util) * 1.15, 2)
 
-    def areas_comunes(self, categoria: str) -> dict[str, float]:
+    def areas_comunes(self, categoria: str, grupo: str = "edificios") -> dict[str, float]:
         """Devuelve los m² por servicio común para la categoría dada."""
+        orm = self._orm(grupo)
         filas = self._session.scalars(
-            select(AnexoIApartamentosORM)
-            .where(AnexoIApartamentosORM.categoria == "comunes_" + categoria)
+            select(orm).where(orm.categoria == "comunes_" + categoria)
         ).all()
         return {f.estancia: f.min_m2 for f in filas}
 
@@ -81,10 +98,12 @@ class CatalogoApartamentosSQLAlchemy:
         estancia: str,
         valor: float,
         usuario: str | None = None,
+        grupo: str = "edificios",
     ) -> None:
-        orm = self._session.get(AnexoIApartamentosORM, (categoria, tipologia, estancia))
+        orm_cls = self._orm(grupo)
+        orm = self._session.get(orm_cls, (categoria, tipologia, estancia))
         if orm is None:
-            orm = AnexoIApartamentosORM(
+            orm = orm_cls(
                 categoria=categoria,
                 tipologia=tipologia,
                 estancia=estancia,
@@ -101,7 +120,15 @@ class CatalogoApartamentosSQLAlchemy:
         self._session.commit()
 
     def reset(self) -> None:
-        from .seed_normativa import sembrar_anexo_i_apartamentos
+        from .anexo_i_apartamentos_conjuntos_sqlalchemy import (
+            AnexoIApartamentosConjuntosORM,
+        )
+        from .seed_normativa import (
+            sembrar_anexo_i_apartamentos,
+            sembrar_anexo_i_apartamentos_conjuntos,
+        )
         self._session.query(AnexoIApartamentosORM).delete()
+        self._session.query(AnexoIApartamentosConjuntosORM).delete()
         self._session.commit()
         sembrar_anexo_i_apartamentos(self._session, forzar=True)
+        sembrar_anexo_i_apartamentos_conjuntos(self._session, forzar=True)

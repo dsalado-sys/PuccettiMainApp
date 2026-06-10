@@ -30,7 +30,8 @@ from shapely.affinity import rotate, translate
 from .config import Parametros
 from .parcelas import LadoParcela
 from .envolvente import Planta, Patio
-from .programa import programa_vivienda, util_maximo, util_minimo_vivienda, MIN_COCINA, MIN_BANO
+from . import programa as _prog
+from .programa import programa_vivienda, util_maximo, util_minimo_vivienda
 from .programa_uso import ProgramaUso
 from .capacidad import calcular_capacidad, Capacidad
 
@@ -271,7 +272,7 @@ def _evaluar_unidad(
                    if patios_union is not None and not patios_union.is_empty else 0.0)
 
     n_banos = 2 if area_util > 70 else 1
-    area_servicio = MIN_COCINA + n_banos * MIN_BANO
+    area_servicio = _prog.MIN_COCINA + n_banos * _prog.MIN_BANO
     area_principal = max(8.0, area_util - area_servicio)
     hueco_req = 0.10 * area_principal
     hueco_disp = borde_fach * ALTURA_HUECO

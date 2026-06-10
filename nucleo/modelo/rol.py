@@ -25,12 +25,13 @@ class PermisoModulo(str, Enum):
 # Identificadores de módulos navegables desde el menú.
 # Coinciden con los slugs declarados en nucleo.modelo.proyecto.ModuloPuccetti.
 MODULOS = (
-    "localizacion",      # §2.1 — buscar parcela
-    "viabilidad",        # §2.3–2.9 — estudio de viabilidad
-    "render_calculos",   # §2.4–2.7 — render y cálculos
-    "modelos_planos",    # apoyo a §2.4 — visión sobre planos
-    "informe",           # §2.10 — informe PDF / DXF
-    "proyectos",         # §2.11 — gestión de proyectos
+    "localizacion",         # §2.1 — buscar parcela
+    "viabilidad",           # §2.3–2.9 — estudio de viabilidad
+    "render_calculos",      # §2.4–2.7 — render y cálculos
+    "modelos_planos",       # apoyo a §2.4 — visión sobre planos
+    "informe",              # §2.10 — informe PDF / DXF
+    "proyectos",            # §2.11 — gestión de proyectos
+    "normativa_municipal",  # PGOU + carpetas y normativas archivadas
 )
 
 
@@ -38,28 +39,31 @@ MODULOS = (
 # Borrador inicial pensado para evolución; ajustar cuando se cierren los flujos.
 MATRIZ_PERMISOS: dict[Rol, dict[str, frozenset[PermisoModulo]]] = {
     Rol.ARQUITECTO: {
-        "localizacion":    frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
-        "viabilidad":      frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
-        "render_calculos": frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
-        "modelos_planos":  frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
-        "informe":         frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
-        "proyectos":       frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "localizacion":        frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "viabilidad":          frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "render_calculos":     frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "modelos_planos":      frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "informe":             frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "proyectos":           frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "normativa_municipal": frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
     },
     Rol.FINANCIERO: {
-        "localizacion":    frozenset({PermisoModulo.VER}),
-        "viabilidad":      frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
-        "render_calculos": frozenset({PermisoModulo.VER}),
-        "modelos_planos":  frozenset(),
-        "informe":         frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
-        "proyectos":       frozenset({PermisoModulo.VER}),
+        "localizacion":        frozenset({PermisoModulo.VER}),
+        "viabilidad":          frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "render_calculos":     frozenset({PermisoModulo.VER}),
+        "modelos_planos":      frozenset(),
+        "informe":             frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "proyectos":           frozenset({PermisoModulo.VER}),
+        "normativa_municipal": frozenset({PermisoModulo.VER}),
     },
     Rol.INVERSOR: {
-        "localizacion":    frozenset({PermisoModulo.VER}),
-        "viabilidad":      frozenset({PermisoModulo.VER}),
-        "render_calculos": frozenset({PermisoModulo.VER}),
-        "modelos_planos":  frozenset(),
-        "informe":         frozenset({PermisoModulo.VER}),
-        "proyectos":       frozenset({PermisoModulo.VER}),
+        "localizacion":        frozenset({PermisoModulo.VER}),
+        "viabilidad":          frozenset({PermisoModulo.VER}),
+        "render_calculos":     frozenset({PermisoModulo.VER}),
+        "modelos_planos":      frozenset(),
+        "informe":             frozenset({PermisoModulo.VER}),
+        "proyectos":           frozenset({PermisoModulo.VER}),
+        "normativa_municipal": frozenset({PermisoModulo.VER}),
     },
 }
 

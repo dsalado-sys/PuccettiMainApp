@@ -150,20 +150,38 @@ def pantalla_buscar(
     proyecto: Proyecto | None = Depends(proyecto_activo),
     parcela_temp: Parcela | None = Depends(obtener_parcela_temporal),
     repo_parcelas: ParcelaTemporalRepositorio = Depends(parcelas_temporales),
+    uc_rc: LocalizarPorRC = Depends(localizar_por_rc_uc),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
 
-    # Si no hay parcela en sesión pero el proyecto activo guarda una, la
-    # restauramos al cache temporal y la usamos como punto de partida.
+    # Con proyecto activo: la parcela del proyecto manda sobre cualquier
+    # parcela suelta que pudiera quedar en la cookie temporal.
+    #   1. Si el proyecto tiene RC, se busca en Catastro para tener datos
+    #      frescos (una llamada por entrada al módulo).
+    #   2. Si la llamada falla (rate limit, offline) se reconstruye desde el
+    #      JSON guardado en datos_por_modulo — degradación suave.
+    # Sin proyecto: respetamos la parcela en cookie temporal (si la hay).
     cookie_a_setear: str | None = None
-    if parcela_temp is None and proyecto is not None:
-        datos = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value)
-        if isinstance(datos, dict):
-            restaurada = restaurar_parcela_desde_proyecto(datos)
-            if restaurada is not None:
-                repo_parcelas.guardar(restaurada)
-                parcela_temp = restaurada
-                cookie_a_setear = restaurada.id
+    if proyecto is not None:
+        rc_proyecto = (proyecto.referencia_catastral or "").strip()
+        parcela_proyecto_obj: Parcela | None = None
+        if rc_proyecto:
+            try:
+                parcela_proyecto_obj = uc_rc.ejecutar(rc_proyecto)
+            except ParcelaError as exc:
+                log.warning(
+                    "No se pudo re-resolver RC %s del proyecto %s: %s",
+                    rc_proyecto, proyecto.id, exc,
+                )
+        if parcela_proyecto_obj is None:
+            datos = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value)
+            if isinstance(datos, dict):
+                parcela_proyecto_obj = restaurar_parcela_desde_proyecto(datos)
+                if parcela_proyecto_obj is not None:
+                    repo_parcelas.guardar(parcela_proyecto_obj)
+        if parcela_proyecto_obj is not None:
+            parcela_temp = parcela_proyecto_obj
+            cookie_a_setear = parcela_proyecto_obj.id
 
     parcela_proyecto = None
     if proyecto is not None:

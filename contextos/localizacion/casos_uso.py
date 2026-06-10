@@ -382,10 +382,17 @@ def restaurar_parcela_desde_proyecto(datos: dict) -> Parcela | None:
 def asociar_a_proyecto(parcela: Parcela, proyecto: Proyecto) -> None:
     """Vuelca la parcela del cache temporal al aggregate Proyecto.
 
-    No es un caso de uso "ejecutable" porque combina dos repositorios distintos
-    cuyo wiring vive en `entrypoints/web/dependencias.py`. La función aquí solo
-    serializa la parcela al diccionario `datos_por_modulo`.
+    Además del JSON detallado en `datos_por_modulo["localizacion"]`, copia la
+    RC (14 chars) y la dirección al propio aggregate para que aparezcan en la
+    cabecera del proyecto y permitan re-resolver la parcela desde Catastro
+    al re-entrar al módulo.
     """
+    # Cabecera del proyecto — visible en /proyectos y usable para re-lookup.
+    if parcela.referencia_catastral:
+        proyecto.referencia_catastral = parcela.referencia_catastral
+    if parcela.direccion:
+        proyecto.direccion = parcela.direccion
+
     proyecto.fijar_datos(
         ModuloPuccetti.LOCALIZACION,
         {

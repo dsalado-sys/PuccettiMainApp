@@ -45,6 +45,8 @@ from app.plataforma.persistencia.normativa_municipal_sqlalchemy import (
 from ..catalogo_modulos import CATALOGO, TarjetaModulo
 from ..dependencias import (
     catalogo_apartamentos_adapter,
+    catalogo_hotel_apartamento_adapter,
+    catalogo_hotelero_adapter,
     catalogo_superficies_adapter,
     proyecto_activo,
     repositorio_proyectos,
@@ -75,6 +77,28 @@ def _exige_permiso(rol: Rol, permiso: PermisoModulo) -> None:
 
 def _normativa_repo(session: Session = Depends(sesion_bbdd)) -> NormativaMunicipalRepositorio:
     return NormativaMunicipalSQLAlchemy(session)
+
+
+def _normativa_de_referencia(
+    payload: dict[str, Any],
+    parcela,
+    repo_norm: NormativaMunicipalRepositorio,
+):
+    """Devuelve la `ParametrosUrbanisticos` contra la que se evaluarán los avisos.
+
+    Prioridad:
+      1. `payload["normativa_referencia"]["urbanisticos"]` — la normativa que el
+         usuario eligió desde el módulo Normativa municipal y aplicó al proyecto.
+      2. Normativa del municipio + provincia de la parcela (si está en BBDD).
+      3. None — no se generarán avisos comparados.
+    """
+    ref = payload.get("normativa_referencia") or {}
+    urb = ref.get("urbanisticos") if isinstance(ref, dict) else None
+    if urb:
+        return parametros_desde_dict({"urbanisticos": urb}).urbanisticos
+    if parcela.municipio and parcela.provincia:
+        return repo_norm.obtener(parcela.municipio, parcela.provincia)
+    return None
 
 
 def _estado_pantalla(proyecto: Proyecto | None) -> str:
@@ -132,7 +156,8 @@ def pantalla(
             "usos_edificio": [
                 {"value": "vivienda", "label": "Vivienda", "habilitado": True},
                 {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": True},
-                {"value": "hotelero", "label": "Hotelero", "habilitado": False},
+                {"value": "hotel_apartamento", "label": "Hotel-apartamento", "habilitado": True},
+                {"value": "hotelero", "label": "Hotelero", "habilitado": True},
             ],
         },
     )
@@ -156,7 +181,7 @@ def preview(
     params = parametros_desde_dict(payload)
     resultado = CalcularEnvolvente().ejecutar(parcela, params)
 
-    normativa = repo_norm.obtener(parcela.municipio, parcela.provincia) if (parcela.municipio and parcela.provincia) else None
+    normativa = _normativa_de_referencia(payload, parcela, repo_norm)
     alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
     resultado["alertas"] = list(resultado.get("alertas", [])) + [
         {"nivel": a.nivel, "regla": a.regla, "mensaje": a.mensaje, "elemento": a.elemento}
@@ -174,6 +199,8 @@ def calcular(
     repo_norm: NormativaMunicipalRepositorio = Depends(_normativa_repo),
     catalogo_viv=Depends(catalogo_superficies_adapter),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
     if proyecto is None:
@@ -186,10 +213,12 @@ def calcular(
     caso_uso = CalcularLayout(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
+        catalogo_hotel_apartamento=catalogo_hap,
+        catalogo_hotelero=catalogo_hot,
     )
     resultado = caso_uso.ejecutar(parcela, params)
 
-    normativa = repo_norm.obtener(parcela.municipio, parcela.provincia) if (parcela.municipio and parcela.provincia) else None
+    normativa = _normativa_de_referencia(payload, parcela, repo_norm)
     alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
     resultado["alertas"] = list(resultado.get("alertas", [])) + [
         {"nivel": a.nivel, "regla": a.regla, "mensaje": a.mensaje, "elemento": a.elemento}
@@ -259,6 +288,11 @@ def guardar_normativa(
     return JSONResponse({"ok": True})
 
 
+# Los endpoints de carpetas + normativas archivadas viven ahora en el módulo
+# Normativa municipal (/modulos/normativa-municipal/...). Render solo lo consulta
+# desde el frontend; aquí no expone esas rutas.
+
+
 # ─── Export CSV ─────────────────────────────────────────────────────────────
 @router.post("/export.csv")
 def export_csv(
@@ -267,6 +301,8 @@ def export_csv(
     proyecto: Proyecto | None = Depends(proyecto_activo),
     catalogo_viv=Depends(catalogo_superficies_adapter),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
     if proyecto is None:
@@ -278,6 +314,8 @@ def export_csv(
     caso_uso = CalcularLayout(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
+        catalogo_hotel_apartamento=catalogo_hap,
+        catalogo_hotelero=catalogo_hot,
     )
     resultado = caso_uso.ejecutar(parcela, params)
 

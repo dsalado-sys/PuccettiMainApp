@@ -103,6 +103,24 @@
 .rc-usos { border: 1px solid #E4DFCC; border-radius: var(--radio); padding: 10px 12px; }
 .rc-usos legend { font-size: 11px; color: #555; padding: 0 6px; text-transform: uppercase; letter-spacing: 0.1em; }
 
+/* ─── Selector dinámico de tipologías ─────────────────────────────── */
+.rc-tipologias { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.rc-tipologia-extra { display: flex; align-items: center; gap: 6px; }
+.rc-tipologia-extra select { flex: 1; }
+.rc-tip-quitar {
+  background: var(--blanco); border: 1px solid var(--error); color: var(--error);
+  border-radius: 3px; width: 28px; height: 28px; cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0;
+}
+.rc-tip-quitar:hover { background: rgba(140,42,31,0.08); }
+.rc-btn-pequeno { font-size: 12px; padding: 4px 10px; }
+
+.rc-fila-unidad-local {
+  background: rgba(184,150,12,0.06);
+  color: #555; font-style: italic; cursor: default;
+}
+.rc-fila-unidad-local small { color: #888; font-style: normal; }
+
 .rc-tip {
   width: 18px; height: 18px; border-radius: 999px;
   border: 1px solid var(--dorado); background: var(--blanco); color: var(--dorado);
@@ -267,6 +285,103 @@
   background: var(--negro); color: var(--dorado); border-radius: 2px;
   letter-spacing: 0.05em; margin-right: 8px; font-weight: 600;
 }
+.rc-alerta-error { background: rgba(140,42,31,0.08); border-color: var(--error); color: var(--error); }
+.rc-alerta-detalles summary {
+  cursor: pointer; list-style: none;
+  display: flex; align-items: center; gap: 8px;
+}
+.rc-alerta-detalles summary::-webkit-details-marker { display: none; }
+.rc-alerta-detalles summary::before {
+  content: "▶"; font-size: 9px; color: var(--dorado);
+  transition: transform 150ms ease;
+}
+.rc-alerta-detalles[open] summary::before { transform: rotate(90deg); }
+.rc-alerta-contador {
+  font-size: 10px; padding: 1px 6px; background: var(--dorado-claro);
+  color: var(--negro); border-radius: 999px; font-weight: 600;
+}
+.rc-alerta-resumen { color: #666; font-style: italic; flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc-alerta-sublista {
+  list-style: disc; margin: 8px 0 0 24px; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.rc-alerta-sublista li {
+  padding: 4px 8px; border-left-width: 2px; font-size: 11px;
+}
+
+/* ── Bloques homogéneos del modal (Carpetas + Parámetros del PGOU) ─── */
+.rc-modal-bloque {
+  background: var(--blanco); border: 1px solid #E4DFCC;
+  border-radius: var(--radio); padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.rc-modal-bloque-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; flex-wrap: wrap; padding-bottom: 8px;
+  border-bottom: 1px solid #EEE9D5;
+}
+.rc-modal-bloque-header h3 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: #555; margin: 0;
+}
+.rc-carpetas-acciones { display: flex; gap: 6px; align-items: center; }
+
+/* Buscador con lupa */
+.rc-buscador-lupa {
+  display: flex; align-items: center; gap: 4px;
+  border: 1px solid #C9C5B0; border-radius: 4px;
+  padding: 2px 6px; background: var(--blanco);
+}
+.rc-buscador-lupa:focus-within { border-color: var(--dorado); }
+.rc-icono-lupa { color: var(--dorado); font-size: 14px; line-height: 1; }
+.rc-buscador-lupa input[type="text"] {
+  font-size: 12px; padding: 4px 6px; border: none; outline: none;
+  background: transparent; min-width: 160px;
+}
+
+.rc-carpetas-lista { display: flex; flex-direction: column; gap: 6px; }
+.rc-carpeta {
+  background: var(--blanco); border: 1px solid #E4DFCC;
+  border-radius: 4px; padding: 6px 10px;
+}
+.rc-carpeta summary {
+  cursor: pointer; list-style: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.rc-carpeta summary::-webkit-details-marker { display: none; }
+.rc-carpeta summary::before {
+  content: "▶"; font-size: 9px; color: var(--dorado);
+  transition: transform 150ms ease; margin-right: 6px;
+}
+.rc-carpeta[open] summary::before { transform: rotate(90deg); }
+.rc-carpeta-nombre { font-weight: 600; font-size: 13px; flex: 1; }
+.rc-carpeta-acciones { display: flex; gap: 4px; }
+.rc-carpeta-acciones button {
+  font-size: 11px; padding: 2px 8px; border: 1px solid var(--dorado);
+  background: var(--blanco); color: var(--negro); border-radius: 3px;
+  cursor: pointer;
+}
+.rc-carpeta-acciones .rc-carpeta-borrar { color: var(--error); border-color: var(--error); }
+.rc-carpeta-normativas {
+  list-style: none; padding: 8px 0 0 18px; margin: 6px 0 0 0;
+  display: flex; flex-direction: column; gap: 4px;
+  border-top: 1px dashed #E4DFCC;
+}
+.rc-carpeta-normativa-item {
+  display: flex; align-items: stretch; gap: 4px;
+}
+.rc-carpeta-normativa-item .rc-carpeta-cargar {
+  flex: 1; text-align: left; padding: 6px 10px;
+  background: var(--gris-suave); border: 1px solid #E4DFCC; border-radius: 3px;
+  cursor: pointer;
+}
+.rc-carpeta-normativa-item .rc-carpeta-cargar:hover { background: rgba(184,150,12,0.10); }
+.rc-carpeta-normativa-item small { display: block; color: #666; font-size: 11px; margin-top: 2px; }
+.rc-carpeta-norm-borrar {
+  background: var(--blanco); border: 1px solid var(--error); color: var(--error);
+  border-radius: 3px; padding: 0 8px; cursor: pointer;
+}
 
 /* ── Toast ───────────────────────────────────────────────────────── */
 .rc-toast {
@@ -304,32 +419,44 @@
 .rc-modal-cerrar:hover { background: var(--gris-suave); color: var(--negro); }
 .rc-modal-cuerpo {
   padding: 16px 24px; overflow-y: auto;
-  display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+  display: flex; flex-direction: column; gap: 16px;
 }
-@media (max-width: 720px) {
-  .rc-modal-cuerpo { grid-template-columns: 1fr; }
-}
-.rc-modal-buscador { display: flex; gap: 8px; align-items: flex-end; grid-column: 1 / -1; }
+.rc-modal-buscador { display: flex; gap: 8px; align-items: flex-end; }
 .rc-modal-buscador .rc-campo { flex: 1; }
-.rc-modal-lista h3, .rc-modal-form h3 {
-  font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em;
-  color: #555; margin: 0 0 8px;
-}
-.rc-modal-lista ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
-.rc-norm-item {
-  width: 100%; padding: 8px 12px; text-align: left;
-  background: var(--gris-suave); border: 1px solid transparent;
-  border-radius: var(--radio); font-size: 13px; cursor: pointer;
-}
-.rc-norm-item:hover { border-color: var(--dorado); }
-.rc-norm-item small { color: #666; font-size: 11px; display: block; margin-top: 2px; }
 .rc-modal-ayuda {
   font-size: 12px; color: #555; line-height: 1.45;
   background: var(--gris-suave); padding: 8px 12px; border-radius: var(--radio);
   margin: 0 0 12px;
 }
-.rc-modal-form { display: flex; flex-direction: column; gap: 10px; }
-.rc-modal-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.rc-modal-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+
+/* ── Submodales (crear carpeta, archivar, confirmar) ─────────────────── */
+.rc-submodal {
+  border: none; padding: 0; background: transparent;
+  max-width: 460px; width: 90vw;
+}
+.rc-submodal::backdrop { background: rgba(10,10,10,0.45); }
+.rc-submodal-card {
+  background: var(--blanco); border-radius: var(--radio);
+  border-top: 3px solid var(--dorado); box-shadow: var(--sombra);
+  display: flex; flex-direction: column;
+}
+.rc-submodal-header {
+  position: relative; padding: 16px 20px 10px;
+  border-bottom: 1px solid #EEE9D5;
+}
+.rc-submodal-header h3 { margin: 0; font-size: 15px; }
+.rc-submodal-cuerpo {
+  padding: 14px 20px; display: flex; flex-direction: column; gap: 10px;
+}
+.rc-submodal-acciones {
+  padding: 12px 20px; border-top: 1px solid #EEE9D5;
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.rc-boton-peligro {
+  background: var(--error); border-color: var(--error); color: var(--blanco);
+}
+.rc-boton-peligro:hover { filter: brightness(0.92); }
 
 /* ── data-puede-editar=false (rol inversor): inputs en solo lectura ── */
 .rc-layout[data-puede-editar="false"] input,
@@ -408,7 +535,13 @@
 .rc-mu-estancia-publica { border-left-color: #B8960C; }
 .rc-mu-estancia-privada { border-left-color: #6e6a60; }
 .rc-mu-estancia-servicio { border-left-color: #9b9b9b; }
+.rc-mu-estancia-circulacion { border-left-color: #c9a84c; font-style: italic; }
 .rc-mu-est-nombre { font-weight: 600; }
 .rc-mu-est-cat { font-size: 11px; color: #6e6a60; text-transform: uppercase; }
 .rc-mu-est-m2 { font-weight: 600; }
+.rc-mu-est-warn {
+  color: var(--error); font-size: 14px; margin-right: 4px;
+  cursor: help;
+}
+.rc-mu-estancia-warn { background: rgba(140,42,31,0.08); }
 .rc-mu-total { font-size: 12px; color: #6e6a60; margin: 4px 0 0; text-align: right; }
