@@ -52,18 +52,16 @@ class ParametrosUrbanisticos:
     usar_coeficiente_edificabilidad: bool = True
     ocupacion_maxima_pct: float = 100.0     # 0..100
     n_plantas_max: int = 3
-    retranqueo_fachada_m: float = 0.0       # SUPERIOR
-    retranqueo_linderos_m: float = 0.0      # SUPERIOR
-    luz_recta_patio_min_m: float = 3.0      # SUPERIOR (nombre legacy)
     diametro_max_vestibulo_m: float = 1.50  # SUPERIOR
     espesor_muro_medianero_max_m: float = 0.25      # SUPERIOR
     espesor_separacion_unidades_max_m: float = 0.20  # SUPERIOR
     pct_muros_normativo: float = 20.0       # SUPERIOR (referencia normativa de muros)
 
-    # ── límite FIJO ──
-    retranqueo_atico_m: float = 3.0         # FIJO
-
     # ── límites INFERIORES ──
+    retranqueo_fachada_m: float = 0.0       # INFERIOR (mínimo normativo)
+    retranqueo_linderos_m: float = 0.0      # INFERIOR (mínimo normativo)
+    retranqueo_atico_m: float = 3.0         # INFERIOR (mínimo normativo)
+    luz_recta_patio_min_m: float = 3.0      # INFERIOR (nombre legacy)
     area_patio_min_m2: float = 12.0                 # INFERIOR
     pct_unidades_adaptadas_min: float = 5.0         # INFERIOR
     ancho_min_fachada_m: float = 5.0                # INFERIOR (sobre la parcela)

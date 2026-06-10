@@ -546,12 +546,6 @@ class ValidarCumplimiento:
              normativa.ocupacion_maxima_pct, "%", 0),
             ("Plantas máximas", urb_p.n_plantas_max,
              normativa.n_plantas_max, "", 0),
-            ("Retranqueo fachada", urb_p.retranqueo_fachada_m,
-             normativa.retranqueo_fachada_m, "m", 1),
-            ("Retranqueo linderos", urb_p.retranqueo_linderos_m,
-             normativa.retranqueo_linderos_m, "m", 1),
-            ("Luz recta patio", urb_p.luz_recta_patio_min_m,
-             normativa.luz_recta_patio_min_m, "m", 2),
             ("Diámetro vestíbulo", dis_p.diametro_min_vestibulo_m,
              normativa.diametro_max_vestibulo_m, "m", 2),
             ("Espesor muro medianero", dis_p.espesor_muro_medianero_m,
@@ -572,6 +566,14 @@ class ValidarCumplimiento:
         # ── Límites INFERIORES (proyecto < normativa → aviso) ──
         ancho_fachada_total = sum(l.longitud_m for l in parcela.lados if l.tipo == "fachada")
         inferiores = [
+            ("Retranqueo fachada", urb_p.retranqueo_fachada_m,
+             normativa.retranqueo_fachada_m, "m", 1),
+            ("Retranqueo linderos", urb_p.retranqueo_linderos_m,
+             normativa.retranqueo_linderos_m, "m", 1),
+            ("Retranqueo ático", urb_p.retranqueo_atico_m,
+             normativa.retranqueo_atico_m, "m", 1),
+            ("Luz recta patio", urb_p.luz_recta_patio_min_m,
+             normativa.luz_recta_patio_min_m, "m", 2),
             ("Área patio mínima", urb_p.area_patio_min_m2,
              normativa.area_patio_min_m2, "m²", 2),
             ("Unidades adaptadas", prog_p.pct_unidades_adaptadas,
@@ -594,13 +596,6 @@ class ValidarCumplimiento:
                     "aviso", "Normativa",
                     f"{nombre} {fmt.format(actual)}{unidad} < {fmt.format(lim)}{unidad}.",
                 ))
-
-        # ── Valor FIJO (proyecto ≠ normativa → aviso) ──
-        if abs(urb_p.retranqueo_atico_m - normativa.retranqueo_atico_m) > 1e-6:
-            alertas.append(Alerta(
-                "aviso", "Normativa",
-                f"Retranqueo ático {urb_p.retranqueo_atico_m:.1f} m ≠ {normativa.retranqueo_atico_m:.1f} m (debe ser exacto).",
-            ))
 
         return alertas
 

@@ -282,11 +282,10 @@ estancia que no cumple, dentro del modal de detalle.
 contra la normativa archivada activa. Tipos de comparación:
 
 - **SUPERIORES** (proyecto > normativa → incumplimiento): coef. edif.,
-  ocupación, nº plantas, retranqueos, luz patio, Ø vestíbulo, espesores
-  máx., % muros.
-- **INFERIORES** (proyecto < normativa → aviso): área patio mínima,
+  ocupación, nº plantas, Ø vestíbulo, espesores máx., % muros.
+- **INFERIORES** (proyecto < normativa → aviso): retranqueos (fachada,
+  linderos y ático, que son mínimos), luz patio, área patio mínima,
   % adaptadas, ancho fachada, espesor tabique, anchos pasillos, puerta.
-- **FIJO** (≠ → aviso): retranqueo ático.
 
 Los mensajes usan el identificador unificado **"Normativa"** y **no
 referencian** el PDF (Anexo I/II, DB SUA, §x.x, PGOU, Decreto 194/2010
