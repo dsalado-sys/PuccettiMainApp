@@ -307,6 +307,9 @@ def calcular_capacidad(
 
         cat = _categoria_planta(p, es_primera_regular)
         dis = disenos.get(cat, dis_tipo)
+        # PB usa el perfil de tipología de planta baja; tipo y ático, el de
+        # plantas tipo (ver §perfiles arriba). El sótano no aloja unidades.
+        perfil = perfil_pb if cat == "pb" else perfil_tipo
 
         muros_i = construida_i * dis.pct_muros / 100.0
         muros_est_i = construida_i * pct_muros_normativo / 100.0
@@ -329,7 +332,9 @@ def calcular_capacidad(
             # PB: usa pct_circulacion_pb + descuenta local. Resto (planta tipo /
             # ático): usa pct_circulacion_tipo, sin local.
             es_pb = es_primera_regular and p.tipo == "regular"
-            pct_circ_planta = pct_circ_pb if es_pb else pct_circ_tipo
+            # La circulación por categoría ya viene resuelta en `dis`
+            # (disenos["pb"]→pct_circulacion_pb, "tipo"/"atico"→pct_circulacion_tipo).
+            pct_circ_planta = dis.pct_circulacion
             # La circulación de la planta engloba: pasillos comunes
             # (`pct_circulacion_*`) + cuota de áreas comunes obligatorias del
             # uso (`descuento_por_planta`, sólo no-vivienda). Así la tabla
