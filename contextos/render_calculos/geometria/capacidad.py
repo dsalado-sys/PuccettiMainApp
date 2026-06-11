@@ -32,6 +32,29 @@ def _truncar(x: float) -> int:
     return max(0, int(x))
 
 
+@dataclass(frozen=True)
+class DisenoPlanta:
+    """Porcentajes de descuento de una categoría de planta (muros/circulación/núcleo).
+
+    Iteración 6: cada categoría (pb / tipo / atico / sotano) trae los suyos, lo que
+    permite que PB sea independiente de las plantas tipo y que ático y sótano tengan
+    su propio % muros y % circulación.
+    """
+    pct_muros: float
+    pct_circulacion: float
+    pct_nucleo: float
+
+
+@dataclass
+class _PerfilTipologia:
+    """Cómo se reparte el útil de una planta en unidades (PB vs plantas tipo)."""
+    descriptores: list | None
+    n_dorms: int
+    util_viv: float
+    tipologias_set: list  # ints (vía int-based de vivienda)
+    salon_open: bool
+
+
 @dataclass
 class Capacidad:
     superficie_parcela_m2: float
@@ -90,6 +113,57 @@ def _nombre_planta(idx_visual: int, tipo: str) -> str:
     return "PB" if idx_visual == 0 else f"P{idx_visual}"
 
 
+def _categoria_planta(p, es_primera_regular: bool) -> str:
+    """Categoría de planta para elegir su perfil de diseño/tipología."""
+    if p.tipo == "sotano":
+        return "sotano"
+    if p.tipo == "atico":
+        return "atico"
+    return "pb" if es_primera_regular else "tipo"
+
+
+def _construir_perfil(prog_motor, descriptores, util_objetivo) -> _PerfilTipologia:
+    """Perfil de reparto en unidades a partir del programa (motor) de una categoría."""
+    n_dorms = prog_motor.n_dormitorios
+    if descriptores:
+        util_viv = descriptores[0].util_objetivo
+    elif util_objetivo is not None:
+        util_viv = util_objetivo
+    else:
+        util_viv = util_maximo(n_dorms)
+    extras = list(getattr(prog_motor, "tipologias_extra", []) or [])
+    tipologias_set = [n_dorms] + [int(t) for t in extras]
+    salon_open = bool(getattr(prog_motor, "salon_cocina_open", False))
+    return _PerfilTipologia(descriptores, n_dorms, util_viv, tipologias_set, salon_open)
+
+
+def _reparto_planta(util_disponible: float, perfil: _PerfilTipologia):
+    """Reparte el útil de una planta en unidades según su perfil de tipología.
+
+    Devuelve `(unidades, tipologias)` con `unidades=[(n_dorms_label, util_m2)…]`
+    y `tipologias=[slug…]` paralelo. Prioridad: descriptores (use-agnóstico) →
+    vía int-based histórica (preview de vivienda).
+    """
+    if perfil.descriptores:
+        if len(perfil.descriptores) > 1:
+            seleccion = reparto_multi_tipologia_generico(util_disponible, perfil.descriptores)
+            unidades = [(d.n_dorms_label, u) for d, u in seleccion]
+            tipologias = [d.slug for d, _ in seleccion]
+        else:
+            d0 = perfil.descriptores[0]
+            n_viv = _truncar(util_disponible / d0.util_objetivo) if d0.util_objetivo > 0 else 0
+            unidades = [(d0.n_dorms_label, d0.util_objetivo) for _ in range(n_viv)]
+            tipologias = [d0.slug for _ in range(n_viv)]
+    elif len(set(perfil.tipologias_set)) > 1:
+        unidades = reparto_multi_tipologia(util_disponible, perfil.tipologias_set, perfil.salon_open)
+        tipologias = [str(n) for n, _ in unidades]
+    else:
+        n_viv = _truncar(util_disponible / perfil.util_viv) if perfil.util_viv > 0 else 0
+        unidades = [(perfil.n_dorms, perfil.util_viv) for _ in range(n_viv)]
+        tipologias = [str(perfil.n_dorms) for _ in range(n_viv)]
+    return unidades, tipologias
+
+
 def calcular_capacidad(
     envolvente,
     params: Parametros,
@@ -97,30 +171,51 @@ def calcular_capacidad(
     util_objetivo_por_unidad: float | None = None,
     area_servicios_comunes_m2: float = 0.0,
     descriptores_tipologia: list[TipologiaUnidadDescriptor] | None = None,
+    params_tipo: Parametros | None = None,
+    util_objetivo_por_unidad_tipo: float | None = None,
+    descriptores_tipologia_tipo: list[TipologiaUnidadDescriptor] | None = None,
+    disenos: dict[str, DisenoPlanta] | None = None,
 ) -> Capacidad:
     """Deriva la capacidad numérica del edificio (sin geometría de unidades).
 
+    Diferenciación por categoría de planta (iter. 6 — PB independiente):
+    - `params` / `descriptores_tipologia` / `util_objetivo_por_unidad` describen la
+      PLANTA BAJA y los valores de edificio.
+    - `params_tipo` / `descriptores_tipologia_tipo` / `util_objetivo_por_unidad_tipo`
+      describen las PLANTAS TIPO (y el ático). Si `params_tipo is None`, las plantas
+      tipo replican PB (comportamiento histórico).
+    - `disenos`: dict `categoría → DisenoPlanta` con los % muros/circulación/núcleo
+      de "pb"/"tipo"/"atico"/"sotano". Si es None se derivan de `params` igual que
+      antes (sótano con circulación 0).
+
     Reparto por planta (en orden de prioridad):
-    - `descriptores_tipologia` con >1 entrada → mezcla multi-tipología
-      use-agnóstica (`reparto_multi_tipologia_generico`); cada unidad lleva su
-      propia tipología (slug).
-    - `descriptores_tipologia` con 1 entrada → tantas unidades como quepan al
-      `util_objetivo` de esa tipología.
-    - `descriptores_tipologia is None` → vía int-based histórica (preview de
-      vivienda, usa `tipologias_extra` del motor).
+    - descriptores con >1 entrada → mezcla multi-tipología use-agnóstica
+      (`reparto_multi_tipologia_generico`); cada unidad lleva su slug.
+    - descriptores con 1 entrada → tantas unidades como quepan al `util_objetivo`.
+    - sin descriptores → vía int-based histórica (preview de vivienda).
     """
     parcela_area = envolvente.parcela.area
     urb = params.urbanismo
 
-    pct_muros = max(0.0, min(80.0, float(params.diseno.pct_muros)))
-    pct_circ_pb = max(0.0, min(50.0, float(params.diseno.pct_circulacion_pb)))
-    pct_circ_tipo = max(0.0, min(50.0, float(params.diseno.pct_circulacion_tipo)))
-    pct_nucl = max(0.0, min(30.0, float(params.diseno.pct_nucleo)))
+    # Diseño por categoría de planta. Si no llega `disenos`, se deriva de `params`
+    # reproduciendo el comportamiento histórico (sótano con circulación 0).
+    if disenos is None:
+        _pm = max(0.0, min(80.0, float(params.diseno.pct_muros)))
+        _cpb = max(0.0, min(50.0, float(params.diseno.pct_circulacion_pb)))
+        _ct = max(0.0, min(50.0, float(params.diseno.pct_circulacion_tipo)))
+        _nu = max(0.0, min(30.0, float(params.diseno.pct_nucleo)))
+        disenos = {
+            "pb": DisenoPlanta(_pm, _cpb, _nu),
+            "tipo": DisenoPlanta(_pm, _ct, _nu),
+            "atico": DisenoPlanta(_pm, _ct, _nu),
+            "sotano": DisenoPlanta(_pm, 0.0, _nu),
+        }
+    dis_pb = disenos["pb"]
+    dis_tipo = disenos["tipo"]
     pct_muros_normativo = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_normativo", 20.0))))
     pct_local_pb = max(0.0, min(100.0, float(getattr(params.programa, "pct_local_pb", 0.0))))
-    tipologias_extra = list(getattr(params.programa, "tipologias_extra", []) or [])
     # Verificación de no quedar útil: usamos el % de circulación más exigente.
-    pct_total_max = pct_muros + max(pct_circ_pb, pct_circ_tipo) + pct_nucl
+    pct_total_max = dis_pb.pct_muros + max(dis_pb.pct_circulacion, dis_tipo.pct_circulacion) + dis_pb.pct_nucleo
 
     huella = envolvente.plantas[0].footprint.area if envolvente.plantas else parcela_area
     coef = urb.coeficiente_edificabilidad
@@ -131,13 +226,17 @@ def calcular_capacidad(
         edificabilidad_m2 = ocup_area * max(1, urb.n_plantas_max)
     huella_efectiva = min(huella, ocup_area) if ocup_area > 0 else huella
 
-    n_dorms = params.programa.n_dormitorios
-    if descriptores_tipologia:
-        util_viv = descriptores_tipologia[0].util_objetivo
-    elif util_objetivo_por_unidad is not None:
-        util_viv = util_objetivo_por_unidad
+    # Perfiles de tipología: PB (params) y plantas tipo (params_tipo). El ático
+    # usa el perfil tipo; el sótano no aloja unidades. Sin params_tipo, tipo = PB.
+    perfil_pb = _construir_perfil(params.programa, descriptores_tipologia, util_objetivo_por_unidad)
+    if params_tipo is None:
+        perfil_tipo = perfil_pb
     else:
-        util_viv = util_maximo(n_dorms)
+        perfil_tipo = _construir_perfil(
+            params_tipo.programa, descriptores_tipologia_tipo, util_objetivo_por_unidad_tipo
+        )
+    n_dorms = perfil_pb.n_dorms        # KPI: tipología principal de PB
+    util_viv = perfil_pb.util_viv      # KPI
 
     n_plantas_solicitadas = max(1, len(envolvente.plantas) or params.programa.n_plantas)
     plantas = list(envolvente.plantas)
@@ -197,11 +296,6 @@ def calcular_capacidad(
     idx_visual = 0
     area_patio_norm = float(getattr(params.diseno, "area_patio_min", 12.0))
 
-    salon_open = bool(getattr(params.programa, "salon_cocina_open", False))
-    # Tipologías para reparto: la principal (n_dorms) primero, luego las extra
-    # (deduplicadas más abajo en reparto_multi_tipologia).
-    tipologias_set = [n_dorms] + [int(t) for t in tipologias_extra]
-
     es_primera_regular = True
 
     for i, p in enumerate(plantas):
@@ -211,27 +305,36 @@ def calcular_capacidad(
         if p.computa_edif and admitida:
             construida_computable_efectiva += construida_i
 
-        muros_i = construida_i * pct_muros / 100.0
+        cat = _categoria_planta(p, es_primera_regular)
+        dis = disenos.get(cat, dis_tipo)
+        # PB usa el perfil de tipología de planta baja; tipo y ático, el de
+        # plantas tipo (ver §perfiles arriba). El sótano no aloja unidades.
+        perfil = perfil_pb if cat == "pb" else perfil_tipo
+
+        muros_i = construida_i * dis.pct_muros / 100.0
         muros_est_i = construida_i * pct_muros_normativo / 100.0
-        nucl_i = construida_i * pct_nucl / 100.0
+        nucl_i = construida_i * dis.pct_nucleo / 100.0
+        circ_i = construida_i * dis.pct_circulacion / 100.0
         patio_i = min(area_patio_norm, construida_i * 0.20) if area_patio_norm > 0 else 0.0
         local_i = 0.0
         viv_i = 0
-        util_i = 0.0
         util_disponible_planta = 0.0   # útil neto de la planta (lo que se reparte)
         mix_i: dict[str, int] = {}
         unidades_i: list[tuple[int, float]] = []
         tipologias_i: list[str] = []
 
-        if p.tipo == "sotano":
-            circ_i = 0.0
+        if cat == "sotano":
+            # El sótano aplica sus propios % muros/circulación/núcleo pero no aloja
+            # unidades (viv = 0, sin útil ni patio).
             patio_i = 0.0
             nombre = _nombre_planta(0, "sotano")
         else:
             # PB: usa pct_circulacion_pb + descuenta local. Resto (planta tipo /
             # ático): usa pct_circulacion_tipo, sin local.
             es_pb = es_primera_regular and p.tipo == "regular"
-            pct_circ_planta = pct_circ_pb if es_pb else pct_circ_tipo
+            # La circulación por categoría ya viene resuelta en `dis`
+            # (disenos["pb"]→pct_circulacion_pb, "tipo"/"atico"→pct_circulacion_tipo).
+            pct_circ_planta = dis.pct_circulacion
             # La circulación de la planta engloba: pasillos comunes
             # (`pct_circulacion_*`) + cuota de áreas comunes obligatorias del
             # uso (`descuento_por_planta`, sólo no-vivienda). Así la tabla
@@ -255,36 +358,9 @@ def calcular_capacidad(
             util_disponible_planta = util_disponible_i
             util_total += util_disponible_planta
 
-            if admitida and util_disponible_i > 0 and util_viv > 0:
-                # Reparto. Prioridad: descriptores (use-agnóstico) → vía
-                # int-based histórica (preview de vivienda).
-                if descriptores_tipologia:
-                    if len(descriptores_tipologia) > 1:
-                        seleccion = reparto_multi_tipologia_generico(
-                            util_disponible_i, descriptores_tipologia
-                        )
-                        unidades_i = [(d.n_dorms_label, u) for d, u in seleccion]
-                        tipologias_i = [d.slug for d, _ in seleccion]
-                    else:
-                        d0 = descriptores_tipologia[0]
-                        n_viv = (
-                            _truncar(util_disponible_i / d0.util_objetivo)
-                            if d0.util_objetivo > 0 else 0
-                        )
-                        unidades_i = [(d0.n_dorms_label, d0.util_objetivo) for _ in range(n_viv)]
-                        tipologias_i = [d0.slug for _ in range(n_viv)]
-                elif len(set(tipologias_set)) > 1:
-                    unidades_i = reparto_multi_tipologia(
-                        util_disponible_i, tipologias_set, salon_open
-                    )
-                    tipologias_i = [str(n) for n, _ in unidades_i]
-                else:
-                    n_viv = _truncar(util_disponible_i / util_viv)
-                    unidades_i = [(n_dorms, util_viv) for _ in range(n_viv)]
-                    tipologias_i = [str(n_dorms) for _ in range(n_viv)]
-
+            if admitida and util_disponible_i > 0 and perfil.util_viv > 0:
+                unidades_i, tipologias_i = _reparto_planta(util_disponible_i, perfil)
                 viv_i = len(unidades_i)
-                util_i = sum(u for _, u in unidades_i)
                 mix_counts: dict[str, int] = {}
                 for slug in tipologias_i:
                     mix_counts[slug] = mix_counts.get(slug, 0) + 1
@@ -338,10 +414,10 @@ def calcular_capacidad(
         util_planta_disponible_m2=util_planta_promedio,
         viv_por_planta_objetivo=viv_pp_obj,
         n_viviendas_objetivo=n_total,
-        pct_muros=pct_muros,
-        pct_circulacion_pb=pct_circ_pb,
-        pct_circulacion_tipo=pct_circ_tipo,
-        pct_nucleo=pct_nucl,
+        pct_muros=dis_pb.pct_muros,
+        pct_circulacion_pb=dis_pb.pct_circulacion,
+        pct_circulacion_tipo=dis_tipo.pct_circulacion,
+        pct_nucleo=dis_pb.pct_nucleo,
         pct_muros_normativo=pct_muros_normativo,
         pct_local_pb=pct_local_pb,
         viv_por_planta=viv_por_planta,

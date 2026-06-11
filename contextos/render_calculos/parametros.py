@@ -124,14 +124,37 @@ class ParametrosPrograma:
 
 @dataclass
 class ParametrosRender:
-    """Bundle global del módulo Render y cálculos."""
+    """Bundle global del módulo Render y cálculos.
+
+    Diferenciación por categoría de planta (iter. 6 — PB independiente):
+    - `diseno`/`programa` describen la PLANTA BAJA (y los valores de edificio:
+      urbanismo, uso destino, categoría, % local PB…).
+    - `diseno_tipo`/`programa_tipo` describen las PLANTAS TIPO. `programa_tipo`
+      solo difiere en la tipología (el uso y la categoría de edificio se heredan
+      de `programa`).
+    - `diseno_atico`/`diseno_sotano` aportan, de momento, su propio % muros y %
+      circulación (el resto hereda de tipo/PB). El ático usa la tipología de las
+      plantas tipo; el sótano no aloja unidades.
+    """
     urbanisticos: ParametrosUrbanisticos = field(default_factory=ParametrosUrbanisticos)
     diseno: ParametrosDiseno = field(default_factory=ParametrosDiseno)
     programa: ParametrosPrograma = field(default_factory=ParametrosPrograma)
+    diseno_tipo: ParametrosDiseno = field(default_factory=ParametrosDiseno)
+    diseno_atico: ParametrosDiseno = field(default_factory=ParametrosDiseno)
+    diseno_sotano: ParametrosDiseno = field(default_factory=ParametrosDiseno)
+    programa_tipo: ParametrosPrograma = field(default_factory=ParametrosPrograma)
     seed: int = 42
 
     def a_parametros_motor(self) -> ParametrosMotor:
-        """Traduce a la estructura que espera el motor de geometría."""
+        """Motor para la planta baja / valores de edificio."""
+        return self._motor_desde(self.diseno, self.programa)
+
+    def a_parametros_motor_tipo(self) -> ParametrosMotor:
+        """Motor para las plantas tipo (y ático): tipología de `programa_tipo`."""
+        return self._motor_desde(self.diseno_tipo, self.programa_tipo)
+
+    def _motor_desde(self, diseno: ParametrosDiseno, programa: ParametrosPrograma) -> ParametrosMotor:
+        """Traduce (diseño, programa) + urbanismo de edificio a la estructura del motor."""
         from .dominio import (
             CATEGORIA_A_NUM_DORMS,
             TIPOLOGIA_APT_A_NUM_DORMS,
@@ -139,34 +162,34 @@ class ParametrosRender:
             TIPOLOGIA_HAP_A_NUM_DORMS,
         )
 
-        uso = self.programa.uso
+        uso = programa.uso
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
-            n_dorms = TIPOLOGIA_APT_A_NUM_DORMS.get(self.programa.tipologia_apartamento, 1)
-            categoria_label = self.programa.categoria_apartamentos.value
+            n_dorms = TIPOLOGIA_APT_A_NUM_DORMS.get(programa.tipologia_apartamento, 1)
+            categoria_label = programa.categoria_apartamentos.value
         elif uso == UsoEdificio.HOTEL_APARTAMENTO:
-            n_dorms = TIPOLOGIA_HAP_A_NUM_DORMS.get(self.programa.tipologia_apartamento, 1)
-            categoria_label = self.programa.categoria_hotel_apartamento.value
+            n_dorms = TIPOLOGIA_HAP_A_NUM_DORMS.get(programa.tipologia_apartamento, 1)
+            categoria_label = programa.categoria_hotel_apartamento.value
         elif uso == UsoEdificio.HOTELERO:
             # "n_dorms" para hotelero es solo etiqueta (plazas de la habitación);
             # el reparto real usa el útil objetivo inyectado por casos_uso.
-            n_dorms = TIPOLOGIA_HABITACION_A_PLAZAS.get(self.programa.tipologia_habitacion, 2)
-            categoria_label = self.programa.categoria_hotelero.value
+            n_dorms = TIPOLOGIA_HABITACION_A_PLAZAS.get(programa.tipologia_habitacion, 2)
+            categoria_label = programa.categoria_hotelero.value
         else:  # VIVIENDA
-            n_dorms = CATEGORIA_A_NUM_DORMS.get(self.programa.categoria_vivienda, 2)
-            categoria_label = self.programa.categoria_vivienda.value
+            n_dorms = CATEGORIA_A_NUM_DORMS.get(programa.categoria_vivienda, 2)
+            categoria_label = programa.categoria_vivienda.value
 
         # Sanitiza porcentajes 0..100; suma se valida en el motor.
-        pct_muros = max(0.0, min(80.0, float(self.diseno.pct_muros)))
-        pct_circulacion_pb = max(0.0, min(50.0, float(self.diseno.pct_circulacion_pb)))
-        pct_circulacion_tipo = max(0.0, min(50.0, float(self.diseno.pct_circulacion_tipo)))
-        pct_nucleo = max(0.0, min(30.0, float(self.diseno.pct_nucleo)))
+        pct_muros = max(0.0, min(80.0, float(diseno.pct_muros)))
+        pct_circulacion_pb = max(0.0, min(50.0, float(diseno.pct_circulacion_pb)))
+        pct_circulacion_tipo = max(0.0, min(50.0, float(diseno.pct_circulacion_tipo)))
+        pct_nucleo = max(0.0, min(30.0, float(diseno.pct_nucleo)))
 
         # La vía int-based de `tipologias_extra` solo la consume el preview de
         # vivienda. Para el resto de usos la mezcla la resuelve `casos_uso`
         # construyendo descriptores, así que aquí se pasa lista vacía.
         tipologias_extra_n: list[int] = []
         if uso == UsoEdificio.VIVIENDA:
-            for slug in self.programa.tipologias_extra:
+            for slug in programa.tipologias_extra:
                 if slug == "estudio":
                     tipologias_extra_n.append(0)
                 elif slug == "4d+":
@@ -180,14 +203,14 @@ class ParametrosRender:
 
         return ParametrosMotor(
             diseno=DisenoMotor(
-                espesor_muro_fachada=self.diseno.espesor_muro_fachada_m,
-                espesor_muro_medianero=self.diseno.espesor_muro_medianero_m,
-                espesor_separacion_unidades=self.diseno.espesor_separacion_unidades_m,
-                espesor_tabiqueria=self.diseno.espesor_tabique_m,
-                ancho_min_pasillo_comun=self.diseno.ancho_min_pasillo_comun_m,
-                ancho_min_pasillo_vivienda=self.diseno.ancho_min_pasillo_vivienda_m,
-                diametro_min_vestibulo=self.diseno.diametro_min_vestibulo_m,
-                radio_apertura_puerta=self.diseno.ancho_min_puerta_m,
+                espesor_muro_fachada=diseno.espesor_muro_fachada_m,
+                espesor_muro_medianero=diseno.espesor_muro_medianero_m,
+                espesor_separacion_unidades=diseno.espesor_separacion_unidades_m,
+                espesor_tabiqueria=diseno.espesor_tabique_m,
+                ancho_min_pasillo_comun=diseno.ancho_min_pasillo_comun_m,
+                ancho_min_pasillo_vivienda=diseno.ancho_min_pasillo_vivienda_m,
+                diametro_min_vestibulo=diseno.diametro_min_vestibulo_m,
+                radio_apertura_puerta=diseno.ancho_min_puerta_m,
                 luz_recta_patio_min=self.urbanisticos.luz_recta_patio_min_m,
                 area_patio_min=self.urbanisticos.area_patio_min_m2,
                 pct_muros=pct_muros,
@@ -210,20 +233,54 @@ class ParametrosRender:
                 sotano_computa_edificabilidad=self.urbanisticos.sotano_computa_edificabilidad,
             ),
             programa=ProgramaMotor(
-                uso=self.programa.uso.value,
+                uso=programa.uso.value,
                 categoria=categoria_label,
                 n_dormitorios=n_dorms,
-                salon_cocina_open=self.programa.salon_cocina_open,
+                salon_cocina_open=programa.salon_cocina_open,
                 n_plantas=self.urbanisticos.n_plantas_max,
-                pct_unidades_adaptadas=self.programa.pct_unidades_adaptadas,
+                pct_unidades_adaptadas=programa.pct_unidades_adaptadas,
                 tipologias_extra=tipologias_extra_n,
-                pct_local_pb=max(0.0, min(100.0, float(self.programa.pct_local_pb))),
+                pct_local_pb=max(0.0, min(100.0, float(programa.pct_local_pb))),
             ),
             seed=self.seed,
         )
 
 
 # ─── Serialización JSON ─────────────────────────────────────────────────────
+def _diseno_a_dict(d: ParametrosDiseno) -> dict[str, Any]:
+    return {
+        "espesor_muro_fachada_m": d.espesor_muro_fachada_m,
+        "espesor_muro_medianero_m": d.espesor_muro_medianero_m,
+        "espesor_separacion_unidades_m": d.espesor_separacion_unidades_m,
+        "espesor_tabique_m": d.espesor_tabique_m,
+        "ancho_min_pasillo_comun_m": d.ancho_min_pasillo_comun_m,
+        "ancho_min_pasillo_vivienda_m": d.ancho_min_pasillo_vivienda_m,
+        "diametro_min_vestibulo_m": d.diametro_min_vestibulo_m,
+        "ancho_min_puerta_m": d.ancho_min_puerta_m,
+        "pct_muros": d.pct_muros,
+        "pct_circulacion_pb": d.pct_circulacion_pb,
+        "pct_circulacion_tipo": d.pct_circulacion_tipo,
+        "pct_nucleo": d.pct_nucleo,
+    }
+
+
+def _programa_a_dict(prog: ParametrosPrograma) -> dict[str, Any]:
+    return {
+        "uso": prog.uso.value,
+        "categoria_vivienda": prog.categoria_vivienda.value,
+        "categoria_hotelero": prog.categoria_hotelero.value,
+        "tipologia_habitacion": prog.tipologia_habitacion.value,
+        "categoria_apartamentos": prog.categoria_apartamentos.value,
+        "tipologia_apartamento": prog.tipologia_apartamento.value,
+        "categoria_hotel_apartamento": prog.categoria_hotel_apartamento.value,
+        "grupo_apartamentos": prog.grupo_apartamentos.value,
+        "salon_cocina_open": prog.salon_cocina_open,
+        "tipologias_extra": list(prog.tipologias_extra),
+        "pct_local_pb": prog.pct_local_pb,
+        "pct_unidades_adaptadas": prog.pct_unidades_adaptadas,
+    }
+
+
 def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
     return {
         "urbanisticos": {
@@ -252,34 +309,12 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
             "tiene_sotano": p.urbanisticos.tiene_sotano,
             "sotano_computa_edificabilidad": p.urbanisticos.sotano_computa_edificabilidad,
         },
-        "diseno": {
-            "espesor_muro_fachada_m": p.diseno.espesor_muro_fachada_m,
-            "espesor_muro_medianero_m": p.diseno.espesor_muro_medianero_m,
-            "espesor_separacion_unidades_m": p.diseno.espesor_separacion_unidades_m,
-            "espesor_tabique_m": p.diseno.espesor_tabique_m,
-            "ancho_min_pasillo_comun_m": p.diseno.ancho_min_pasillo_comun_m,
-            "ancho_min_pasillo_vivienda_m": p.diseno.ancho_min_pasillo_vivienda_m,
-            "diametro_min_vestibulo_m": p.diseno.diametro_min_vestibulo_m,
-            "ancho_min_puerta_m": p.diseno.ancho_min_puerta_m,
-            "pct_muros": p.diseno.pct_muros,
-            "pct_circulacion_pb": p.diseno.pct_circulacion_pb,
-            "pct_circulacion_tipo": p.diseno.pct_circulacion_tipo,
-            "pct_nucleo": p.diseno.pct_nucleo,
-        },
-        "programa": {
-            "uso": p.programa.uso.value,
-            "categoria_vivienda": p.programa.categoria_vivienda.value,
-            "categoria_hotelero": p.programa.categoria_hotelero.value,
-            "tipologia_habitacion": p.programa.tipologia_habitacion.value,
-            "categoria_apartamentos": p.programa.categoria_apartamentos.value,
-            "tipologia_apartamento": p.programa.tipologia_apartamento.value,
-            "categoria_hotel_apartamento": p.programa.categoria_hotel_apartamento.value,
-            "grupo_apartamentos": p.programa.grupo_apartamentos.value,
-            "salon_cocina_open": p.programa.salon_cocina_open,
-            "tipologias_extra": list(p.programa.tipologias_extra),
-            "pct_local_pb": p.programa.pct_local_pb,
-            "pct_unidades_adaptadas": p.programa.pct_unidades_adaptadas,
-        },
+        "diseno": _diseno_a_dict(p.diseno),
+        "diseno_tipo": _diseno_a_dict(p.diseno_tipo),
+        "diseno_atico": _diseno_a_dict(p.diseno_atico),
+        "diseno_sotano": _diseno_a_dict(p.diseno_sotano),
+        "programa": _programa_a_dict(p.programa),
+        "programa_tipo": _programa_a_dict(p.programa_tipo),
         "seed": p.seed,
     }
 
@@ -315,6 +350,83 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         if isinstance(v, str):
             return v.lower() in ("true", "1", "yes", "si", "sí")
         return bool(v)
+
+    def _parse_diseno(node: dict[str, Any] | None, base_d: ParametrosDiseno) -> ParametrosDiseno:
+        """Parsea un bloque de diseño; cada campo ausente HEREDA de `base_d`.
+
+        Permite que `diseno_tipo`/`diseno_atico`/`diseno_sotano` lleguen parciales
+        (p. ej. solo % muros + % circulación) y completen el resto desde su padre.
+        """
+        node = node or {}
+
+        def _circ(field: str, base_val: float) -> float:
+            # Compat JSON antiguo: `pct_circulacion` único alimenta pb y tipo.
+            if "pct_circulacion" in node and field not in node:
+                return max(0.0, min(50.0, _f(node, "pct_circulacion", base_val)))
+            return max(0.0, min(50.0, _f(node, field, base_val)))
+
+        return ParametrosDiseno(
+            espesor_muro_fachada_m=_f(node, "espesor_muro_fachada_m", base_d.espesor_muro_fachada_m),
+            espesor_muro_medianero_m=_f(node, "espesor_muro_medianero_m", base_d.espesor_muro_medianero_m),
+            espesor_separacion_unidades_m=_f(node, "espesor_separacion_unidades_m", base_d.espesor_separacion_unidades_m),
+            espesor_tabique_m=_f(node, "espesor_tabique_m", base_d.espesor_tabique_m),
+            ancho_min_pasillo_comun_m=_f(node, "ancho_min_pasillo_comun_m", base_d.ancho_min_pasillo_comun_m),
+            ancho_min_pasillo_vivienda_m=_f(node, "ancho_min_pasillo_vivienda_m", base_d.ancho_min_pasillo_vivienda_m),
+            diametro_min_vestibulo_m=_f(node, "diametro_min_vestibulo_m", base_d.diametro_min_vestibulo_m),
+            ancho_min_puerta_m=_f(node, "ancho_min_puerta_m", base_d.ancho_min_puerta_m),
+            pct_muros=max(0.0, min(80.0, _f(node, "pct_muros", base_d.pct_muros))),
+            pct_circulacion_pb=_circ("pct_circulacion_pb", base_d.pct_circulacion_pb),
+            pct_circulacion_tipo=_circ("pct_circulacion_tipo", base_d.pct_circulacion_tipo),
+            pct_nucleo=max(0.0, min(30.0, _f(node, "pct_nucleo", base_d.pct_nucleo))),
+        )
+
+    def _parse_programa(node: dict[str, Any] | None, base_prog: ParametrosPrograma) -> ParametrosPrograma:
+        """Parsea un bloque de programa; campos ausentes HEREDAN de `base_prog`."""
+        node = node or {}
+
+        def _enum(cls, clave, defecto):
+            try:
+                return cls(node.get(clave, defecto.value))
+            except (ValueError, TypeError):
+                return defecto
+
+        uso = _enum(UsoEdificio, "uso", base_prog.uso)
+        cat = _enum(CategoriaVivienda, "categoria_vivienda", base_prog.categoria_vivienda)
+        cat_apt = _enum(CategoriaApartamentos, "categoria_apartamentos", base_prog.categoria_apartamentos)
+        tip_apt = _enum(TipologiaApartamento, "tipologia_apartamento", base_prog.tipologia_apartamento)
+        cat_hot = _enum(CategoriaHotelero, "categoria_hotelero", base_prog.categoria_hotelero)
+        tip_hab = _enum(TipologiaHabitacion, "tipologia_habitacion", base_prog.tipologia_habitacion)
+        cat_hap = _enum(CategoriaHotelApartamento, "categoria_hotel_apartamento", base_prog.categoria_hotel_apartamento)
+        # Default tolerante "edificios": JSON antiguos sin el campo no cambian de resultado.
+        grupo_apt = _enum(GrupoApartamentos, "grupo_apartamentos", base_prog.grupo_apartamentos)
+
+        # Los slugs válidos de la mezcla dependen del uso activo.
+        if uso == UsoEdificio.HOTELERO:
+            slugs_validos = {"individual", "doble", "triple", "cuadruple", "multiple"}
+        elif uso in (UsoEdificio.APARTAMENTOS_TURISTICOS, UsoEdificio.HOTEL_APARTAMENTO):
+            slugs_validos = {"estudio", "individual", "doble", "triple", "cuadruple"}
+        else:  # VIVIENDA
+            slugs_validos = {"estudio", "1d", "2d", "3d", "4d+"}
+        tip_extra_raw = node.get("tipologias_extra")
+        if tip_extra_raw is None:
+            tip_extra = list(base_prog.tipologias_extra)
+        else:
+            tip_extra = [str(s) for s in tip_extra_raw if isinstance(s, str) and s in slugs_validos]
+
+        return ParametrosPrograma(
+            uso=uso,
+            categoria_vivienda=cat,
+            categoria_hotelero=cat_hot,
+            tipologia_habitacion=tip_hab,
+            categoria_apartamentos=cat_apt,
+            tipologia_apartamento=tip_apt,
+            categoria_hotel_apartamento=cat_hap,
+            grupo_apartamentos=grupo_apt,
+            salon_cocina_open=_b(node, "salon_cocina_open", base_prog.salon_cocina_open),
+            tipologias_extra=tip_extra,
+            pct_local_pb=max(0.0, min(100.0, _f(node, "pct_local_pb", base_prog.pct_local_pb))),
+            pct_unidades_adaptadas=_f(node, "pct_unidades_adaptadas", base_prog.pct_unidades_adaptadas),
+        )
 
     urb_in = d.get("urbanisticos") or {}
 
@@ -367,95 +479,43 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         sotano_computa_edificabilidad=_b(urb_in, "sotano_computa_edificabilidad", base.urbanisticos.sotano_computa_edificabilidad),
     )
 
-    dis_in = d.get("diseno") or {}
-    pct_muros = max(0.0, min(80.0, _f(dis_in, "pct_muros", base.diseno.pct_muros)))
-    # Compat con JSON antiguo: `pct_circulacion` único → se usa como tipo y PB.
-    pct_circ_legacy = _f(dis_in, "pct_circulacion", base.diseno.pct_circulacion_tipo)
-    pct_circulacion_pb = max(0.0, min(50.0,
-        _f(dis_in, "pct_circulacion_pb", pct_circ_legacy)))
-    pct_circulacion_tipo = max(0.0, min(50.0,
-        _f(dis_in, "pct_circulacion_tipo", pct_circ_legacy)))
-    pct_nucleo = max(0.0, min(30.0, _f(dis_in, "pct_nucleo", base.diseno.pct_nucleo)))
-    diseno = ParametrosDiseno(
-        espesor_muro_fachada_m=_f(dis_in, "espesor_muro_fachada_m", base.diseno.espesor_muro_fachada_m),
-        espesor_muro_medianero_m=_f(dis_in, "espesor_muro_medianero_m", base.diseno.espesor_muro_medianero_m),
-        espesor_separacion_unidades_m=_f(dis_in, "espesor_separacion_unidades_m", base.diseno.espesor_separacion_unidades_m),
-        espesor_tabique_m=_f(dis_in, "espesor_tabique_m", base.diseno.espesor_tabique_m),
-        ancho_min_pasillo_comun_m=_f(dis_in, "ancho_min_pasillo_comun_m", base.diseno.ancho_min_pasillo_comun_m),
-        ancho_min_pasillo_vivienda_m=_f(dis_in, "ancho_min_pasillo_vivienda_m", base.diseno.ancho_min_pasillo_vivienda_m),
-        diametro_min_vestibulo_m=_f(dis_in, "diametro_min_vestibulo_m", base.diseno.diametro_min_vestibulo_m),
-        ancho_min_puerta_m=_f(dis_in, "ancho_min_puerta_m", base.diseno.ancho_min_puerta_m),
-        pct_muros=pct_muros,
-        pct_circulacion_pb=pct_circulacion_pb,
-        pct_circulacion_tipo=pct_circulacion_tipo,
-        pct_nucleo=pct_nucleo,
-    )
+    # Diseño por categoría de planta. Cadena de herencia: tipo←pb, atico←tipo,
+    # sotano←pb. Un JSON legado sin estos bloques deja todas las categorías = PB.
+    diseno = _parse_diseno(d.get("diseno"), base.diseno)
+    diseno_tipo = _parse_diseno(d.get("diseno_tipo"), diseno)
+    diseno_atico = _parse_diseno(d.get("diseno_atico"), diseno_tipo)
+    diseno_sotano = _parse_diseno(d.get("diseno_sotano"), diseno)
 
-    prog_in = d.get("programa") or {}
-    try:
-        uso = UsoEdificio(prog_in.get("uso", base.programa.uso.value))
-    except (ValueError, TypeError):
-        uso = base.programa.uso
-    try:
-        cat = CategoriaVivienda(prog_in.get("categoria_vivienda", base.programa.categoria_vivienda.value))
-    except (ValueError, TypeError):
-        cat = base.programa.categoria_vivienda
+    programa = _parse_programa(d.get("programa"), base.programa)
 
-    try:
-        cat_apt = CategoriaApartamentos(prog_in.get("categoria_apartamentos", base.programa.categoria_apartamentos.value))
-    except (ValueError, TypeError):
-        cat_apt = base.programa.categoria_apartamentos
-    try:
-        tip_apt = TipologiaApartamento(prog_in.get("tipologia_apartamento", base.programa.tipologia_apartamento.value))
-    except (ValueError, TypeError):
-        tip_apt = base.programa.tipologia_apartamento
-
-    try:
-        cat_hot = CategoriaHotelero(prog_in.get("categoria_hotelero", base.programa.categoria_hotelero.value))
-    except (ValueError, TypeError):
-        cat_hot = base.programa.categoria_hotelero
-    try:
-        tip_hab = TipologiaHabitacion(prog_in.get("tipologia_habitacion", base.programa.tipologia_habitacion.value))
-    except (ValueError, TypeError):
-        tip_hab = base.programa.tipologia_habitacion
-    try:
-        cat_hap = CategoriaHotelApartamento(prog_in.get("categoria_hotel_apartamento", base.programa.categoria_hotel_apartamento.value))
-    except (ValueError, TypeError):
-        cat_hap = base.programa.categoria_hotel_apartamento
-    try:
-        # Default tolerante "edificios": JSON antiguos sin el campo no cambian de resultado.
-        grupo_apt = GrupoApartamentos(prog_in.get("grupo_apartamentos", base.programa.grupo_apartamentos.value))
-    except (ValueError, TypeError):
-        grupo_apt = base.programa.grupo_apartamentos
-
-    # Los slugs válidos de la mezcla dependen del uso activo.
-    if uso == UsoEdificio.HOTELERO:
-        slugs_validos = {"individual", "doble", "triple", "cuadruple", "multiple"}
-    elif uso in (UsoEdificio.APARTAMENTOS_TURISTICOS, UsoEdificio.HOTEL_APARTAMENTO):
-        slugs_validos = {"estudio", "individual", "doble", "triple", "cuadruple"}
-    else:  # VIVIENDA
-        slugs_validos = {"estudio", "1d", "2d", "3d", "4d+"}
-    tip_extra_raw = prog_in.get("tipologias_extra") or []
-    tip_extra = [str(s) for s in tip_extra_raw if isinstance(s, str) and s in slugs_validos]
-
-    programa = ParametrosPrograma(
-        uso=uso,
-        categoria_vivienda=cat,
-        categoria_hotelero=cat_hot,
-        tipologia_habitacion=tip_hab,
-        categoria_apartamentos=cat_apt,
-        tipologia_apartamento=tip_apt,
-        categoria_hotel_apartamento=cat_hap,
-        grupo_apartamentos=grupo_apt,
-        salon_cocina_open=_b(prog_in, "salon_cocina_open", base.programa.salon_cocina_open),
-        tipologias_extra=tip_extra,
-        pct_local_pb=max(0.0, min(100.0, _f(prog_in, "pct_local_pb", base.programa.pct_local_pb))),
-        pct_unidades_adaptadas=_f(prog_in, "pct_unidades_adaptadas", base.programa.pct_unidades_adaptadas),
+    # `programa_tipo`: el uso y la categoría de edificio son globales (de PB);
+    # solo se toma del bloque la TIPOLOGÍA (lo que el usuario edita por planta).
+    prog_tipo_node = d.get("programa_tipo") or {}
+    programa_tipo = _parse_programa(
+        {
+            "uso": programa.uso.value,
+            "categoria_apartamentos": programa.categoria_apartamentos.value,
+            "grupo_apartamentos": programa.grupo_apartamentos.value,
+            "categoria_hotel_apartamento": programa.categoria_hotel_apartamento.value,
+            "categoria_hotelero": programa.categoria_hotelero.value,
+            "salon_cocina_open": programa.salon_cocina_open,
+            "pct_local_pb": programa.pct_local_pb,
+            "pct_unidades_adaptadas": programa.pct_unidades_adaptadas,
+            "categoria_vivienda": prog_tipo_node.get("categoria_vivienda", programa.categoria_vivienda.value),
+            "tipologia_apartamento": prog_tipo_node.get("tipologia_apartamento", programa.tipologia_apartamento.value),
+            "tipologia_habitacion": prog_tipo_node.get("tipologia_habitacion", programa.tipologia_habitacion.value),
+            "tipologias_extra": prog_tipo_node.get("tipologias_extra", list(programa.tipologias_extra)),
+        },
+        programa,
     )
 
     return ParametrosRender(
         urbanisticos=urb,
         diseno=diseno,
         programa=programa,
+        diseno_tipo=diseno_tipo,
+        diseno_atico=diseno_atico,
+        diseno_sotano=diseno_sotano,
+        programa_tipo=programa_tipo,
         seed=_i(d, "seed", base.seed),
     )

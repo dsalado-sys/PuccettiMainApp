@@ -26,7 +26,7 @@ from .dominio import (
     ResumenEnvolvente,
     UsoEdificio,
 )
-from .geometria.capacidad import calcular_capacidad, capacidad_a_dict
+from .geometria.capacidad import DisenoPlanta, calcular_capacidad, capacidad_a_dict
 from .geometria.envolvente import construir_envolvente
 from .geometria.parcelas import LadoParcela, azimut_normal_exterior, orientacion_cardinal
 from .geometria.serializacion import (
@@ -65,6 +65,28 @@ def _lado_a_utm(p1: tuple[float, float], p2: tuple[float, float]) -> tuple[tuple
     a = _WGS84_A_UTM.transform(p1[0], p1[1])
     b = _WGS84_A_UTM.transform(p2[0], p2[1])
     return a, b
+
+
+def _disenos_por_categoria(params: ParametrosRender) -> dict[str, DisenoPlanta]:
+    """% muros/circulación/núcleo por categoría de planta (pb/tipo/atico/sotano).
+
+    PB lee `pct_circulacion_pb`; el resto de categorías `pct_circulacion_tipo` de su
+    propio bucket. Permite que PB sea independiente de las plantas tipo y que ático y
+    sótano tengan su propio % muros y % circulación.
+    """
+    def dp(diseno, circ_field: str) -> DisenoPlanta:
+        return DisenoPlanta(
+            max(0.0, min(80.0, float(diseno.pct_muros))),
+            max(0.0, min(50.0, float(getattr(diseno, circ_field)))),
+            max(0.0, min(30.0, float(diseno.pct_nucleo))),
+        )
+
+    return {
+        "pb": dp(params.diseno, "pct_circulacion_pb"),
+        "tipo": dp(params.diseno_tipo, "pct_circulacion_tipo"),
+        "atico": dp(params.diseno_atico, "pct_circulacion_tipo"),
+        "sotano": dp(params.diseno_sotano, "pct_circulacion_tipo"),
+    }
 
 
 # ─── Construcción de la parcela métrica desde el proyecto ───────────────────
@@ -158,6 +180,7 @@ class CalcularEnvolvente:
         params: ParametrosRender,
     ) -> dict[str, Any]:
         params_motor = params.a_parametros_motor()
+        params_motor_tipo = params.a_parametros_motor_tipo()
         try:
             envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
         except ValueError as exc:
@@ -168,7 +191,14 @@ class CalcularEnvolvente:
                 "indicadores": None,
             }
 
-        cap = calcular_capacidad(envolvente, params_motor)
+        # Diferenciación por planta también en el preview (KPI nº viviendas): en
+        # preview no se construyen descriptores, así que la mezcla por planta usa la
+        # vía int-based de vivienda (igual que antes), pero con % y tipología por planta.
+        cap = calcular_capacidad(
+            envolvente, params_motor,
+            params_tipo=params_motor_tipo,
+            disenos=_disenos_por_categoria(params),
+        )
 
         indicadores = _indicadores_disenho(parcela, envolvente.plantas)
         alertas = _alertas_envolvente(envolvente, parcela, params)
@@ -271,6 +301,7 @@ class CalcularLayout:
         params: ParametrosRender,
     ) -> dict[str, Any]:
         params_motor = params.a_parametros_motor()
+        params_motor_tipo = params.a_parametros_motor_tipo()
         try:
             envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
         except ValueError as exc:
@@ -285,24 +316,32 @@ class CalcularLayout:
                 "envolvente": None,
             }
 
-        # 1) Resolver tamaño objetivo de la tipología principal desde BBDD.
+        # 1) Resolver tamaño objetivo de la tipología principal (PB y plantas tipo).
         util_objetivo = self._resolver_util_objetivo(params)
+        util_objetivo_tipo = self._resolver_util_objetivo(params, params.programa_tipo)
 
-        # 2) Descriptores de tipología del uso (principal + extras → mezcla).
+        # 2) Descriptores de tipología (principal + extras → mezcla), PB y tipo.
         descriptores = self._construir_descriptores_tipologia(params, util_objetivo)
+        descriptores_tipo = self._construir_descriptores_tipologia(
+            params, util_objetivo_tipo, params.programa_tipo
+        )
 
-        # 3) Construir programa_uso (aporta áreas comunes/sociales obligatorias).
+        # 3) Construir programa_uso (áreas comunes/sociales obligatorias — de edificio).
         programa_uso = self._construir_programa_uso(
             params, envolvente, params_motor, util_objetivo, descriptores
         )
         area_comunes = programa_uso.area_servicios_obligatorios_m2 if programa_uso else 0.0
 
-        # 4) Cálculo puro — la fuente de verdad del módulo.
+        # 4) Cálculo puro — diferenciando PB / plantas tipo / ático / sótano.
         cap = calcular_capacidad(
             envolvente, params_motor,
             util_objetivo_por_unidad=util_objetivo,
             area_servicios_comunes_m2=area_comunes,
             descriptores_tipologia=descriptores,
+            params_tipo=params_motor_tipo,
+            util_objetivo_por_unidad_tipo=util_objetivo_tipo,
+            descriptores_tipologia_tipo=descriptores_tipo,
+            disenos=_disenos_por_categoria(params),
         )
 
         # 4) Tablas sintéticas derivadas del cálculo (no de geometría).
@@ -340,18 +379,21 @@ class CalcularLayout:
         }
 
     # ─── Helpers privados de CalcularLayout ────────────────────────────────
-    def _resolver_util_objetivo(self, params: ParametrosRender) -> float | None:
+    def _resolver_util_objetivo(self, params: ParametrosRender, prog=None) -> float | None:
         """Lee el m² útil objetivo por unidad desde la BBDD del Anexo I.
 
         Vivienda: `anexo_i_vivienda.max_m2_util` para `n_dormitorios`.
         Apartamentos: `anexo_i_apartamentos.max_m2_util` × 1.15.
+
+        `prog` permite resolver el objetivo de las plantas tipo (`programa_tipo`);
+        por defecto usa `params.programa` (planta baja).
 
         Si la consulta falla o la fila no existe → None y `calcular_capacidad`
         cae en el hardcoded `util_maximo(n_dorms)` o `util_objetivo_apartamento`.
         """
         from .dominio import CATEGORIA_A_NUM_DORMS
 
-        prog = params.programa
+        prog = prog if prog is not None else params.programa
         if prog.uso == UsoEdificio.VIVIENDA:
             if self.catalogo_vivienda is None:
                 return None
@@ -394,14 +436,16 @@ class CalcularLayout:
         return None
 
     # ─── Descriptores de tipología (mezcla multi-tipología por uso) ─────────
-    def _construir_descriptores_tipologia(self, params: ParametrosRender, util_objetivo):
+    def _construir_descriptores_tipologia(self, params: ParametrosRender, util_objetivo, prog=None):
         """Lista de `TipologiaUnidadDescriptor` del uso activo (principal + extras).
 
         La categoría del proyecto es fija; varía la tipología (igual que en
-        vivienda solo varía el nº de dormitorios). Devuelve `None` para vivienda
-        (que sigue la vía int-based del motor) y para usos no soportados.
+        vivienda solo varía el nº de dormitorios). `prog` permite construir la lista
+        de las plantas tipo (`programa_tipo`); por defecto usa `params.programa`.
+        Devuelve `None` para vivienda (que sigue la vía int-based del motor) y para
+        usos no soportados.
         """
-        prog = params.programa
+        prog = prog if prog is not None else params.programa
         uso = prog.uso
         if uso == UsoEdificio.VIVIENDA:
             return None
@@ -431,15 +475,15 @@ class CalcularLayout:
             d = constructor(slug)
             # El útil objetivo de la principal proviene de BBDD (si está); las
             # extras usan la constante del Anexo (mismo valor salvo edición).
-            uo_bbdd = util_objetivo if idx == 0 else self._util_objetivo_bbdd(params, slug)
+            uo_bbdd = util_objetivo if idx == 0 else self._util_objetivo_bbdd(params, slug, prog)
             if uo_bbdd is not None and uo_bbdd > 0:
                 d = replace(d, util_objetivo=uo_bbdd, util_maximo=round(uo_bbdd * 1.25, 2))
             descriptores.append(d)
         return descriptores or None
 
-    def _util_objetivo_bbdd(self, params: ParametrosRender, slug: str):
+    def _util_objetivo_bbdd(self, params: ParametrosRender, slug: str, prog=None):
         """Útil objetivo de una tipología desde BBDD (None si no hay catálogo/fila)."""
-        prog = params.programa
+        prog = prog if prog is not None else params.programa
         try:
             if prog.uso == UsoEdificio.APARTAMENTOS_TURISTICOS and self.catalogo_apartamentos:
                 return self.catalogo_apartamentos.util_objetivo_apartamento(
