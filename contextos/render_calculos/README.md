@@ -1,8 +1,9 @@
 # Módulo Render y cálculos (§2.4 – §2.7)
 
 Genera la envolvente edificable de una parcela, calcula la capacidad
-(número y tamaño de viviendas por planta), valida cumplimiento normativo
-y serializa el resultado para el frontend del módulo.
+(número y tamaño de unidades por planta para los 4 usos soportados),
+valida cumplimiento normativo y serializa el resultado para el frontend
+del módulo.
 
 Está integrado en `app/` (main app) siguiendo arquitectura hexagonal +
 screaming. La lógica de geometría/cálculo vive en `geometria/` aislada
@@ -70,7 +71,8 @@ EdificioPlurifamiliar
    └── parcela, lados, edificabilidad_*
         │
         ▼
-calcular_capacidad(envolvente, params)     capacidad.py
+calcular_capacidad(envolvente, params,     capacidad.py
+                   descriptores_tipologia)
    └── Para cada planta:
         ├── PB:        circ_pb + patio + local
         ├── Planta tipo: circ_tipo + patio
@@ -81,7 +83,8 @@ calcular_capacidad(envolvente, params)     capacidad.py
 Capacidad
    ├── viv_por_planta, util_por_planta
    ├── muros / circulación / núcleo / patio / local por planta
-   ├── unidades_por_planta: list[(n_dorms, util_m2)]
+   ├── unidades_por_planta: list[(n_dorms_label, util_m2)]
+   ├── tipologias_unidad_por_planta: list[list[slug]]   ← slug por unidad real
    └── viviendas_por_tipologia: list[dict]
         │
         ▼
@@ -94,66 +97,113 @@ JSON al frontend
 
 ---
 
-## 3. Modelo diferenciado por planta
+## 3. Modelo diferenciado por planta (PB independiente, iter. 6)
 
-`calcular_capacidad` (capacidad.py) recorre cada `Planta` y aplica un
-modelo distinto según su tipo:
+`calcular_capacidad` (capacidad.py) recorre cada `Planta` y aplica el
+**bucket de diseño y tipología de su categoría**. `ParametrosRender` lleva
+cuatro buckets de diseño (`diseno`=PB, `diseno_tipo`, `diseno_atico`,
+`diseno_sotano`) y dos de programa (`programa`=PB, `programa_tipo`). Cada
+categoría toma su `DisenoPlanta` (`% muros / % circulación / % núcleo`) del
+dict `disenos` que arma [`casos_uso._disenos_por_categoria`](casos_uso.py), y
+su perfil de tipología (PB vs plantas tipo) de `params` / `params_tipo`.
 
-| Tipo planta | Circulación común | Patio | Local | Comportamiento |
-|------------|-------------------|-------|-------|----------------|
-| **PB** (primera regular) | `pct_circulacion_pb` (8 %) | Sí | `pct_local_pb` (0–100 %) | Resto disponible para viviendas |
-| **Planta tipo** | `pct_circulacion_tipo` (8 %) | Sí (mismo área, no editable) | No | Multi-tipología si procede |
-| **Ático** | `pct_circulacion_tipo` | No | No | `computa_edif` opcional |
-| **Sótano** | 0 % | 0 | 0 | `viv = 0` forzado |
+| Categoría | Bucket diseño | Tipología | Patio | Local | Comportamiento |
+|-----------|---------------|-----------|-------|-------|----------------|
+| **PB** (primera regular) | `diseno` (`pct_circulacion_pb`) | `programa` | Sí | `pct_local_pb` (0–100 %) | Resto disponible para unidades |
+| **Planta tipo** | `diseno_tipo` (`pct_circulacion_tipo`) | `programa_tipo` | Sí | No | Multi-tipología si procede |
+| **Ático** | `diseno_atico` | `programa_tipo` (como tipo) | No | No | `% muros` y `% circulación` propios; `computa_edif` opcional |
+| **Sótano** | `diseno_sotano` | — | 0 | 0 | `% muros` y `% circulación` propios; `viv = 0` |
 
-Todos descuentan también: `muros = pct_muros × construida` y
-`núcleo = pct_nucleo × construida`.
+Cada categoría descuenta `muros = pct_muros × construida`,
+`circ = pct_circulacion × construida` y `núcleo = pct_nucleo × construida`
+con los `pct_*` de **su** bucket (antes de iter. 6, muros/núcleo eran únicos
+para todo el edificio y el sótano forzaba circulación 0).
+
+**Herencia por defecto** de los buckets (parser tolerante): `diseno_tipo`←
+`diseno`, `diseno_atico`←`diseno_tipo`, `diseno_sotano`←`diseno`,
+`programa_tipo`←`programa` (salvo la tipología). Un proyecto sin estos bloques
+replica PB en todas las plantas → resultado idéntico al histórico hasta que el
+usuario edita una planta tipo/ático/sótano.
 
 ---
 
-## 4. Reparto multi-tipología (todos los usos)
+## 4. Reparto multi-tipología (use-agnóstico)
 
 Cuando el usuario elige tipologías extra (selector dinámico `+` / `−`),
-`calcular_capacidad` reparte la planta entre varias tipologías. El reparto es
-**use-agnóstico**: vive en
-[`reparto_multi_tipologia_generico`](geometria/programa_uso.py) y opera sobre
-`TipologiaUnidadDescriptor` (slug, útil objetivo/mínimo/máximo, plazas), así que
-sirve igual para vivienda, apartamentos, hotel-apartamento y hotelero. Cada
-unidad guarda su **propia tipología** (`Capacidad.tipologias_unidad_por_planta`),
-de modo que la tabla por unidad regenera las estancias correctas de cada una en
-la mezcla. `casos_uso._construir_descriptores_tipologia` arma la lista del uso
-activo (tipología principal + extras, con categoría fija del proyecto).
-`reparto_multi_tipologia` (vivienda, int-based) se conserva como envoltura del
-genérico para el preview rápido.
+`calcular_capacidad` reparte la planta entre varias tipologías. El
+reparto NO sabe si la unidad es vivienda, apartamento, habitación de
+hotel o hotel-apartamento: opera sobre `TipologiaUnidadDescriptor`.
+
+```python
+# programa_uso.py
+@dataclass(frozen=True)
+class TipologiaUnidadDescriptor:
+    slug: str                   # "1d" | "estudio" | "doble" | "individual" …
+    util_objetivo: float
+    util_minimo: float
+    util_maximo: float
+    n_dorms_label: int          # etiqueta numérica para `unidades_por_planta`
+    tipo_unidad: str = "vivienda"
+    plazas: int = 1
+```
+
+[`casos_uso._construir_descriptores_tipologia`](casos_uso.py) arma la
+lista del uso activo (tipología principal + extras + categoría del
+proyecto) y la pasa a `calcular_capacidad`.
+[`reparto_multi_tipologia_generico`](geometria/programa_uso.py) hace el
+reparto sobre esa lista.
 
 **Política**:
 
-1. Sortear las tipologías por `util_maximo` ascendente (la más pequeña
-   primero).
-2. Asignar 1 unidad de cada tipología si cabe en el útil restante.
-3. Rellenar el sobrante con la tipología más pequeña hasta agotar.
+1. Ordenar tipologías por `util_maximo` ascendente (la más pequeña primero).
+2. Asignar 1 unidad de cada tipología si cabe en el útil restante
+   (consume `min(util_maximo, restante)`).
+3. Rellenar el sobrante con la tipología más pequeña mientras quepa su
+   `util_minimo`.
 
-Devuelve `list[(n_dorms, util_asignado_m2)]` — una entrada por unidad
-real. El `util_asignado` se acota por `util_maximo(n_dorms)` (no excede
-el techo VPO). El residual no asignable queda como espacio libre no
-contabilizado.
+**Resultado**: una entrada por unidad real con `(descriptor, util_asignado_m2)`.
+El residual no asignable queda como espacio libre.
 
-Ejemplo con `util_disponible = 158 m²`, tipologías = `[2d, 1d]`:
+Ejemplo vivienda con `util_disponible = 158 m²`, tipologías = `[2d, 1d]`:
 
 ```
 1d primero: consume min(60, 158)  = 60 → restante 98
 2d:         consume min(70, 98)   = 70 → restante 28
 2d paso: 28 < util_min(1d) = 41.4 → no añade más
-Resultado: [(1, 60), (2, 70)] — 2 unidades, residual 28 m²
+Resultado: [(1d, 60), (2d, 70)] — 2 unidades, residual 28 m²
 ```
 
-`Capacidad.unidades_por_planta` guarda este detalle por planta, y
-`tabla_unidad_desde_capacidad` genera una fila por unidad real (no
-promedia el util/viviendas).
+`Capacidad` guarda dos listas paralelas:
+- `unidades_por_planta: list[list[(n_dorms_label, util_m2)]]` — formato
+  numérico compatible con código legacy.
+- `tipologias_unidad_por_planta: list[list[str]]` — slug por unidad
+  real (clave para que `tabla_unidad_desde_capacidad` regenere las
+  estancias correctas en una planta mezclada).
+
+`reparto_multi_tipologia` (vivienda, int-based) se conserva en
+[`programa.py`](geometria/programa.py) como envoltura del genérico para
+el preview rápido.
 
 ---
 
-## 5. Política de escalado de estancias (última adición)
+## 5. Usos soportados y sus Anexos
+
+| Uso | Anexo | Driver de tipología | Construcción `ProgramaUso` |
+|-----|-------|---------------------|---------------------------|
+| Vivienda | I.5 — VPO Junta Andalucía | nº de dormitorios (0..4) | `programa.programa_uso_vivienda(n_dorms, salon_open)` |
+| Apartamentos turísticos | I.3 (edificios) / I.4 (conjuntos) — Decreto 194/2010 | categoría 1L–4L × tipología estudio/1d/2d/3d | `programa_apartamentos.programa_uso_apartamento(cat, tip)` |
+| Hotel-Apartamento | I.2 — categorías por estrellas 1E–5E | estudio / individual / doble / triple / cuádruple | `programa_hotel_apartamento.programa_uso_hap(cat, tip)` |
+| Hotelero | I.1 — Hotel 1–5★, Hostal 1–2★, Pensión, Albergue | individual / doble / triple / cuádruple / múltiple (sólo albergue) | `programa_hotelero.programa_uso_hotelero(cat, tip)` |
+
+Para los usos NO-vivienda, cada uso descuenta del techo de planta las
+**áreas comunes obligatorias** (recepción, áreas sociales, segundo
+baño) según su Anexo. En vivienda, no hay áreas comunes obligatorias
+(la "circulación común" del edificio ya está modelada como
+`pct_circulacion_pb/tipo`).
+
+---
+
+## 6. Política de escalado de estancias (vivienda)
 
 [`programa_vivienda(n_dorms, util_disponible)`](geometria/programa.py)
 distribuye el útil de la vivienda entre estancias de forma que **la suma
@@ -188,21 +238,28 @@ sin asignar). La política nueva resuelve este desajuste.
 excluyendo servicios comunes).
 
 ```
-espacio_principal = 18 m²  (mínimo VPO 14)
-bano              =  4 m²  (mínimo VPO 3)
-circulacion_interior = 3 m²
+espacio_principal    = 18 m²  (mínimo VPO 14)
+bano                 =  4 m²  (mínimo VPO 3)
+circulacion_interior =  3 m²
 TOTAL = 25 m² (util_maximo VPO)
 ```
 
 `util_minimo_vivienda(0)` = `max(25, sum_min × 1.15)` — garantiza ≥ 25
 en cualquier caso.
 
+> Los programas de los otros 3 usos (apartamentos, hotel-apartamento,
+> hotelero) producen estancias derivadas de sus mínimos legales + áreas
+> comunes — no aplican la política de escalado por % de circulación
+> interior (las habitaciones de hotel no tienen pasillos internos
+> propios).
+
 ---
 
-## 6. Persistencia de la política en BBDD
+## 7. Persistencia de la política en BBDD
 
-Toda la política (mínimos VPO, targets y porcentajes) vive en BBDD para
-no estar hardcodeada en código.
+Cada Anexo se siembra en su propia tabla. Sólo `anexo_i_vivienda` y
+`parametros_motor_vivienda` modelan la política de escalado; el resto
+son tablas planas con mínimos por (categoría, tipología, estancia).
 
 ### `anexo_i_vivienda` (Anexo I.5 + targets)
 
@@ -223,14 +280,24 @@ no estar hardcodeada en código.
 | `pct_circulacion_interior_pct` | FLOAT | 15.0 |
 | `umbral_minimo_estudio_m2` | FLOAT | 25.0 |
 
+### Tablas paralelas para los demás Anexos
+
+- `anexo_i_apartamentos` (PK: `categoria, tipologia, estancia`) — Anexo I.3.
+- `anexo_i_apartamentos_conjuntos` (PK: `categoria, tipologia, estancia`)
+  — Anexo I.4; solo categorías 1L y 2L.
+- `anexo_i_hotel_apartamento` (PK: `estrellas, tipologia, estancia`)
+  — Anexo I.2.
+- `anexo_i_hotelero` (PK: `categoria, tipologia, estancia`)
+  — Anexo I.1; modelo "habitación" (sin cocina por unidad).
+
 ### Carga en arranque
 
 [`aplicacion.py`](../../entrypoints/web/aplicacion.py) llama a
-[`programa.cargar_desde_repo(catalogo)`](geometria/programa.py)
-después de `init_db()`. El catálogo expone `consolidadas_vivienda()`
-que devuelve un dict con todos los valores: la función rellena las
-constantes module-level (`MIN_DORM_DOBLE`, `UTIL_MAX`,
-`AREA_TARGET_VIVIENDA`, `PCT_CIRCULACION_INTERIOR_VIVIENDA`, …).
+`programa.cargar_desde_repo(catalogo)` (y a las funciones análogas de
+los otros programas) después de `init_db()`. Cada catálogo expone un
+método tipo `consolidadas_*()` que devuelve un dict con todos los
+valores; las funciones rellenan las constantes module-level del
+programa correspondiente.
 
 ### Migración SQLite
 
@@ -241,7 +308,7 @@ filas no editadas por el usuario se resincronizan en cada seed.
 
 ---
 
-## 7. Tabla "por unidad" vs tabla "por planta"
+## 8. Tabla "por unidad" vs tabla "por planta"
 
 | Concepto | Tabla por planta | Tabla por unidad |
 |----------|------------------|-------------------|
@@ -252,15 +319,21 @@ filas no editadas por el usuario se resincronizan en cada seed.
 | Local PB | Sí (m² destinados) | Fila "Local" sin estancias |
 | Útil | Suma del útil consumido | Útil real por unidad |
 | Construida | `Σ construida_planta` | `util + muros` |
-| Circulación interior (15 % del util) | Implícita en "Útil" | Estancia del detalle |
+| Circulación interior (15 % del util) | Implícita en "Útil" | Estancia del detalle (sólo vivienda) |
+| Tipología por unidad | Mix agregado (`viviendas_por_tipologia`) | Slug real (`tipologias_unidad_por_planta`) |
 
 **Decisión de junio 2026**: la circulación común y el núcleo son
 del edificio. No se imputan a la unidad. Sólo los muros perimetrales
-sí se prorratean (proporcionales al útil de cada vivienda).
+sí se prorratean (proporcionales al útil de cada unidad).
+
+`tabla_unidad_desde_capacidad` itera `cap.tipologias_unidad_por_planta[i]`
+y regenera las estancias específicas de cada slug llamando al
+`programa_*` del uso activo (vivienda → `programa_vivienda`, apartamento
+→ `programa_apartamentos`, etc.).
 
 ---
 
-## 8. Validador de círculo inscrito en estancias
+## 9. Validador de círculo inscrito en estancias
 
 [`_cabe_diametro(nombre, area)`](geometria/serializacion.py) verifica
 que un círculo del diámetro mínimo del tipo de estancia (CTE DB-SUA + Anexo I)
@@ -276,7 +349,7 @@ estancia que no cumple, dentro del modal de detalle.
 
 ---
 
-## 9. Avisos / cumplimiento
+## 10. Avisos / cumplimiento
 
 [`ValidarCumplimiento`](casos_uso.py) compara los valores del proyecto
 contra la normativa archivada activa. Tipos de comparación:
@@ -297,34 +370,48 @@ sobre `NormativaMunicipal` archivada en BBDD.
 
 ---
 
-## 10. Frontend
+## 11. Frontend
 
 - **Canvas 2D**: dibuja parcela, plantas, núcleo, patios, lados con
   orientación cardinal (normal exterior, no azimut del segmento).
-- **Pestañas de planta**: PB / P1 / P2 / Ático / S1. Parámetros
-  específicos (`pct_circulacion_pb`, `pct_local_pb` solo en PB;
-  `pct_circulacion_tipo` solo en planta tipo) se ocultan/muestran con
-  `data-visible-en-planta`.
-- **Tipologías**: selector dinámico con botón `+ Tipología` y `−` por
-  fila. Persiste `tipologias_extra` como lista de slugs.
+- **Pestañas de planta**: PB / P1 / P2 / Ático / S1. PB es independiente: en
+  ella se edita todo (urbanismo, opciones de sótano/ático, uso, % local PB,
+  tipología y ambas secciones de Diseño). En las plantas tipo solo se edita el
+  **tipo de unidad** y **Diseño · muros** + **Diseño · circulación y
+  accesibilidad**; ático y sótano solo su **% muros** y **% circulación**. La
+  visibilidad combina `data-cuando-uso` × `data-visible-en-planta`
+  (`pb|tipo|atico|sotano`) en `aplicarVisibilidad`; cada campo editable por
+  planta se enruta con `data-bloque` (`diseno`/`diseno_tipo`/`diseno_atico`/
+  `diseno_sotano` · `programa`/`programa_tipo`) y `leerFormulario` los envía
+  todos (estén o no ocultos por planta, salvo los de otro uso).
+- **Tipologías**: selector dinámico con botón `+ Tipología` y `−` por fila,
+  **por planta** (PB → `programa.tipologias_extra`; plantas tipo →
+  `programa_tipo.tipologias_extra`). La categoría de edificio (estrellas /
+  llaves) es global, se fija en PB.
 - **Tabla por planta**: columnas Plantas / Viv / Construida / Útil /
   Muros / Muros est. / Circul. / Núcleo / Patio / Local. Tooltip
-  muestra mix tipología.
-- **Tabla por unidad**: una fila por vivienda con su tipología (1d/2d/…)
-  y `util` real; fila "Local" cuando aplica (sin estancias). Click en
-  fila → modal con detalle de estancias.
+  muestra mix de tipologías.
+- **Tabla por unidad**: una fila por unidad con su tipología real
+  (slug del descriptor) y `util` real; fila "Local" cuando aplica (sin
+  estancias). Click en fila → modal con detalle de estancias.
 - **Cache-busting**: `?v=ESTATICOS_VERSION` en CSS/JS. Subir versión
   manualmente al tocar estáticos.
 
 ---
 
-## 11. Punto de extensión: editar la política desde la UI
+## 12. Punto de extensión: editar la política desde la UI
 
 `anexo_i_vivienda.editable_por_usuario` protege filas modificadas por
 el usuario contra el reseed automático. La columna `area_target_m2` y
 la tabla `parametros_motor_vivienda` están preparadas para futuras
 pantallas de edición (panel de administración del Anexo I).
 
-`programa.cargar_desde_repo()` se invoca al arrancar; si más adelante
-se necesita recargar en caliente tras edición, basta llamarla de nuevo
+Las tablas `anexo_i_apartamentos*`, `anexo_i_hotel_apartamento` y
+`anexo_i_hotelero` siguen el mismo patrón (flag `editable_por_usuario`)
+y el módulo de Normativa Municipal ya tiene CRUD para los parámetros
+urbanísticos. Falta exponer las tablas de superficies mínimas en una
+pantalla específica.
+
+`cargar_desde_repo()` se invoca al arrancar; si más adelante se
+necesita recargar en caliente tras edición, basta llamarla de nuevo
 con la sesión vigente.

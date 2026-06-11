@@ -46,16 +46,26 @@
     debounceId: null,
   };
 
+  function usoActivoForm() {
+    const sel = form.querySelector('select[name="uso"]');
+    return sel ? sel.value : "vivienda";
+  }
+
   // ─── Lectura del formulario → payload backend ─────────────────────────
   function leerFormulario() {
-    const fd = new FormData(form);
-    const bloques = { urbanisticos: {}, diseno: {}, programa: {} };
+    const bloques = {
+      urbanisticos: {}, diseno: {}, programa: {},
+      diseno_tipo: {}, diseno_atico: {}, diseno_sotano: {}, programa_tipo: {},
+    };
+    const usoActivo = usoActivoForm();
     const inputs = form.querySelectorAll("[data-bloque]");
     inputs.forEach(inp => {
-      // Los bloques de otro uso están ocultos → no deben entrar al payload
-      // (cada uso tiene su categoría/tipología y su propia lista de extras).
+      // Los bloques de otro USO no entran al payload (cada uso tiene su categoría
+      // y su lista de extras). En cambio, los campos ocultos por PLANTA SÍ se leen:
+      // cada categoría de planta (pb/tipo/atico/sotano) tiene su propio valor que
+      // debe persistir aunque la pestaña activa no lo muestre.
       const bloqueUso = inp.closest("[data-cuando-uso]");
-      if (bloqueUso && bloqueUso.hidden) return;
+      if (bloqueUso && !bloqueUso.dataset.cuandoUso.split(/\s+/).includes(usoActivo)) return;
       const bloque = inp.dataset.bloque;
       const nombre = inp.name;
       if (!bloque || !nombre) return;
@@ -85,6 +95,7 @@
     // Aseguramos que los arrays existan aunque ninguna casilla esté marcada
     if (!bloques.urbanisticos.usos_permitidos) bloques.urbanisticos.usos_permitidos = [];
     if (!bloques.programa.tipologias_extra) bloques.programa.tipologias_extra = [];
+    if (!bloques.programa_tipo.tipologias_extra) bloques.programa_tipo.tipologias_extra = [];
     return bloques;
   }
 
@@ -156,11 +167,11 @@
         ESTADO.plantaActiva = i;
         dibujarTabsPlantas(payload);
         renderer.dibujar(payload, i);
-        aplicarVisibilidadPorPlanta(payload);
+        aplicarVisibilidad(payload);
       });
       tabsPlantasEl.appendChild(b);
     });
-    aplicarVisibilidadPorPlanta(payload);
+    aplicarVisibilidad(payload);
   }
 
   // ─── Tabla por planta (iter. 4 — desglose muros/circulación/núcleo) ────
@@ -705,13 +716,18 @@
     pedirPreview();
   }
 
-  // ─── Visibilidad de campos según uso (vivienda/apartamentos) ──────────
-  function aplicarVisibilidadPorUso() {
-    const sel = form.querySelector('select[name="uso"]');
-    const usoActivo = sel ? sel.value : "vivienda";
-    form.querySelectorAll("[data-cuando-uso]").forEach(el => {
-      const usos = el.dataset.cuandoUso.split(/\s+/);
-      el.hidden = !usos.includes(usoActivo);
+  // ─── Visibilidad combinada: uso × categoría de planta ─────────────────
+  // Un campo se ve solo si su `data-cuando-uso` (si lo tiene) incluye el uso activo
+  // Y su `data-visible-en-planta` (si lo tiene) incluye la categoría de planta activa.
+  function aplicarVisibilidad(payload) {
+    const usoActivo = usoActivoForm();
+    const cat = categoriaPlantaActiva(payload || ESTADO.fullPayload || ESTADO.previewPayload);
+    form.querySelectorAll("[data-cuando-uso], [data-visible-en-planta]").forEach(el => {
+      const usoOk = !el.dataset.cuandoUso
+        || el.dataset.cuandoUso.split(/\s+/).includes(usoActivo);
+      const plantaOk = !el.dataset.visibleEnPlanta
+        || el.dataset.visibleEnPlanta.split(/\s+/).includes(cat);
+      el.hidden = !(usoOk && plantaOk);
     });
   }
 
@@ -738,10 +754,12 @@
   // "Múltiple" solo existe en albergue (resto: individual/doble/triple/cuádruple).
   function _filtrarTipologiaHotelero() {
     const catSel = form.querySelector('select[name="categoria_hotelero"]');
-    const cont = document.getElementById("rc-tip-hotelero");
-    if (!catSel || !cont) return;
+    if (!catSel) return;
     const permite = catSel.value === "albergue";
-    cont.querySelectorAll("select").forEach(sel => _toggleOpcion(sel, "multiple", permite, "doble"));
+    // PB y plantas tipo tienen cada una su contenedor de tipología hotelera.
+    form.querySelectorAll('[data-opciones="hotelero"] select').forEach(
+      sel => _toggleOpcion(sel, "multiple", permite, "doble")
+    );
   }
 
   function actualizarOpcionesCondicionales() {
@@ -749,30 +767,23 @@
     _filtrarTipologiaHotelero();
   }
 
-  // ─── Visibilidad según planta activa (PB vs tipo vs sótano) ───────────
+  // ─── Categoría de la planta activa (pb / tipo / atico / sotano) ───────
   function categoriaPlantaActiva(payload) {
     const plantas = payload?.envolvente?.plantas
       || payload?.edificio?.plantas || [];
+    if (!plantas.length) return "pb";   // sin cálculo aún → se edita la PB
     const idx = Math.min(ESTADO.plantaActiva, plantas.length - 1);
-    if (!plantas.length || idx < 0) return "tipo";
+    if (idx < 0) return "pb";
     const pl = plantas[idx];
-    if (!pl) return "tipo";
+    if (!pl) return "pb";
     if (pl.tipo === "sotano") return "sotano";
-    if (pl.tipo === "atico") return "tipo";
+    if (pl.tipo === "atico") return "atico";
     // primera planta regular = PB
     let primeraRegular = -1;
     for (let i = 0; i < plantas.length; i++) {
       if (plantas[i].tipo === "regular") { primeraRegular = i; break; }
     }
     return idx === primeraRegular ? "pb" : "tipo";
-  }
-
-  function aplicarVisibilidadPorPlanta(payload) {
-    const cat = categoriaPlantaActiva(payload);
-    form.querySelectorAll("[data-visible-en-planta]").forEach(el => {
-      const dest = el.dataset.visibleEnPlanta.split(/\s+/);
-      el.hidden = !dest.includes(cat);
-    });
   }
 
   // ─── Selector dinámico de tipologías extra (por uso) ──────────────────
@@ -793,10 +804,12 @@
   function anadirTipologia(contenedor) {
     if (!contenedor) return;
     const opciones = contenedor.dataset.opciones || "vivienda";
+    // El contenedor de las plantas tipo enruta sus extras a `programa_tipo`.
+    const bloque = contenedor.dataset.bloque || "programa";
     const inicial = DEFAULT_TIPOLOGIA[opciones] || Object.keys(OPCIONES_TIPOLOGIA[opciones])[0];
     const wrap = document.createElement("div");
     wrap.className = "rc-tipologia-extra";
-    wrap.innerHTML = `<select name="tipologias_extra" data-bloque="programa">${_opcionesTipologia(opciones, inicial)}</select>
+    wrap.innerHTML = `<select name="tipologias_extra" data-bloque="${bloque}">${_opcionesTipologia(opciones, inicial)}</select>
       <button type="button" class="rc-tip-quitar" aria-label="Eliminar tipología">−</button>`;
     contenedor.appendChild(wrap);
   }
@@ -820,7 +833,7 @@
 
   // ─── Bindings ─────────────────────────────────────────────────────────
   function calcularConDebounce() {
-    aplicarVisibilidadPorUso();
+    aplicarVisibilidad();
     actualizarOpcionesCondicionales();
     if (ESTADO.debounceId) clearTimeout(ESTADO.debounceId);
     ESTADO.debounceId = setTimeout(pedirPreview, 250);
@@ -841,7 +854,7 @@
     });
   }
 
-  aplicarVisibilidadPorUso();
+  aplicarVisibilidad();
   actualizarOpcionesCondicionales();
 
   // Toggle visual del input "coeficiente" según el checkbox "usar coef".
