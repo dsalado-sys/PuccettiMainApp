@@ -32,6 +32,14 @@
       this.padPx = 28;
       this.origenX = 0;
       this.origenY = 0;
+      this.rotationDeg = 0;
+      this._lastPayload = null;
+      this._lastIndicePlanta = 0;
+    }
+
+    setRotation(deg) {
+      this.rotationDeg = ((deg % 360) + 360) % 360;
+      if (this._lastPayload) this.dibujar(this._lastPayload, this._lastIndicePlanta);
     }
 
     _ajustarTamano() {
@@ -227,9 +235,19 @@
      * @param indicePlanta  Índice de la planta a dibujar (0 = PB)
      */
     dibujar(payload, indicePlanta) {
+      this._lastPayload = payload;
+      this._lastIndicePlanta = indicePlanta || 0;
       this._ajustarTamano();
       const ctx = this.ctx;
       ctx.clearRect(0, 0, this.cv.width, this.cv.height);
+
+      if (this.rotationDeg !== 0) {
+        const cx = this.wPx / 2;
+        const cy = this.hPx / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate(this.rotationDeg * Math.PI / 180);
+        ctx.translate(-cx, -cy);
+      }
 
       if (!payload) {
         ctx.fillStyle = COLOR.grisMedio;

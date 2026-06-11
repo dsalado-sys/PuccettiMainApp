@@ -374,6 +374,7 @@
     pintarTablaLados(parcela);
     pintarCardsSubref(parcela);
     pintarAgregados(parcela);
+    pintarDatosCatastrales(parcela);
     actualizarToggleCards();
 
     bloquearSlider = true;
@@ -400,8 +401,6 @@
     }
     box.classList.remove("oculto");
     document.getElementById("loc-agg-n").textContent = p.agregados.num_referencias;
-    document.getElementById("loc-agg-sum").textContent =
-      formatoNum(p.agregados.suma_superficie_construida_m2, 1) + " m²";
     document.getElementById("loc-agg-edif").textContent =
       p.agregados.edificabilidad_m2t_m2s > 0
         ? p.agregados.edificabilidad_m2t_m2s.toFixed(2) + " m²t/m²s" : "—";
@@ -409,6 +408,29 @@
     document.getElementById("loc-agg-dens").textContent =
       p.agregados.densidad_viviendas_viv_ha > 0
         ? formatoNum(p.agregados.densidad_viviendas_viv_ha, 1) + " viv/ha" : "—";
+  }
+
+  function pintarDatosCatastrales(p) {
+    const box = document.getElementById("loc-catastro");
+    if (!box) return;
+    // El bloque también incluye RC/Mun/Prov/Sup que siempre están presentes,
+    // así que lo mostramos siempre que haya parcela; cada campo opcional cae
+    // a "—" cuando el Catastro no lo devuelve.
+    box.classList.remove("oculto");
+    const tieneUso = !!(p.uso_catastral && p.uso_catastral.trim());
+    const tieneAnio = p.anio_construccion != null && p.anio_construccion !== "";
+    const tieneSup = p.superficie_construida_total_m2 != null
+      && p.superficie_construida_total_m2 > 0;
+    const tienePl = p.plantas_sobre_rasante != null;
+    const tieneSo = p.plantas_bajo_rasante != null && p.plantas_bajo_rasante > 0;
+    document.getElementById("loc-cat-uso").textContent = tieneUso ? p.uso_catastral : "—";
+    document.getElementById("loc-cat-anio").textContent = tieneAnio ? String(p.anio_construccion) : "—";
+    document.getElementById("loc-cat-supc").textContent = tieneSup
+      ? formatoNum(p.superficie_construida_total_m2, 0) + " m²" : "—";
+    document.getElementById("loc-cat-plantas").textContent = tienePl
+      ? String(p.plantas_sobre_rasante) : "—";
+    document.getElementById("loc-cat-sotanos").textContent = tieneSo
+      ? String(p.plantas_bajo_rasante) : "—";
   }
 
   function pintarCardsSubref(p) {

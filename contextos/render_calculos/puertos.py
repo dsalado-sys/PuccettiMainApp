@@ -30,16 +30,87 @@ class NormativaMunicipalRepositorio(Protocol):
 
 
 class CatalogoSuperficiesRepositorio(Protocol):
-    """Anexo I editable (vivienda en MVP; hotel/apt en iteración posterior)."""
+    """Anexo I.5 editable (vivienda). Hotel/apt usan otro adapter."""
 
     def superficies_vivienda(self, n_dormitorios: int) -> dict[str, float]:
         """Mínimos y máximos por estancia para una vivienda de N dormitorios."""
+        ...
+
+    def util_objetivo_vivienda(self, n_dormitorios: int) -> float | None:
+        """m² útiles objetivo por unidad (None si no hay fila → motor usa fallback)."""
         ...
 
     def actualizar(
         self,
         uso: str,
         categoria: str,
+        estancia: str,
+        valor: float,
+        usuario: str | None = None,
+    ) -> None: ...
+
+    def reset(self) -> None: ...
+
+
+class CatalogoApartamentosRepositorio(Protocol):
+    """Anexo I.3/I.4 editable (apartamentos turísticos · Decreto 194/2010).
+
+    `grupo` distingue "edificios" (A1.3, 1L-4L) de "conjuntos" (A1.4, 1L/2L).
+    """
+
+    def superficies_apartamento(self, categoria: str, tipologia: str, grupo: str = "edificios") -> dict[str, float]: ...
+
+    def util_objetivo_apartamento(self, categoria: str, tipologia: str, grupo: str = "edificios") -> float | None: ...
+
+    def areas_comunes(self, categoria: str, grupo: str = "edificios") -> dict[str, float]: ...
+
+    def actualizar(
+        self,
+        categoria: str,
+        tipologia: str,
+        estancia: str,
+        valor: float,
+        usuario: str | None = None,
+        grupo: str = "edificios",
+    ) -> None: ...
+
+    def reset(self) -> None: ...
+
+
+class CatalogoHotelApartamentoRepositorio(Protocol):
+    """Anexo I.2 editable (hoteles-apartamento, categorías por estrellas)."""
+
+    def superficies(self, categoria: str, tipologia: str) -> dict[str, float]: ...
+
+    def util_objetivo(self, categoria: str, tipologia: str) -> float | None: ...
+
+    def areas_sociales(self, categoria: str) -> dict[str, float]: ...
+
+    def actualizar(
+        self,
+        categoria: str,
+        tipologia: str,
+        estancia: str,
+        valor: float,
+        usuario: str | None = None,
+    ) -> None: ...
+
+    def reset(self) -> None: ...
+
+
+class CatalogoHoteleroRepositorio(Protocol):
+    """Anexo I.1 editable (hoteles / hostales / pensiones / albergues)."""
+
+    def superficies_habitacion(self, categoria: str, tipologia: str) -> dict[str, float]: ...
+
+    def util_objetivo_habitacion(self, categoria: str, tipologia: str) -> float | None: ...
+
+    def areas_sociales(self, categoria: str) -> dict[str, float]: ...
+
+    def actualizar(
+        self,
+        categoria: str,
+        tipologia: str,
         estancia: str,
         valor: float,
         usuario: str | None = None,

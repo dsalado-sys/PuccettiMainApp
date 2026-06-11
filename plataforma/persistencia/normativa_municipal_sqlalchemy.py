@@ -1,6 +1,11 @@
 """Adapter SQLAlchemy del puerto NormativaMunicipalRepositorio.
 
 Persiste y consulta los parámetros urbanísticos por municipio (PGOU).
+
+Iteración 4 (2026-06-04): renombrado `edificabilidad_m2t_m2s` →
+`coeficiente_edificabilidad`, eliminados `altura_planta_m` y los tres
+retranqueos antiguos (frontal/lateral/trasero); añadidos
+`retranqueo_fachada_m` y `retranqueo_linderos_m`.
 """
 from __future__ import annotations
 
@@ -11,7 +16,6 @@ from typing import Any
 from sqlalchemy import DateTime, Float, Integer, String, Text, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from app.contextos.render_calculos.dominio import UsoEdificio
 from app.contextos.render_calculos.parametros import ParametrosUrbanisticos
 
 from .sqlalchemy_base import Base
@@ -23,13 +27,11 @@ class NormativaMunicipalORM(Base):
     municipio: Mapped[str] = mapped_column(String(120), primary_key=True)
     provincia: Mapped[str] = mapped_column(String(60), primary_key=True)
 
-    edificabilidad_m2t_m2s: Mapped[float] = mapped_column(Float, nullable=False)
+    coeficiente_edificabilidad: Mapped[float] = mapped_column(Float, nullable=False)
     ocupacion_maxima_pct: Mapped[float] = mapped_column(Float, nullable=False)
     n_plantas_max: Mapped[int] = mapped_column(Integer, nullable=False)
-    retranqueo_frontal_m: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    retranqueo_lateral_m: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    retranqueo_trasero_m: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    altura_planta_m: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
+    retranqueo_fachada_m: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    retranqueo_linderos_m: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     usos_permitidos_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     luz_recta_patio_min_m: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
@@ -46,29 +48,25 @@ class NormativaMunicipalORM(Base):
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+USOS_PGOU_VALIDOS = {"residencial", "hotelero", "terciario", "mixto"}
+
+
 def _orm_a_params(orm: NormativaMunicipalORM) -> ParametrosUrbanisticos:
     usos_raw: list[str]
     try:
         usos_raw = json.loads(orm.usos_permitidos_json or "[]")
     except json.JSONDecodeError:
         usos_raw = []
-    usos: list[UsoEdificio] = []
-    for v in usos_raw:
-        try:
-            usos.append(UsoEdificio(v))
-        except ValueError:
-            continue
+    usos = [u for u in usos_raw if u in USOS_PGOU_VALIDOS]
     if not usos:
-        usos = [UsoEdificio.VIVIENDA]
+        usos = ["residencial"]
 
     return ParametrosUrbanisticos(
-        edificabilidad_m2t_m2s=orm.edificabilidad_m2t_m2s,
+        coeficiente_edificabilidad=orm.coeficiente_edificabilidad,
         ocupacion_maxima_pct=orm.ocupacion_maxima_pct,
         n_plantas_max=orm.n_plantas_max,
-        retranqueo_frontal_m=orm.retranqueo_frontal_m,
-        retranqueo_lateral_m=orm.retranqueo_lateral_m,
-        retranqueo_trasero_m=orm.retranqueo_trasero_m,
-        altura_planta_m=orm.altura_planta_m,
+        retranqueo_fachada_m=orm.retranqueo_fachada_m,
+        retranqueo_linderos_m=orm.retranqueo_linderos_m,
         usos_permitidos=usos,
         luz_recta_patio_min_m=orm.luz_recta_patio_min_m,
         area_patio_min_m2=orm.area_patio_min_m2,
@@ -81,14 +79,12 @@ def _orm_a_params(orm: NormativaMunicipalORM) -> ParametrosUrbanisticos:
 
 
 def _params_a_orm(p: ParametrosUrbanisticos, orm: NormativaMunicipalORM) -> None:
-    orm.edificabilidad_m2t_m2s = p.edificabilidad_m2t_m2s
+    orm.coeficiente_edificabilidad = p.coeficiente_edificabilidad
     orm.ocupacion_maxima_pct = p.ocupacion_maxima_pct
     orm.n_plantas_max = p.n_plantas_max
-    orm.retranqueo_frontal_m = p.retranqueo_frontal_m
-    orm.retranqueo_lateral_m = p.retranqueo_lateral_m
-    orm.retranqueo_trasero_m = p.retranqueo_trasero_m
-    orm.altura_planta_m = p.altura_planta_m
-    orm.usos_permitidos_json = json.dumps([u.value for u in p.usos_permitidos])
+    orm.retranqueo_fachada_m = p.retranqueo_fachada_m
+    orm.retranqueo_linderos_m = p.retranqueo_linderos_m
+    orm.usos_permitidos_json = json.dumps(list(p.usos_permitidos))
     orm.luz_recta_patio_min_m = p.luz_recta_patio_min_m
     orm.area_patio_min_m2 = p.area_patio_min_m2
     orm.tiene_atico_default = 1 if p.tiene_atico else 0
@@ -136,7 +132,7 @@ class NormativaMunicipalSQLAlchemy:
             {
                 "municipio": o.municipio,
                 "provincia": o.provincia,
-                "edificabilidad_m2t_m2s": o.edificabilidad_m2t_m2s,
+                "coeficiente_edificabilidad": o.coeficiente_edificabilidad,
                 "n_plantas_max": o.n_plantas_max,
                 "actualizado_en": o.actualizado_en.isoformat() if o.actualizado_en else None,
             }

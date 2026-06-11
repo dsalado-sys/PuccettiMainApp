@@ -97,8 +97,6 @@ def _planta_dict(pl: PlantaPlurifamiliar) -> dict[str, Any]:
             "circulacion_comun_m2": pl.circulacion_m2,
             "muros_m2": pl.muros_m2,
             "patios_m2": pl.patios_m2,
-            "eficiencia_util_pct": round(100 * pl.util_unidades_m2 / pl.construida_m2, 1)
-                                   if pl.construida_m2 else 0.0,
         },
         "n_viviendas": len(pl.unidades),
         "score": pl.score,
@@ -116,7 +114,8 @@ def lados_a_dict(lados: list[LadoParcela]) -> list[dict[str, Any]]:
             "tipo": l.tipo,
             "longitud_m": round(l.longitud_m, 2),
             "azimut": round(l.azimut, 1),
-            "orientacion": orientacion_cardinal(l.azimut),
+            "normal_azimut": round(l.normal_azimut, 1),
+            "orientacion": orientacion_cardinal(l.normal_azimut),
         }
         for i, l in enumerate(lados)
     ]
@@ -137,7 +136,6 @@ def edificio_a_dict(
             "uso": params.programa.uso,
             "categoria": params.programa.categoria,
             "n_dormitorios": params.programa.n_dormitorios,
-            "n_viviendas_por_planta": params.programa.n_viviendas_por_planta,
             "n_plantas": len(edif.plantas),
             "pct_unidades_adaptadas": params.programa.pct_unidades_adaptadas,
         },
@@ -172,7 +170,12 @@ def edificio_a_dict(
 
 
 def tabla_por_planta(edif: EdificioPlurifamiliar) -> list[dict[str, Any]]:
-    """Una fila por planta (req. 16 y 17)."""
+    """Una fila por planta (req. 16 y 17).
+
+    DEPRECATED desde iteración 3 — la fuente de verdad es ahora
+    `tabla_planta_desde_capacidad` (deriva del cálculo, no de la geometría).
+    Se mantiene para compatibilidad con código que aún reciba `EdificioPlurifamiliar`.
+    """
     rows: list[dict[str, Any]] = []
     for p in edif.plantas:
         rows.append({
@@ -183,14 +186,12 @@ def tabla_por_planta(edif: EdificioPlurifamiliar) -> list[dict[str, Any]]:
             "circulacion_m2": p.circulacion_m2,
             "patios_m2": p.patios_m2,
             "muros_m2": p.muros_m2,
-            "eficiencia_pct": round(100 * p.util_unidades_m2 / p.construida_m2, 1)
-                              if p.construida_m2 else 0.0,
         })
     return rows
 
 
 def tabla_por_unidad(edif: EdificioPlurifamiliar) -> list[dict[str, Any]]:
-    """Una fila por vivienda (req. 16)."""
+    """Una fila por vivienda (req. 16). Idem deprecation que `tabla_por_planta`."""
     rows: list[dict[str, Any]] = []
     for p in edif.plantas:
         for u in p.unidades:
@@ -206,5 +207,268 @@ def tabla_por_unidad(edif: EdificioPlurifamiliar) -> list[dict[str, Any]]:
                 "ventila_ok": u.ventila_ok,
                 "acceso": u.acceso_pasillo,
                 "adaptada": u.es_adaptada,
+            })
+    return rows
+
+
+# ─── Tablas sintéticas iter. 4 — datos reales desde Capacidad ───────────────
+def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]:
+    """Tabla por planta derivada del cálculo (muros / circulación / núcleo separados)."""
+    rows: list[dict[str, Any]] = []
+    muros_est = list(getattr(cap, "muros_estimados_por_planta", [])) or [0.0] * len(cap.nombres_planta)
+    patio_pp = list(getattr(cap, "patio_por_planta", [])) or [0.0] * len(cap.nombres_planta)
+    local_pp = list(getattr(cap, "local_por_planta", [])) or [0.0] * len(cap.nombres_planta)
+    mix_pp = list(getattr(cap, "viviendas_por_tipologia", [])) or [{}] * len(cap.nombres_planta)
+
+    for i, nombre in enumerate(cap.nombres_planta):
+        construida_i = cap.construida_por_planta[i]
+        util_i = cap.util_por_planta[i]
+        muros_i = cap.muros_por_planta[i]
+        muros_est_i = muros_est[i] if i < len(muros_est) else 0.0
+        circulacion_i = cap.circulacion_por_planta[i]
+        nucleo_i = cap.nucleo_por_planta[i]
+        patio_i = patio_pp[i] if i < len(patio_pp) else 0.0
+        local_i = local_pp[i] if i < len(local_pp) else 0.0
+        mix_i = mix_pp[i] if i < len(mix_pp) else {}
+        viv_i = cap.viv_por_planta[i]
+        tipo_i = cap.tipo_planta[i]
+
+        rows.append({
+            "planta": nombre,
+            "tipo": tipo_i,
+            "viviendas": viv_i,
+            "construida_m2": round(construida_i, 2),
+            "util_viviendas_m2": round(util_i, 2),
+            "muros_m2": round(muros_i, 2),
+            "muros_estimados_m2": round(muros_est_i, 2),
+            "circulacion_m2": round(circulacion_i, 2),
+            "nucleo_m2": round(nucleo_i, 2),
+            "patios_m2": round(patio_i, 2),
+            "local_m2": round(local_i, 2),
+            "mix_tipologia": dict(mix_i),
+        })
+
+    # NOTA iter. junio 2026: las "Comunes obligatorias" del uso (apartamentos,
+    # hotel-apartamento, hotelero) están ya distribuidas dentro de
+    # `circulacion_por_planta[i]` (suma de `pct_circ × construida` + cuota de
+    # `area_servicios_obligatorios_m2 / n_plantas_habitables`). No se añade
+    # fila aparte: duplicaría m² y la suma de columnas dejaría de cuadrar con
+    # `construida_i` (huella).
+    return rows
+
+
+# Diámetros mínimos inscribibles por nombre de estancia (m).
+# Aproximamos cada habitación como rectángulo 1:1.5 → lado_menor = √(area/1.5).
+# Cabe el círculo si lado_menor ≥ diametro_min_m.
+_DIAMETROS_MIN_M: dict[str, float] = {
+    "salon": 3.00, "salon_cocina": 3.00, "salon_comedor": 3.00,
+    "dormitorio_1": 2.70,        # principal
+    "dormitorio_2": 2.40,        # secundario doble
+    "dormitorio_3": 2.00,        # individual
+    "dormitorio_4": 2.00,
+    "dormitorio": 2.40,          # estudio (legacy nombre)
+    "habitacion": 2.70,          # unidad de alojamiento hotelera (Anexo I.1)
+    "espacio_principal": 3.00,   # estudio: salón+cocina+zona dormir integrados
+    "cocina": 1.60,
+    "bano": 1.20, "bano_1": 1.20, "aseo": 1.20,
+    "vestibulo": 1.20,
+    "pasillo": 1.00,
+    "circulacion_interior": 1.00,
+    "estudio": 3.50,
+}
+
+
+def _cabe_diametro(nombre: str, area_target_m2: float) -> tuple[bool, float]:
+    """Devuelve (cabe, diametro_min_requerido_m).
+
+    Asume habitación rectangular 1:1.5; lado_menor = √(area/1.5).
+    Si la estancia no está en el catálogo de mínimos, devuelve (True, 0.0).
+    """
+    diam = _DIAMETROS_MIN_M.get(nombre, 0.0)
+    if diam <= 0 or area_target_m2 <= 0:
+        return True, diam
+    lado_menor = (area_target_m2 / 1.5) ** 0.5
+    return lado_menor + 1e-6 >= diam, diam
+
+
+def _slug_principal(params, tipo_unidad: str) -> str:
+    """Slug de la tipología principal del proyecto, según el uso."""
+    prog = params.programa
+    if tipo_unidad == "habitacion":
+        t = getattr(prog, "tipologia_habitacion", None)
+        return t.value if t is not None else "doble"
+    t = getattr(prog, "tipologia_apartamento", None)  # apartamento / hotel_apartamento
+    return t.value if t is not None else "doble"
+
+
+def _estancias_por_unidad_dorms(
+    params, n_dorms: int, util_por_unidad: float, programa_uso, slug: str | None = None,
+) -> list[dict[str, Any]]:
+    """Estancias programadas para una unidad concreta.
+
+    Ramifica por `programa_uso.tipo_unidad`:
+    - `vivienda`          → `programa_vivienda(n_dorms, util)` (Anexo I.5).
+    - `apartamento`       → `programa_apartamentos(slug, cat, util, grupo)` (A1.3/A1.4).
+    - `hotel_apartamento` → `programa_hotel_apartamento(slug, cat, util)` (A1.2).
+    - `habitacion`        → `programa_habitacion(slug, cat, util)` (A1.1).
+
+    `slug` es la tipología REAL de esta unidad (mezcla multi-tipología); si falta,
+    se usa la tipología principal del proyecto.
+    """
+    from .programa import programa_vivienda
+    from .programa_apartamentos import programa_apartamentos
+    from .programa_hotel_apartamento import programa_hotel_apartamento
+    from .programa_hotelero import programa_habitacion
+
+    if util_por_unidad <= 0:
+        return []
+
+    tipo_unidad = getattr(programa_uso, "tipo_unidad", "vivienda") if programa_uso is not None else "vivienda"
+
+    if tipo_unidad == "apartamento":
+        cat = getattr(params.programa, "categoria_apartamentos", None)
+        cat_v = cat.value if cat is not None else "2L"
+        grupo = getattr(params.programa, "grupo_apartamentos", None)
+        grupo_v = grupo.value if grupo is not None else "edificios"
+        tip_v = slug or _slug_principal(params, "apartamento")
+        estancias = programa_apartamentos(tip_v, cat_v, util_por_unidad, grupo_v)
+    elif tipo_unidad == "hotel_apartamento":
+        cat = getattr(params.programa, "categoria_hotel_apartamento", None)
+        cat_v = cat.value if cat is not None else "3E"
+        tip_v = slug or _slug_principal(params, "hotel_apartamento")
+        estancias = programa_hotel_apartamento(tip_v, cat_v, util_por_unidad)
+    elif tipo_unidad == "habitacion":
+        cat = getattr(params.programa, "categoria_hotelero", None)
+        cat_v = cat.value if cat is not None else "hotel_3"
+        tip_v = slug or _slug_principal(params, "habitacion")
+        estancias = programa_habitacion(tip_v, cat_v, util_por_unidad)
+    else:
+        salon_open = bool(getattr(params.programa, "salon_cocina_open", False))
+        estancias = programa_vivienda(n_dorms, util_por_unidad, salon_open)
+
+    salida: list[dict[str, Any]] = []
+    for e in estancias:
+        cabe, diam = _cabe_diametro(e.nombre, e.area_target_m2)
+        salida.append({
+            "nombre": e.nombre,
+            "categoria": e.categoria,
+            "area_target_m2": round(e.area_target_m2, 2),
+            "area_min_m2": round(e.area_min_m2, 2),
+            "diametro_min_m": diam,
+            "cabe_diametro": cabe,
+        })
+    return salida
+
+
+def _estancias_por_unidad(params, util_por_unidad: float, programa_uso) -> list[dict[str, Any]]:
+    """Wrapper legacy — deriva n_dorms del programa principal."""
+    n_dorms = getattr(params.programa, "n_dormitorios", None)
+    if n_dorms is None:
+        from ..dominio import CATEGORIA_A_NUM_DORMS
+        n_dorms = CATEGORIA_A_NUM_DORMS.get(params.programa.categoria_vivienda, 2)
+    return _estancias_por_unidad_dorms(params, n_dorms, util_por_unidad, programa_uso)
+
+
+def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[str, Any]]:
+    """Una fila por unidad — n_dorms y útil REAL por unidad (no promediados).
+
+    Cada unidad se lee de `cap.unidades_por_planta[i]` (lista de (n_dorms, util_m2)
+    producida por `calcular_capacidad`). Esto permite mezclas heterogéneas
+    (ej. 1 unidad 2d + 1 unidad 1d en una misma planta) sin perder la
+    tipología real de cada una.
+
+    Reparto m² por unidad:
+    - `util_por_unidad_m2`: útil real de la vivienda (incluye su circulación
+      interior, que aparece como una estancia más en el detalle).
+    - `muros_por_unidad_m2`: muros del proyecto prorrateados al útil de la
+      unidad (los muros perimetrales SÍ pertenecen a la vivienda).
+    - `construida_por_unidad_m2` = `util + muros`.
+    - La CIRCULACIÓN COMÚN y el NÚCLEO del edificio NO se imputan por unidad
+      (son del edificio, viven solo en la tabla por planta).
+
+    - `estancias`: derivadas del Anexo I correspondiente al uso, calculadas
+      con el `n_dorms` y `util` específicos de la unidad.
+    """
+    rows: list[dict[str, Any]] = []
+    util_obj = cap.util_objetivo_viv_m2
+    tipo_unidad = programa_uso.tipo_unidad if programa_uso is not None else "vivienda"
+
+    total_unidades = cap.n_viviendas_objetivo
+    pct_adapt = max(0.0, float(getattr(params.programa, "pct_unidades_adaptadas", 0.0)))
+    n_adaptadas = int(total_unidades * pct_adapt / 100.0 + 0.5)
+    adaptadas_marcadas = 0
+
+    local_pp = list(getattr(cap, "local_por_planta", [])) or [0.0] * len(cap.nombres_planta)
+    pct_local_pb = float(getattr(cap, "pct_local_pb", 0.0))
+    unidades_pp = list(getattr(cap, "unidades_por_planta", []))
+    tipologias_pp = list(getattr(cap, "tipologias_unidad_por_planta", []))
+
+    for i, nombre_planta in enumerate(cap.nombres_planta):
+        viv_i = cap.viv_por_planta[i]
+        local_i = local_pp[i] if i < len(local_pp) else 0.0
+        unidades_i = unidades_pp[i] if i < len(unidades_pp) else []
+        tipologias_i = tipologias_pp[i] if i < len(tipologias_pp) else []
+
+        # Fila "Local" — solo aparece si la planta tiene m² destinados a local.
+        if local_i > 0:
+            rows.append({
+                "planta": nombre_planta,
+                "vivienda": "Local",
+                "dorms": "—",
+                "tipo": "local",
+                "util_m2_objetivo": 0.0,
+                "construida_por_unidad_m2": round(local_i, 2),
+                "util_por_unidad_m2": round(local_i, 2),
+                "muros_por_unidad_m2": 0.0,
+                "circulacion_por_unidad_m2": 0.0,
+                "pct_util_destinado": round(pct_local_pb, 1),
+                "adaptada": False,
+                "estancias": [],
+            })
+
+        if viv_i == 0 or not unidades_i:
+            continue
+
+        util_i_consumido = sum(u for _, u in unidades_i) or 1.0
+        muros_i = cap.muros_por_planta[i]
+
+        for j, (n_dorms_u, util_u) in enumerate(unidades_i):
+            letra = chr(ord('A') + j) if j < 26 else f"#{j+1}"
+            slug_u = tipologias_i[j] if j < len(tipologias_i) else None
+            es_adapt = adaptadas_marcadas < n_adaptadas
+            if es_adapt:
+                adaptadas_marcadas += 1
+            # Solo los MUROS perimetrales se prorratean a la unidad. La
+            # circulación común y el núcleo son del edificio (tabla por planta).
+            factor = util_u / util_i_consumido
+            muros_u = muros_i * factor
+            construida_u = util_u + muros_u
+
+            estancias = _estancias_por_unidad_dorms(
+                params, n_dorms_u, util_u, programa_uso, slug_u
+            )
+
+            # Circulación interior (intrínseca) de la unidad = útil de la unidad
+            # menos la suma de las estancias que NO son circulación. En vivienda
+            # coincide con la estancia "circulacion_interior" (15% del útil); en
+            # apartamentos/hoteles es el remanente del útil tras las estancias.
+            util_estancias_no_circ = sum(
+                e["area_target_m2"] for e in estancias if e.get("categoria") != "circulacion"
+            )
+            circ_interior_u = max(0.0, util_u - util_estancias_no_circ)
+
+            rows.append({
+                "planta": nombre_planta,
+                "vivienda": f"V{i+1}{letra}",
+                "dorms": n_dorms_u,
+                "tipologia": slug_u,
+                "tipo": tipo_unidad,
+                "util_m2_objetivo": util_obj,
+                "construida_por_unidad_m2": round(construida_u, 2),
+                "util_por_unidad_m2": round(util_u, 2),
+                "muros_por_unidad_m2": round(muros_u, 2),
+                "circulacion_interior_por_unidad_m2": round(circ_interior_u, 2),
+                "adaptada": es_adapt,
+                "estancias": estancias,
             })
     return rows

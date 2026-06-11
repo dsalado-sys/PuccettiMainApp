@@ -1,7 +1,49 @@
-{# Panel izquierdo: parámetros del proyecto (req. 18). Inputs comparten el form #rc-form. #}
+{# Panel izquierdo: parámetros del proyecto (req. 18). Inputs comparten el form #rc-form.
+
+   Diferenciación por categoría de planta (iter. 6 — PB independiente):
+   - `data-visible-en-planta="pb|tipo|atico|sotano"` muestra cada campo solo en su
+     pestaña; el JS (`aplicarVisibilidad`) combina esta condición con `data-cuando-uso`.
+   - Los campos editables por planta van por pares/cuartetos enrutados con
+     `data-bloque` (diseno / diseno_tipo / diseno_atico / diseno_sotano · programa /
+     programa_tipo). `leerFormulario` los lee TODOS (estén o no ocultos por planta).
+#}
+
+{# ── Macros de tipología y de campo numérico por planta ── #}
+{% macro tip_bloque(uso, opciones_key, lbl_map, principal_name, prog, bloque, visible, cont_id) %}
+  <div class="rc-campo" data-cuando-uso="{{ uso }}" data-visible-en-planta="{{ visible }}">
+    <span class="rc-campo-label">Tipo de unidad</span>
+    <div class="rc-tipologias" id="{{ cont_id }}" data-opciones="{{ opciones_key }}" data-bloque="{{ bloque }}">
+      <select name="{{ principal_name }}" data-bloque="{{ bloque }}">
+        {% for c, label in lbl_map.items() %}
+          <option value="{{ c }}" {% if prog[principal_name] == c %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      {% if prog.uso == uso %}{% for slug in prog.tipologias_extra %}
+        <div class="rc-tipologia-extra">
+          <select name="tipologias_extra" data-bloque="{{ bloque }}">
+            {% for c, label in lbl_map.items() %}
+              <option value="{{ c }}" {% if slug == c %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="rc-tip-quitar" aria-label="Eliminar tipología">−</button>
+        </div>
+      {% endfor %}{% endif %}
+    </div>
+    <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-add-tipologia" data-target="{{ cont_id }}">+ Tipología</button>
+  </div>
+{% endmacro %}
+
+{% macro dnum(label, name, bloque, valor, mn, mx, step, visible) %}
+  <label class="rc-campo" data-visible-en-planta="{{ visible }}">
+    <span class="rc-campo-label">{{ label }}</span>
+    <input type="number" name="{{ name }}" min="{{ mn }}" max="{{ mx }}" step="{{ step }}"
+           value="{{ valor }}" data-bloque="{{ bloque }}">
+  </label>
+{% endmacro %}
+
 <aside class="rc-params" aria-label="Parámetros del proyecto">
 
-  <details class="rc-grupo" open>
+  <details class="rc-grupo" open data-visible-en-planta="pb">
     <summary><span class="rc-grupo-titulo">Urbanismo</span>
       {% if pgou_municipio_activo %}
         <span class="rc-badge rc-badge-dorado" title="Valores cargados del PGOU del municipio">
@@ -13,15 +55,23 @@
     <div class="rc-grupo-cuerpo">
       {% set urb = parametros.urbanisticos %}
 
+      <label class="rc-checkbox">
+        <input type="checkbox" name="usar_coeficiente_edificabilidad"
+               {% if urb.usar_coeficiente_edificabilidad %}checked{% endif %}
+               data-bloque="urbanisticos" id="rc-chk-usar-coef">
+        <span>Usar coeficiente de edificabilidad</span>
+      </label>
       <label class="rc-campo">
-        <span class="rc-campo-label">Edificabilidad (m²t/m²s)</span>
-        <input type="number" name="edificabilidad_m2t_m2s" min="0.1" max="8" step="0.05"
-               value="{{ urb.edificabilidad_m2t_m2s }}" data-bloque="urbanisticos">
+        <span class="rc-campo-label">Coeficiente de edificabilidad (m²t/m²s)</span>
+        <input type="number" name="coeficiente_edificabilidad" min="0.1" max="8" step="0.05"
+               value="{{ urb.coeficiente_edificabilidad }}" data-bloque="urbanisticos"
+               id="rc-input-coef"
+               {% if not urb.usar_coeficiente_edificabilidad %}disabled{% endif %}>
       </label>
 
       <label class="rc-campo">
         <span class="rc-campo-label">Ocupación máxima (%)</span>
-        <input type="number" name="ocupacion_maxima_pct" min="30" max="100" step="1"
+        <input type="number" name="ocupacion_maxima_pct" min="10" max="100" step="1"
                value="{{ urb.ocupacion_maxima_pct }}" data-bloque="urbanisticos">
       </label>
 
@@ -31,38 +81,27 @@
                value="{{ urb.n_plantas_max }}" data-bloque="urbanisticos">
       </label>
 
-      <label class="rc-campo">
-        <span class="rc-campo-label">Altura de planta (m)</span>
-        <input type="number" name="altura_planta_m" min="2.5" max="4.5" step="0.05"
-               value="{{ urb.altura_planta_m }}" data-bloque="urbanisticos">
-      </label>
-
       <div class="rc-fila">
         <label class="rc-campo">
-          <span class="rc-campo-label">Retranq. frontal (m)</span>
-          <input type="number" name="retranqueo_frontal_m" min="0" max="10" step="0.1"
-                 value="{{ urb.retranqueo_frontal_m }}" data-bloque="urbanisticos">
+          <span class="rc-campo-label">Retranq. fachada (m)</span>
+          <input type="number" name="retranqueo_fachada_m" min="0" max="10" step="0.1"
+                 value="{{ urb.retranqueo_fachada_m }}" data-bloque="urbanisticos">
         </label>
         <label class="rc-campo">
-          <span class="rc-campo-label">Lateral (m)</span>
-          <input type="number" name="retranqueo_lateral_m" min="0" max="10" step="0.1"
-                 value="{{ urb.retranqueo_lateral_m }}" data-bloque="urbanisticos">
-        </label>
-        <label class="rc-campo">
-          <span class="rc-campo-label">Trasero (m)</span>
-          <input type="number" name="retranqueo_trasero_m" min="0" max="10" step="0.1"
-                 value="{{ urb.retranqueo_trasero_m }}" data-bloque="urbanisticos">
+          <span class="rc-campo-label">Retranq. linderos (m)</span>
+          <input type="number" name="retranqueo_linderos_m" min="0" max="10" step="0.1"
+                 value="{{ urb.retranqueo_linderos_m }}" data-bloque="urbanisticos">
         </label>
       </div>
 
       <fieldset class="rc-usos">
         <legend>Usos permitidos por el PGOU</legend>
-        {% for u in ["vivienda", "apartamentos_turisticos", "hotelero"] %}
+        {% for u, label in [("residencial", "Residencial"), ("hotelero", "Hotelero"), ("terciario", "Terciario"), ("mixto", "Mixto")] %}
           <label class="rc-checkbox">
             <input type="checkbox" name="usos_permitidos" value="{{ u }}"
                    {% if u in urb.usos_permitidos %}checked{% endif %}
                    data-bloque="urbanisticos">
-            <span>{{ u | replace("_", " ") | capitalize }}</span>
+            <span>{{ label }}</span>
           </label>
         {% endfor %}
       </fieldset>
@@ -109,11 +148,13 @@
     </div>
   </details>
 
-  <details class="rc-grupo" open>
+  <details class="rc-grupo" open data-visible-en-planta="pb tipo atico">
     <summary><span class="rc-grupo-titulo">Programa</span></summary>
     <div class="rc-grupo-cuerpo">
       {% set prog = parametros.programa %}
-      <label class="rc-campo">
+      {% set prog_t = parametros.programa_tipo %}
+
+      <label class="rc-campo" data-visible-en-planta="pb">
         <span class="rc-campo-label">Uso destino</span>
         <select name="uso" data-bloque="programa">
           {% for u in usos_edificio %}
@@ -124,105 +165,139 @@
             </option>
           {% endfor %}
         </select>
-        <small class="rc-hint">Solo "Vivienda" está totalmente implementado en esta versión.</small>
       </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Tipología de vivienda</span>
-        <select name="categoria_vivienda" data-bloque="programa">
-          {% for c in ["estudio","1d","2d","3d","4d+"] %}
-            <option value="{{ c }}" {% if prog.categoria_vivienda == c %}selected{% endif %}>
-              {% if c == "estudio" %}Estudio{% elif c == "4d+" %}4 o más dormitorios{% else %}{{ c[0] }} dormitorio{{ "s" if c[0] != "1" }}{% endif %}
+
+      {# El ático/sótano no editan tipología: heredan la de las plantas tipo. #}
+      <p class="rc-hint" data-visible-en-planta="atico">
+        El ático usa el tipo de unidad y el diseño de las plantas tipo. Aquí solo se
+        ajustan su % muros y % circulación (pestaña «Diseño · circulación»).
+      </p>
+
+      {# ── Etiquetas reutilizables de tipología ── #}
+      {% set lbl_viv = {"estudio":"Estudio","1d":"1 dormitorio","2d":"2 dormitorios","3d":"3 dormitorios","4d+":"4 o más dormitorios"} %}
+      {% set lbl_apt = {"estudio":"Estudio","individual":"Individual","doble":"Doble","triple":"Triple","cuadruple":"Cuádruple"} %}
+      {% set lbl_hab = {"individual":"Individual","doble":"Doble","triple":"Triple","cuadruple":"Cuádruple","multiple":"Múltiple (albergue)"} %}
+      {% set lbl_hotelero = {"hotel_5":"Hotel 5★","hotel_4":"Hotel 4★","hotel_3":"Hotel 3★","hotel_2":"Hotel 2★","hotel_1":"Hotel 1★","hostal_2":"Hostal 2★","hostal_1":"Hostal 1★","pension":"Pensión","albergue":"Albergue"} %}
+
+      {# ── VIVIENDA (Anexo I.5) — tipología por planta (PB / tipo) ── #}
+      {{ tip_bloque("vivienda", "vivienda", lbl_viv, "categoria_vivienda", prog, "programa", "pb", "rc-tip-vivienda") }}
+      {{ tip_bloque("vivienda", "vivienda", lbl_viv, "categoria_vivienda", prog_t, "programa_tipo", "tipo", "rc-tip-vivienda-tipo") }}
+
+      {# ── APARTAMENTOS TURÍSTICOS (Anexo I.3/I.4) — categoría global (PB) ── #}
+      <label class="rc-campo" data-cuando-uso="apartamentos_turisticos" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Categoría</span>
+        <select name="categoria_apartamentos" data-bloque="programa">
+          {% for c in ["1L","2L","3L","4L"] %}
+            <option value="{{ c }}" {% if prog.categoria_apartamentos == c %}selected{% endif %}>
+              {{ c[0] }} llave{{ "s" if c[0] != "1" }}
             </option>
           {% endfor %}
         </select>
       </label>
-      <label class="rc-campo">
+      <label class="rc-campo" data-cuando-uso="apartamentos_turisticos" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Grupo</span>
+        <select name="grupo_apartamentos" data-bloque="programa">
+          <option value="edificios" {% if prog.grupo_apartamentos == "edificios" %}selected{% endif %}>Edificios / complejos (1L–4L)</option>
+          <option value="conjuntos" {% if prog.grupo_apartamentos == "conjuntos" %}selected{% endif %}>Conjuntos (solo 1L/2L)</option>
+        </select>
+        <small class="rc-hint">"Conjuntos" acota a 1L/2L con mínimos menores.</small>
+      </label>
+      {{ tip_bloque("apartamentos_turisticos", "apartamento", lbl_apt, "tipologia_apartamento", prog, "programa", "pb", "rc-tip-apartamentos") }}
+      {{ tip_bloque("apartamentos_turisticos", "apartamento", lbl_apt, "tipologia_apartamento", prog_t, "programa_tipo", "tipo", "rc-tip-apartamentos-tipo") }}
+
+      {# ── HOTEL-APARTAMENTO (Anexo I.2) — categoría global (PB) ── #}
+      <label class="rc-campo" data-cuando-uso="hotel_apartamento" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Categoría</span>
+        <select name="categoria_hotel_apartamento" data-bloque="programa">
+          {% for c in ["5E","4E","3E","2E","1E"] %}
+            <option value="{{ c }}" {% if prog.categoria_hotel_apartamento == c %}selected{% endif %}>
+              {{ c[0] }} estrella{{ "s" if c[0] != "1" }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      {{ tip_bloque("hotel_apartamento", "apartamento", lbl_apt, "tipologia_apartamento", prog, "programa", "pb", "rc-tip-hotel-apartamento") }}
+      {{ tip_bloque("hotel_apartamento", "apartamento", lbl_apt, "tipologia_apartamento", prog_t, "programa_tipo", "tipo", "rc-tip-hotel-apartamento-tipo") }}
+
+      {# ── HOTELERO: hotel / hostal / pensión / albergue (Anexo I.1) — categoría global (PB) ── #}
+      <label class="rc-campo" data-cuando-uso="hotelero" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Categoría</span>
+        <select name="categoria_hotelero" data-bloque="programa">
+          {% for c, label in lbl_hotelero.items() %}
+            <option value="{{ c }}" {% if prog.categoria_hotelero == c %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {{ tip_bloque("hotelero", "hotelero", lbl_hab, "tipologia_habitacion", prog, "programa", "pb", "rc-tip-hotelero") }}
+      {{ tip_bloque("hotelero", "hotelero", lbl_hab, "tipologia_habitacion", prog_t, "programa_tipo", "tipo", "rc-tip-hotelero-tipo") }}
+
+      <label class="rc-campo" data-visible-en-planta="pb">
         <span class="rc-campo-label">% unidades adaptadas (DB SUA)</span>
         <input type="number" name="pct_unidades_adaptadas" min="0" max="100" step="1"
                value="{{ prog.pct_unidades_adaptadas }}" data-bloque="programa">
-        <small class="rc-hint">DB SUA exige ≥5%. Las primeras plantas absorben el cupo.</small>
       </label>
-      <label class="rc-checkbox">
+      <label class="rc-checkbox" data-visible-en-planta="pb">
         <input type="checkbox" name="salon_cocina_open"
                {% if prog.salon_cocina_open %}checked{% endif %} data-bloque="programa">
         <span>Salón-cocina integrado</span>
       </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Viviendas/planta (forzar)</span>
-        <input type="number" name="n_viviendas_por_planta_objetivo" min="0" max="20" step="1"
-               value="{{ prog.n_viviendas_por_planta_objetivo or '' }}" placeholder="auto"
-               data-bloque="programa">
-        <small class="rc-hint">Vacío = derivar de la edificabilidad.</small>
+      <label class="rc-campo" data-visible-en-planta="pb">
+        <span class="rc-campo-label">% local en planta baja</span>
+        <input type="number" name="pct_local_pb" min="0" max="100" step="1"
+               value="{{ prog.pct_local_pb }}" data-bloque="programa">
+        <small class="rc-hint">Reduce útiles de PB para uso no residencial.</small>
       </label>
     </div>
   </details>
 
-  <details class="rc-grupo">
+  <details class="rc-grupo" data-visible-en-planta="pb tipo">
     <summary><span class="rc-grupo-titulo">Diseño · muros</span></summary>
     <div class="rc-grupo-cuerpo">
       {% set d = parametros.diseno %}
-      <label class="rc-campo">
-        <span class="rc-campo-label">Muro de fachada (m)</span>
-        <input type="number" name="espesor_muro_fachada_m" min="0.10" max="0.60" step="0.01"
-               value="{{ d.espesor_muro_fachada_m }}" data-bloque="diseno">
-      </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Muro medianero (m)</span>
-        <input type="number" name="espesor_muro_medianero_m" min="0.10" max="0.60" step="0.01"
-               value="{{ d.espesor_muro_medianero_m }}" data-bloque="diseno">
-      </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Separación entre unidades (m)</span>
-        <input type="number" name="espesor_separacion_unidades_m" min="0.10" max="0.40" step="0.01"
-               value="{{ d.espesor_separacion_unidades_m }}" data-bloque="diseno">
-      </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Tabique interior (m)</span>
-        <input type="number" name="espesor_tabique_m" min="0.05" max="0.20" step="0.01"
-               value="{{ d.espesor_tabique_m }}" data-bloque="diseno">
-      </label>
+      {% set d_t = parametros.diseno_tipo %}
+      {{ dnum("Muro de fachada (m)", "espesor_muro_fachada_m", "diseno", d.espesor_muro_fachada_m, "0.10", "0.60", "0.01", "pb") }}
+      {{ dnum("Muro de fachada (m)", "espesor_muro_fachada_m", "diseno_tipo", d_t.espesor_muro_fachada_m, "0.10", "0.60", "0.01", "tipo") }}
+      {{ dnum("Muro medianero (m)", "espesor_muro_medianero_m", "diseno", d.espesor_muro_medianero_m, "0.10", "0.60", "0.01", "pb") }}
+      {{ dnum("Muro medianero (m)", "espesor_muro_medianero_m", "diseno_tipo", d_t.espesor_muro_medianero_m, "0.10", "0.60", "0.01", "tipo") }}
+      {{ dnum("Separación entre unidades (m)", "espesor_separacion_unidades_m", "diseno", d.espesor_separacion_unidades_m, "0.10", "0.40", "0.01", "pb") }}
+      {{ dnum("Separación entre unidades (m)", "espesor_separacion_unidades_m", "diseno_tipo", d_t.espesor_separacion_unidades_m, "0.10", "0.40", "0.01", "tipo") }}
+      {{ dnum("Tabique interior (m)", "espesor_tabique_m", "diseno", d.espesor_tabique_m, "0.05", "0.20", "0.01", "pb") }}
+      {{ dnum("Tabique interior (m)", "espesor_tabique_m", "diseno_tipo", d_t.espesor_tabique_m, "0.05", "0.20", "0.01", "tipo") }}
     </div>
   </details>
 
   <details class="rc-grupo">
     <summary><span class="rc-grupo-titulo">Diseño · circulación y accesibilidad</span></summary>
     <div class="rc-grupo-cuerpo">
-      <label class="rc-campo">
-        <span class="rc-campo-label">Pasillo común mín. (m)</span>
-        <input type="number" name="ancho_min_pasillo_comun_m" min="0.90" max="2.0" step="0.05"
-               value="{{ d.ancho_min_pasillo_comun_m }}" data-bloque="diseno">
-      </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Pasillo en vivienda (m)</span>
-        <input type="number" name="ancho_min_pasillo_vivienda_m" min="0.80" max="1.50" step="0.05"
-               value="{{ d.ancho_min_pasillo_vivienda_m }}" data-bloque="diseno">
-      </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Diámetro vestíbulo (m)</span>
-        <input type="number" name="diametro_min_vestibulo_m" min="1.20" max="2.50" step="0.05"
-               value="{{ d.diametro_min_vestibulo_m }}" data-bloque="diseno">
-      </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Puerta paso libre (m)</span>
-        <input type="number" name="ancho_min_puerta_m" min="0.60" max="1.20" step="0.05"
-               value="{{ d.ancho_min_puerta_m }}" data-bloque="diseno">
-      </label>
-      <label class="rc-campo">
-        <span class="rc-campo-label">Profundidad máx. sin patio (m)</span>
-        <input type="number" name="profundidad_max_sin_patio_m" min="8" max="20" step="0.5"
-               value="{{ d.profundidad_max_sin_patio_m }}" data-bloque="diseno">
-      </label>
+      {% set d = parametros.diseno %}
+      {% set d_t = parametros.diseno_tipo %}
+      {% set d_a = parametros.diseno_atico %}
+      {% set d_s = parametros.diseno_sotano %}
+
+      {{ dnum("Pasillo común mín. (m)", "ancho_min_pasillo_comun_m", "diseno", d.ancho_min_pasillo_comun_m, "0.90", "2.0", "0.05", "pb") }}
+      {{ dnum("Pasillo común mín. (m)", "ancho_min_pasillo_comun_m", "diseno_tipo", d_t.ancho_min_pasillo_comun_m, "0.90", "2.0", "0.05", "tipo") }}
+      {{ dnum("Pasillo en vivienda (m)", "ancho_min_pasillo_vivienda_m", "diseno", d.ancho_min_pasillo_vivienda_m, "1.00", "1.50", "0.05", "pb") }}
+      {{ dnum("Pasillo en vivienda (m)", "ancho_min_pasillo_vivienda_m", "diseno_tipo", d_t.ancho_min_pasillo_vivienda_m, "1.00", "1.50", "0.05", "tipo") }}
+      {{ dnum("Diámetro vestíbulo (m)", "diametro_min_vestibulo_m", "diseno", d.diametro_min_vestibulo_m, "1.20", "2.50", "0.05", "pb") }}
+      {{ dnum("Diámetro vestíbulo (m)", "diametro_min_vestibulo_m", "diseno_tipo", d_t.diametro_min_vestibulo_m, "1.20", "2.50", "0.05", "tipo") }}
+      {{ dnum("Puerta paso libre (m)", "ancho_min_puerta_m", "diseno", d.ancho_min_puerta_m, "0.60", "1.20", "0.05", "pb") }}
+      {{ dnum("Puerta paso libre (m)", "ancho_min_puerta_m", "diseno_tipo", d_t.ancho_min_puerta_m, "0.60", "1.20", "0.05", "tipo") }}
+
+      {# % muros — por categoría de planta (PB / tipo / ático / sótano) #}
+      {{ dnum("% muros (PB)", "pct_muros", "diseno", d.pct_muros, "0", "60", "1", "pb") }}
+      {{ dnum("% muros (tipo)", "pct_muros", "diseno_tipo", d_t.pct_muros, "0", "60", "1", "tipo") }}
+      {{ dnum("% muros (ático)", "pct_muros", "diseno_atico", d_a.pct_muros, "0", "60", "1", "atico") }}
+      {{ dnum("% muros (sótano)", "pct_muros", "diseno_sotano", d_s.pct_muros, "0", "60", "1", "sotano") }}
+
+      {# % circulación — por categoría de planta #}
+      {{ dnum("% circulación (PB)", "pct_circulacion_pb", "diseno", d.pct_circulacion_pb, "0", "40", "1", "pb") }}
+      {{ dnum("% circulación (tipo)", "pct_circulacion_tipo", "diseno_tipo", d_t.pct_circulacion_tipo, "0", "40", "1", "tipo") }}
+      {{ dnum("% circulación (ático)", "pct_circulacion_tipo", "diseno_atico", d_a.pct_circulacion_tipo, "0", "40", "1", "atico") }}
+      {{ dnum("% circulación (sótano)", "pct_circulacion_tipo", "diseno_sotano", d_s.pct_circulacion_tipo, "0", "40", "1", "sotano") }}
+
+      {# % núcleo — PB / tipo (ático y sótano lo heredan) #}
+      {{ dnum("% núcleo (PB)", "pct_nucleo", "diseno", d.pct_nucleo, "0", "30", "1", "pb") }}
+      {{ dnum("% núcleo (tipo)", "pct_nucleo", "diseno_tipo", d_t.pct_nucleo, "0", "30", "1", "tipo") }}
     </div>
   </details>
-
-  <div class="rc-resumen-activos" id="rc-resumen-activos" aria-live="polite">
-    <h3>Parámetros activos</h3>
-    <ul>
-      <li><strong>Uso:</strong> <span data-resumen="uso">{{ parametros.programa.uso }}</span></li>
-      <li><strong>Edificabilidad:</strong> <span data-resumen="edif">{{ parametros.urbanisticos.edificabilidad_m2t_m2s }}</span> m²t/m²s</li>
-      <li><strong>Plantas máx.:</strong> <span data-resumen="plantas">{{ parametros.urbanisticos.n_plantas_max }}</span></li>
-      <li><strong>Ocupación:</strong> <span data-resumen="ocupacion">{{ parametros.urbanisticos.ocupacion_maxima_pct }}</span> %</li>
-      <li><strong>% adaptadas:</strong> <span data-resumen="adapt">{{ parametros.programa.pct_unidades_adaptadas }}</span> %</li>
-    </ul>
-  </div>
 </aside>

@@ -1,13 +1,6 @@
 """Parámetros del motor de cálculo (§2.6 + §2.3).
 
-Réplica de la API de `Modulos/puccetti-app/puccetti/config.py` pero con
-dataclasses estándar en lugar de Pydantic. El motor de geometría se sigue
-escribiendo contra estos objetos (`params.urbanismo.edificabilidad`,
-`params.diseno.espesor_muro_fachada`, etc.).
-
-Los valores **por defecto** son los del PDF para Sevilla casco. En tiempo de
-ejecución, la capa de casos de uso construye estos objetos desde los datos
-introducidos por el técnico o consultados a la BBDD de normativas municipales.
+Iteración 4: mirror de los cambios en `parametros.py`.
 """
 from __future__ import annotations
 
@@ -17,9 +10,13 @@ from typing import Optional
 
 @dataclass
 class ParametrosDiseno:
-    """§2.6 + Anexo II A2.x — parámetros de diseño interior."""
+    """§2.6 + Anexo II A2.x — parámetros de diseño interior.
 
-    # Espesores (A2.4)
+    Iteración 4: tres porcentajes explícitos (`pct_muros`,
+    `pct_circulacion`, `pct_nucleo`) controlan el reparto m² no-útil.
+    """
+
+    # Espesores (A2.4) — referencias para el render geométrico (DEPRECATED iter. 3)
     espesor_muro_fachada: float = 0.25
     espesor_muro_medianero: float = 0.25
     espesor_separacion_unidades: float = 0.20
@@ -34,19 +31,35 @@ class ParametrosDiseno:
     # Patios interiores (A2.5)
     luz_recta_patio_min: float = 3.00
     area_patio_min: float = 12.00
-    profundidad_max_sin_patio: float = 12.00
+
+    # Porcentajes. Suma ≤ 90% por planta (validado en capacidad).
+    pct_muros: float = 20.0
+    pct_circulacion_pb: float = 8.0      # % circulación en planta baja
+    pct_circulacion_tipo: float = 8.0    # % circulación en planta tipo / ático
+    pct_nucleo: float = 5.0
+    pct_muros_normativo: float = 20.0    # referencia normativa para "Muros estimado"
 
 
 @dataclass
 class ParametrosUrbanisticos:
-    """§2.3 — defaults para Sevilla casco."""
-    edificabilidad: float = 2.5
+    """§2.3 — defaults para Sevilla casco.
+
+    Iteración 4: `edificabilidad` renombrado a `coeficiente_edificabilidad`,
+    `altura_planta` eliminado, retranqueos refactorizados a `fachada` y
+    `linderos`.
+    """
+    coeficiente_edificabilidad: float = 2.5
+    usar_coeficiente_edificabilidad: bool = True
     ocupacion_maxima: float = 1.00
     n_plantas_max: int = 3
-    retranqueo_frontal: float = 0.0
-    retranqueo_lateral: float = 0.0
-    retranqueo_trasero: float = 0.0
-    altura_planta: float = 3.0
+    retranqueo_fachada: float = 0.0
+    retranqueo_linderos: float = 0.0
+    # Ático y sótano (iter. 3).
+    tiene_atico: bool = False
+    retranqueo_atico: float = 3.0
+    atico_computa_edificabilidad: bool = False
+    tiene_sotano: bool = False
+    sotano_computa_edificabilidad: bool = False
 
 
 @dataclass
@@ -57,8 +70,9 @@ class ParametrosPrograma:
     n_dormitorios: int = 2                    # 0 = estudio
     salon_cocina_open: bool = False
     n_plantas: int = 3
-    n_viviendas_por_planta: int = 1           # 0 = derivar automáticamente
-    pct_unidades_adaptadas: float = 5.0       # DB SUA ≥5%
+    pct_unidades_adaptadas: float = 5.0       # mínimo accesibilidad
+    tipologias_extra: list[int] = field(default_factory=list)  # nº dormitorios adicionales
+    pct_local_pb: float = 0.0                 # % útil PB destinado a local no residencial
 
 
 @dataclass
