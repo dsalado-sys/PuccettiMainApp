@@ -248,23 +248,12 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
             "mix_tipologia": dict(mix_i),
         })
 
-    if programa_uso is not None and getattr(programa_uso, "area_servicios_obligatorios_m2", 0.0) > 0:
-        comunes = float(programa_uso.area_servicios_obligatorios_m2)
-        rows.append({
-            "planta": "Comunes obligatorias",
-            "tipo": "comunes",
-            "viviendas": 0,
-            "construida_m2": round(comunes, 2),
-            "util_viviendas_m2": 0.0,
-            "muros_m2": 0.0,
-            "muros_estimados_m2": 0.0,
-            "circulacion_m2": round(comunes, 2),
-            "nucleo_m2": 0.0,
-            "patios_m2": 0.0,
-            "local_m2": 0.0,
-            "mix_tipologia": {},
-        })
-
+    # NOTA iter. junio 2026: las "Comunes obligatorias" del uso (apartamentos,
+    # hotel-apartamento, hotelero) están ya distribuidas dentro de
+    # `circulacion_por_planta[i]` (suma de `pct_circ × construida` + cuota de
+    # `area_servicios_obligatorios_m2 / n_plantas_habitables`). No se añade
+    # fila aparte: duplicaría m² y la suma de columnas dejaría de cuadrar con
+    # `construida_i` (huella).
     return rows
 
 

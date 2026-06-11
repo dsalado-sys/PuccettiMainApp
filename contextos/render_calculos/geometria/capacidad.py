@@ -232,11 +232,15 @@ def calcular_capacidad(
             # ático): usa pct_circulacion_tipo, sin local.
             es_pb = es_primera_regular and p.tipo == "regular"
             pct_circ_planta = pct_circ_pb if es_pb else pct_circ_tipo
-            circ_i = construida_i * pct_circ_planta / 100.0
+            # La circulación de la planta engloba: pasillos comunes
+            # (`pct_circulacion_*`) + cuota de áreas comunes obligatorias del
+            # uso (`descuento_por_planta`, sólo no-vivienda). Así la tabla
+            # cuadra: construida_i = util + muros + circ + núcleo + patio + local.
+            circ_i = construida_i * pct_circ_planta / 100.0 + descuento_por_planta
 
             util_bruto_i = max(
                 0.0,
-                construida_i - muros_i - circ_i - nucl_i - patio_i - descuento_por_planta,
+                construida_i - muros_i - circ_i - nucl_i - patio_i,
             )
             if es_pb:
                 local_i = util_bruto_i * pct_local_pb / 100.0
