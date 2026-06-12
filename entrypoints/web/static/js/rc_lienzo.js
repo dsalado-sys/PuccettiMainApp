@@ -40,6 +40,7 @@
   const coloresEl = document.getElementById("rc-lienzo-colores");
   const inputHex = document.getElementById("rc-lienzo-hex");
   const btnBorrarSel = document.getElementById("rc-lienzo-borrar-sel");
+  const btnAuto = document.getElementById("rc-lienzo-autodistribuir");
   const resumenEl = document.getElementById("rc-lienzo-resumen");
 
   const fmt = new Intl.NumberFormat("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -687,6 +688,61 @@
     }
   }
 
+  // ── Autodistribución (rellena el lienzo con el cálculo, Anexo II) ─────────
+  function hayDibujo() {
+    return Object.values(S.dibujos).some((l) => Array.isArray(l) && l.length > 0);
+  }
+
+  async function autodistribuir() {
+    if (!puedeEditar || !S.parcela) return;
+    if (hayDibujo() && !window.confirm(
+      "Se reemplazará el dibujo de TODAS las plantas por la distribución automática " +
+      "calculada (unidades, muros, circulación, núcleo, patio y local). ¿Continuar?"
+    )) return;
+
+    const parametros = (typeof window.rcLeerParametros === "function")
+      ? window.rcLeerParametros() : null;
+
+    if (window.rcSpinner) window.rcSpinner(true);
+    if (btnAuto) btnAuto.disabled = true;
+    try {
+      const resp = await fetch("/modulos/render-calculos/lienzo/autodistribuir", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parametros, persistir: true }),
+      });
+      if (!resp.ok) {
+        const txt = resp.status === 409
+          ? "Localiza la parcela y calcula la capacidad antes de autodistribuir."
+          : "No se pudo autodistribuir.";
+        if (window.rcToast) window.rcToast(txt, true);
+        return;
+      }
+      const data = await resp.json();
+      if (data.error) { if (window.rcToast) window.rcToast(data.error, true); return; }
+
+      adoptarDibujos(data.plantas);          // reemplaza el dibujo de todas las plantas
+      S.planta = plantaActivaDOM();
+      deseleccionar();
+      needsRender = true;
+      renderResumen();
+      if (figs().length) calcular();         // m² autoritativos + resumen por color
+
+      const n = (data.incidencias || []).length;
+      if (window.rcToast) {
+        window.rcToast(
+          n ? `Distribución generada · ${n} aviso${n === 1 ? "" : "s"} de Normativa`
+            : "Distribución generada.",
+          false,
+        );
+      }
+    } catch (err) {
+      if (window.rcToast) window.rcToast("No se pudo autodistribuir.", true);
+    } finally {
+      if (window.rcSpinner) window.rcSpinner(false);
+      if (btnAuto) btnAuto.disabled = false;
+    }
+  }
+
   function cambiarPlanta(idx) {
     if (idx === S.planta) return;
     S.planta = idx;
@@ -703,8 +759,15 @@
     aplicarColor(S.colorActual);
 
     if (toolbarEl) {
-      toolbarEl.querySelectorAll(".rc-tool").forEach((b) =>
+      toolbarEl.querySelectorAll(".rc-tool[data-tool]").forEach((b) =>
         b.addEventListener("click", (e) => { e.preventDefault(); setTool(b.dataset.tool); }));
+    }
+    if (btnAuto) {
+      if (puedeEditar) {
+        btnAuto.addEventListener("click", (e) => { e.preventDefault(); autodistribuir(); });
+      } else {
+        btnAuto.hidden = true;
+      }
     }
     if (inputNombre) {
       inputNombre.addEventListener("input", (e) => {

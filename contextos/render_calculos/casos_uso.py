@@ -274,6 +274,22 @@ def _plantas_envolvente_a_dict(envolvente) -> list[dict[str, Any]]:
     return out
 
 
+@dataclass
+class PreparacionCapacidad:
+    """Envolvente + capacidad + programa de uso ya resueltos.
+
+    Lo produce `CalcularLayout.preparar` y lo consumen tanto las tablas/KPIs
+    (`CalcularLayout.ejecutar`) como la autodistribución del lienzo
+    (`AutodistribuirLienzo`), para no duplicar la resolución de tipologías,
+    descriptores y áreas comunes.
+    """
+    envolvente: Any = None
+    cap: Any = None
+    programa_uso: Any = None
+    descriptores: Any = None
+    error: str | None = None
+
+
 # ─── Caso de uso 2: CalcularLayout (§2.4+§2.5 — calculations-first iter. 3) ─
 @dataclass
 class CalcularLayout:
@@ -295,26 +311,23 @@ class CalcularLayout:
     catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
     catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
 
-    def ejecutar(
+    def preparar(
         self,
         parcela: ParcelaMetrica,
         params: ParametrosRender,
-    ) -> dict[str, Any]:
+    ) -> PreparacionCapacidad:
+        """Resuelve envolvente + capacidad + programa de uso (sin tablas ni alertas).
+
+        Es la parte reutilizable: `ejecutar` la usa para las tablas/KPIs y
+        `AutodistribuirLienzo` para repartir cada planta en el lienzo. Si la
+        envolvente no es construible, devuelve `PreparacionCapacidad(error=…)`.
+        """
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
         try:
             envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
         except ValueError as exc:
-            return {
-                "error": str(exc),
-                "edificio": None,
-                "capacidad": None,
-                "alertas": [_alerta_dict(Alerta("incumplimiento", "Geometría", str(exc)))],
-                "tabla_planta": [],
-                "tabla_unidad": [],
-                "indicadores": None,
-                "envolvente": None,
-            }
+            return PreparacionCapacidad(error=str(exc))
 
         # 1) Resolver tamaño objetivo de la tipología principal (PB y plantas tipo).
         util_objetivo = self._resolver_util_objetivo(params)
@@ -343,8 +356,33 @@ class CalcularLayout:
             descriptores_tipologia_tipo=descriptores_tipo,
             disenos=_disenos_por_categoria(params),
         )
+        return PreparacionCapacidad(
+            envolvente=envolvente, cap=cap,
+            programa_uso=programa_uso, descriptores=descriptores,
+        )
 
-        # 4) Tablas sintéticas derivadas del cálculo (no de geometría).
+    def ejecutar(
+        self,
+        parcela: ParcelaMetrica,
+        params: ParametrosRender,
+    ) -> dict[str, Any]:
+        prep = self.preparar(parcela, params)
+        if prep.error is not None:
+            return {
+                "error": prep.error,
+                "edificio": None,
+                "capacidad": None,
+                "alertas": [_alerta_dict(Alerta("incumplimiento", "Geometría", prep.error))],
+                "tabla_planta": [],
+                "tabla_unidad": [],
+                "indicadores": None,
+                "envolvente": None,
+            }
+        envolvente = prep.envolvente
+        cap = prep.cap
+        programa_uso = prep.programa_uso
+
+        # Tablas sintéticas derivadas del cálculo (no de geometría).
         tabla_planta = tabla_planta_desde_capacidad(cap, programa_uso=programa_uso)
         tabla_unidad = tabla_unidad_desde_capacidad(cap, params, programa_uso=programa_uso)
 

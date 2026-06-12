@@ -30,6 +30,7 @@ from app.contextos.render_calculos.casos_uso import (
     parametros_desde_proyecto,
 )
 from app.contextos.render_calculos.casos_uso_lienzo import (
+    AutodistribuirLienzo,
     CalcularLienzo,
     CargarLienzo,
     GuardarLienzo,
@@ -291,6 +292,59 @@ def lienzo_calcular(
     if not isinstance(figuras, list) or not isinstance(muros, list):
         raise HTTPException(422, "Se esperan listas 'figuras' y 'muros'.")
     return JSONResponse(CalcularLienzo().ejecutar(parcela, figuras, muros))
+
+
+@router.post("/lienzo/autodistribuir")
+def lienzo_autodistribuir(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+    repo_proy: ProyectoRepositorio = Depends(repositorio_proyectos),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Reparte los m² calculados como piezas del lienzo, planta a planta (Anexo II).
+
+    Entrada: `{parametros, planta?, persistir?}`. Sin `planta` → todas las plantas.
+    `persistir` solo surte efecto si el rol puede EDITAR (reemplaza el dibujo de
+    cada planta generada). Devuelve `{plantas:{idx:{figuras,muros}}, incidencias,
+    resumen}` con el mismo formato de dibujo que `GET /lienzo`.
+    """
+    _exige_permiso(rol, PermisoModulo.VER)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    parcela = construir_parcela_metrica(proyecto)
+    if parcela is None:
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en §2.1.")
+
+    params = parametros_desde_dict(payload.get("parametros") or payload)
+    planta = payload.get("planta")
+    try:
+        planta_idx = int(planta) if planta is not None else None
+    except (TypeError, ValueError):
+        planta_idx = None
+
+    puede_editar = puede_acceder(
+        rol, ModuloPuccetti.RENDER_CALCULOS.value, PermisoModulo.EDITAR
+    )
+    persistir = bool(payload.get("persistir")) and puede_editar
+
+    layout = CalcularLayout(
+        catalogo_vivienda=catalogo_viv,
+        catalogo_apartamentos=catalogo_apt,
+        catalogo_hotel_apartamento=catalogo_hap,
+        catalogo_hotelero=catalogo_hot,
+    )
+    caso = AutodistribuirLienzo(
+        layout=layout,
+        repo_proyectos=repo_proy if persistir else None,
+    )
+    resultado = caso.ejecutar(
+        proyecto, parcela, params, planta=planta_idx, persistir=persistir
+    )
+    return JSONResponse(resultado)
 
 
 @router.post("/lienzo/guardar")

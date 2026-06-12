@@ -18,9 +18,11 @@ from typing import Any
 from app.contextos.proyectos.puertos import ProyectoRepositorio
 from app.nucleo.modelo import ModuloPuccetti, Proyecto
 
-from .casos_uso import ParcelaMetrica
+from .casos_uso import CalcularLayout, ParcelaMetrica
+from .geometria.disposicion import ObjetivoPlanta, disponer_planta
 from .geometria.lienzo import recortar_muro, recortar_poligono, resumen_por_color
 from .geometria.serializacion import ring
+from .parametros import ParametrosRender
 
 # Topes defensivos del payload (backstop ante dibujos accidentalmente enormes).
 LIENZO_MAX_FIGURAS = 1000
@@ -175,3 +177,120 @@ class CargarLienzo:
         lienzo = datos.get("lienzo") or {}
         plantas = lienzo.get("plantas") or {}
         return {"parcela": _parcela_dict(parcela), "plantas": plantas}
+
+
+# ─── Caso de uso 4: AutodistribuirLienzo (cálculo → piezas del lienzo) ──────
+@dataclass
+class AutodistribuirLienzo:
+    """Reparte los m² calculados (unidades / muros / circulación / núcleo /
+    patio / local) como piezas coloreadas del lienzo, planta a planta (Anexo II).
+
+    Reutiliza `CalcularLayout.preparar` (mismo cálculo que la tabla de
+    superficies) para obtener envolvente + capacidad, y `geometria.disposicion`
+    para la geometría. Las áreas de cada categoría cuadran con el cálculo.
+
+    El índice de planta coincide con el de las pestañas del lienzo y con la clave
+    bajo la que `GuardarLienzo` persiste cada dibujo (posición en
+    `envolvente.plantas`).
+    """
+
+    layout: CalcularLayout
+    repo_proyectos: ProyectoRepositorio | None = None
+
+    def ejecutar(
+        self,
+        proyecto: Proyecto,
+        parcela: ParcelaMetrica,
+        params: ParametrosRender,
+        planta: int | None = None,
+        persistir: bool = False,
+    ) -> dict[str, Any]:
+        prep = self.layout.preparar(parcela, params)
+        if prep.error is not None or prep.cap is None:
+            return {
+                "error": prep.error or "No se pudo calcular la capacidad de la parcela.",
+                "plantas": {},
+                "incidencias": [],
+                "resumen": [],
+                "persistido": 0,
+            }
+
+        cap = prep.cap
+        plantas_motor = list(prep.envolvente.plantas)
+        pm = params.a_parametros_motor()  # anchos / espesores de referencia (PB)
+
+        plantas_out: dict[str, dict[str, Any]] = {}
+        incidencias: list[str] = []
+        resumen: list[dict[str, Any]] = []
+
+        # `i` es la posición en `envolvente.plantas`, que coincide con el índice de
+        # `cap.*_por_planta[]` (ambos se recorren en el mismo orden), con la pestaña
+        # del lienzo (`data-indice`) y con la clave de `GuardarLienzo`. Con sótano:
+        # i=0 → sótano (n=-1), i=1 → PB (n=0), etc. La alineación está garantizada.
+        for i, pl in enumerate(plantas_motor):
+            if planta is not None and i != planta:
+                continue
+            obj = self._objetivo(i, pl, cap)
+            res = disponer_planta(obj, parcela.lados, pm)
+            figuras = [
+                {
+                    "id": f"auto-P{i}-{j}",
+                    "tipo": "poly",
+                    "nombre": pieza.nombre,
+                    "color": pieza.color,
+                    "vertices": pieza.vertices,
+                    "rotacion": 0.0,
+                }
+                for j, pieza in enumerate(res.piezas)
+            ]
+            plantas_out[str(i)] = {"figuras": figuras, "muros": []}
+            incidencias.extend(res.incidencias)
+            resumen.append({
+                "planta": cap.nombres_planta[i] if i < len(cap.nombres_planta) else f"P{i}",
+                "areas": {k: round(v, 2) for k, v in res.areas.items()},
+                "n_piezas": len(res.piezas),
+            })
+
+        persistido = 0
+        if persistir and self.repo_proyectos is not None and plantas_out:
+            # Al regenerar TODAS las plantas (planta is None), se descartan primero
+            # los dibujos de plantas que ya no existen (p. ej. si se redujo el nº de
+            # plantas), para que no reaparezcan al volver a aumentarlo.
+            if planta is None:
+                lienzo = proyecto.datos(ModuloPuccetti.RENDER_CALCULOS).setdefault(
+                    "lienzo", {"plantas": {}}
+                )
+                lienzo.setdefault("plantas", {})
+                for obsoleta in [k for k in lienzo["plantas"] if k not in plantas_out]:
+                    lienzo["plantas"].pop(obsoleta, None)
+            guardar = GuardarLienzo(repo_proyectos=self.repo_proyectos)
+            for idx, bloque in plantas_out.items():
+                guardar.ejecutar(proyecto, int(idx), bloque["figuras"], bloque["muros"])
+                persistido += 1
+
+        return {
+            "plantas": plantas_out,
+            "incidencias": incidencias,
+            "resumen": resumen,
+            "persistido": persistido,
+        }
+
+    def _objetivo(self, i: int, pl, cap) -> ObjetivoPlanta:
+        """Construye el objetivo de una planta desde la capacidad calculada."""
+        def _g(lista, defecto=0.0):
+            return float(lista[i]) if i < len(lista) else defecto
+
+        unidades_raw = cap.unidades_por_planta[i] if i < len(cap.unidades_por_planta) else []
+        unidades = [(f"V{j + 1}", float(util)) for j, (_n, util) in enumerate(unidades_raw)]
+        return ObjetivoPlanta(
+            nombre=cap.nombres_planta[i] if i < len(cap.nombres_planta) else f"P{i}",
+            tipo=cap.tipo_planta[i] if i < len(cap.tipo_planta) else "regular",
+            footprint=pl.footprint,
+            unidades=unidades,
+            muros_m2=_g(cap.muros_por_planta),
+            circulacion_m2=_g(cap.circulacion_por_planta),
+            nucleo_m2=_g(cap.nucleo_por_planta),
+            patio_m2=_g(cap.patio_por_planta),
+            local_m2=_g(cap.local_por_planta),
+            util_m2=_g(cap.util_por_planta),
+        )

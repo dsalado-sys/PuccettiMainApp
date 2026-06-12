@@ -576,6 +576,15 @@
 .rc-tool-goma.rc-tool-activo { background: var(--error, #8C2A1F); border-color: var(--error, #8C2A1F); }
 .rc-tool-sep { width: 1px; align-self: stretch; background: #E4DFCC; margin: 2px 4px; }
 
+/* Autodistribuir: acción destacada (rellena el lienzo con el cálculo). */
+.rc-tool-auto {
+  background: var(--negro, #0A0A0A);
+  border-color: var(--negro, #0A0A0A);
+  color: var(--dorado-claro, #C9A84C);
+}
+.rc-tool-auto:hover { background: #1c1c1c; border-color: var(--dorado, #B8960C); color: var(--blanco, #fff); }
+.rc-tool-auto:disabled { opacity: 0.55; cursor: progress; }
+
 .rc-lienzo-inspector {
   display: flex;
   flex-wrap: wrap;

@@ -126,6 +126,12 @@
   }
   function spinner(on) { if (spinnerEl) spinnerEl.hidden = !on; }
 
+  // Puente para el lienzo (rc_lienzo.js): leer los parámetros del formulario y
+  // reutilizar el toast/spinner de la cabecera sin duplicar lógica de lectura.
+  window.rcLeerParametros = leerFormulario;
+  window.rcToast = mostrarToast;
+  window.rcSpinner = spinner;
+
   // ─── Repintado de KPIs ────────────────────────────────────────────────
   function repintarKpis(payload) {
     const set = (key, v) => {
