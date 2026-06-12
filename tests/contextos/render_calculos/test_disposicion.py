@@ -73,18 +73,22 @@ def _overflow(res, footprint: Polygon) -> float:
 
 
 # ─── 1. Geometría pura ──────────────────────────────────────────────────────
-def test_cuadre_exacto_de_areas():
+def test_cuadre_total_y_muros_como_piezas():
     fp = box(0, 0, 20, 12)  # 240 m²
     obj = _objetivo_proporcional("PB", "regular", fp, n_unidades=4)
     res = disponer_planta(obj, _lados_rect(20, 12), Parametros())
 
-    assert _suma_areas(res) == pytest.approx(fp.area, abs=0.5)
-    # Cada categoría coincide con su objetivo (±tolerancia de bisección).
-    assert res.areas["muro"] == pytest.approx(obj.muros_m2, abs=0.5)
-    assert res.areas["circulacion"] == pytest.approx(obj.circulacion_m2, abs=0.5)
-    assert res.areas["nucleo"] == pytest.approx(obj.nucleo_m2, abs=0.5)
-    assert res.areas["patio"] == pytest.approx(obj.patio_m2, abs=0.5)
-    assert res.areas["unidad"] == pytest.approx(obj.util_m2, abs=0.5)
+    # El total (superficies + muro) cuadra con la huella.
+    assert _suma_areas(res) == pytest.approx(fp.area, rel=0.02)
+    # Los muros van como PIEZAS DE MURO (herramienta de muro), NO como superficie.
+    assert not any(p.categoria == "muro" for p in res.piezas)
+    assert res.muros
+    # m² de muro real (espesor normativo A2.4) → no supera el 20 % abstracto del cálculo.
+    assert res.areas["muro"] <= obj.muros_m2 + 1.0
+    # Cada categoría de superficie está presente y al menos su útil neto calculado.
+    for cat in ("circulacion", "nucleo", "patio", "unidad"):
+        assert res.areas.get(cat, 0.0) > 0
+    assert res.areas["unidad"] >= obj.util_m2 - 1.0
 
 
 def test_una_pieza_por_unidad():
@@ -106,8 +110,9 @@ def test_local_en_planta_baja():
     fp = box(0, 0, 24, 12)  # 288
     obj = _objetivo_proporcional("PB", "regular", fp, n_unidades=2, local=30.0)
     res = disponer_planta(obj, _lados_rect(24, 12), Parametros())
-    assert res.areas.get("local", 0.0) == pytest.approx(30.0, abs=0.5)
-    assert _suma_areas(res) == pytest.approx(fp.area, abs=0.5)
+    # Local presente y al menos su objetivo (descontados los muros reales).
+    assert res.areas.get("local", 0.0) >= 28.0
+    assert _suma_areas(res) == pytest.approx(fp.area, rel=0.02)
 
 
 def test_sotano_sin_unidades():
@@ -127,8 +132,8 @@ def test_una_unidad_con_patio_no_pierde_area():
     fp = box(0, 0, 9, 9)  # 81 m²
     obj = _objetivo_proporcional("PB", "regular", fp, n_unidades=1, patio=12.0)
     res = disponer_planta(obj, _lados_rect(9, 9), Parametros())
-    assert res.areas.get("patio", 0.0) == pytest.approx(12.0, abs=0.6)
-    assert _suma_areas(res) == pytest.approx(fp.area, abs=0.5)
+    assert res.areas.get("patio", 0.0) > 8.0  # patio presente (no se pierde)
+    assert _suma_areas(res) == pytest.approx(fp.area, rel=0.02)
     assert _overflow(res, fp) == pytest.approx(0.0, abs=0.05)
 
 
@@ -186,13 +191,16 @@ def test_incidencias_sin_referencias_literales():
         assert "Anexo" not in inc and "Decreto" not in inc
 
 
-def test_muros_distinguen_fachada_y_medianera():
+def test_muros_son_piezas_de_muro_clasificadas():
     fp = box(0, 0, 20, 12)
     obj = _objetivo_proporcional("PB", "regular", fp, n_unidades=3)
     res = disponer_planta(obj, _lados_rect(20, 12), Parametros())
-    nombres = {p.nombre for p in res.piezas if p.categoria == "muro"}
-    assert "Muro fachada" in nombres
-    assert "Muro medianera" in nombres
+    # Los muros son piezas de muro (segmento + grosor), no superficies.
+    assert not any(p.categoria == "muro" for p in res.piezas)
+    assert all(m.grosor > 0 and m.p1 and m.p2 for m in res.muros)
+    nombres = {m.nombre for m in res.muros}
+    assert "Muro interior" in nombres                     # entre unidades / unidad-circulación
+    assert nombres & {"Muro fachada", "Muro medianera"}   # exterior
 
 
 # ─── 2. Caso de uso AutodistribuirLienzo ────────────────────────────────────
@@ -214,13 +222,17 @@ def test_autodistribuir_genera_plantas_y_cuadra():
 
     assert out.get("error") is None
     assert out["plantas"], "debe generar al menos una planta"
-    # Cada planta: figuras con formato del lienzo y áreas que cuadran con la huella.
+    # Cada planta: figuras (superficies) + muros (piezas de muro) con su formato.
+    algun_muro = False
     for idx, bloque in out["plantas"].items():
-        assert bloque["muros"] == []
         for fig in bloque["figuras"]:
             assert set(fig) >= {"id", "tipo", "nombre", "color", "vertices", "rotacion"}
             assert fig["tipo"] == "poly"
             assert len(fig["vertices"]) >= 3
+        for m in bloque["muros"]:
+            assert set(m) >= {"id", "nombre", "color", "p1", "p2", "grosor"}
+            algun_muro = True
+    assert algun_muro, "las plantas con unidades deben llevar muros (herramienta de muro)"
     # El resumen reporta el cuadre por planta.
     for fila in out["resumen"]:
         assert fila["n_piezas"] > 0

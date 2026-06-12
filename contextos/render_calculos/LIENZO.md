@@ -372,19 +372,34 @@ deprecación de `macro_layout.py`). A diferencia de aquel motor (geometry-driven
 aquí **las áreas son el dato de entrada** y la geometría se dimensiona para
 **cuadrar con ellas** (partición exacta de la huella por bisección).
 
-### Qué pinta (bloques por categoría)
-Una pieza por **unidad** (V1, V2…) + **circulación** + **núcleo** + **patio** +
-**local** (solo PB) + la **banda perimetral de muros** (fachada/medianera). La
-suma de cada categoría = su m² calculado (`*_por_planta` de `Capacidad`).
+### Qué pinta (bloques por categoría + muros con la herramienta de muro)
+Un **bloque (superficie)** por **unidad** (V1, V2…) + **circulación** + **núcleo**
++ **patio** + **local** (solo PB). Los **muros NO son superficies**: se dibujan con
+la **herramienta de muro** (piezas de muro: segmento + grosor).
 
-| Categoría | Color | Origen del m² |
+| Categoría | Color | Origen / forma |
 |-----------|-------|----------------|
 | Unidad | Verde `#2E9E5B` | `unidades_por_planta[i]` (útil de cada unidad) |
 | Circulación | Dorado claro `#C9A84C` | `circulacion_por_planta[i]` |
 | Núcleo | Dorado `#B8960C` | `nucleo_por_planta[i]` |
 | Patio | Azul `#2D6CDF` | `patio_por_planta[i]` |
 | Local | Amarillo `#F2C200` | `local_por_planta[i]` (PB) |
-| Muros | Negro `#0A0A0A` | `muros_por_planta[i]` (banda perimetral) |
+| Muros | Negro `#0A0A0A` | **piezas de muro** (p1→p2 + grosor), espesor normativo A2.4 |
+
+### Muros (criterio del estudio)
+Los muros salen del **contorno de las regiones con muro** (unidad/patio/local):
+`wall_lines = unión de sus fronteras`. Por construcción se cumple:
+- unidades, patios y locales van **rodeados de muro**;
+- circulación y núcleos **no** llevan muro propio;
+- unidad pegada a núcleo → **un solo** muro (el de la unidad); unidad↔unidad → un
+  muro compartido (una vez); unidad↔exterior → fachada/medianera (clasificado por
+  el punto medio del segmento).
+
+Cada muro lleva su **espesor normativo** (A2.4: fachada/medianera 0,25 m,
+separación entre unidades 0,20 m, configurables). Su banda se **descuenta** de las
+superficies → la suma (superficies + muro) cuadra con la huella. Como los muros
+reales (≈0,20-0,25 m) ocupan menos que el 20 % abstracto de `muros_por_planta`, las
+superficies quedan **algo por encima** de su útil neto calculado («acercándose»).
 
 ### Esquema (vivienda, Anexo II)
 Núcleo pegado a una fachada (acceso) → pasillo común central → dos crujías de
@@ -413,10 +428,10 @@ a un **treemap** slice-and-dice que mantiene las áreas exactas y deja constanci
 `POST /modulos/render-calculos/lienzo/autodistribuir` · Entrada
 `{parametros, planta?, persistir?}` (sin `planta` → todas; `persistir` solo si el
 rol puede **EDITAR**). Salida `{plantas:{idx:{figuras,muros}}, incidencias,
-resumen}` con el **mismo formato de dibujo** que `GET /lienzo` (las piezas son
-`figuras` tipo `poly`; los muros van como superficies, no como piezas `muro`,
-para que su área cuadre con `recortar_poligono`). El índice de planta coincide
-con la pestaña del lienzo y con la clave de `GuardarLienzo`.
+resumen}` con el **mismo formato de dibujo** que `GET /lienzo`: las superficies
+son `figuras` tipo `poly` y los **muros son piezas de muro** (`{p1,p2,grosor}`),
+que `recortar_muro` recorta y que se editan con la herramienta de muro. El índice
+de planta coincide con la pestaña del lienzo y con la clave de `GuardarLienzo`.
 
 ### Flujo (un clic, reemplaza con confirmación)
 ```
@@ -433,8 +448,9 @@ con la pestaña del lienzo y con la clave de `GuardarLienzo`.
 ### Limitaciones (v1)
 - **Solo vivienda** afinada; otros usos caen al reparto genérico/treemap (la
   arquitectura es use-agnostic, pendiente afinar hotelero/apartamentos).
-- Banda de muros = **perímetro del bbox** local recortado a la huella: exacta en
-  área, pero en huellas muy cóncavas no traza los muros del entrante.
+- Las superficies por categoría son **aproximadas** (los muros reales ocupan menos
+  que el 20 % del cálculo, así que las superficies quedan algo por encima del útil
+  neto); el **total** (superficies + muro) sí cuadra con la huella.
 - Sin subdivisión interior de cada unidad en estancias (salón, dormitorios…): es
   «bloques por categoría». La subdivisión queda para una capa posterior
   (`interiores.py` ya existe para vivienda).

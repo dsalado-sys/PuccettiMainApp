@@ -54,6 +54,7 @@ from shapely.geometry import (
     box,
 )
 from shapely.affinity import rotate, translate
+from shapely.ops import unary_union
 
 from .config import Parametros
 from .parcelas import LadoParcela
@@ -102,11 +103,28 @@ class PiezaDispuesta:
     vertices: list[list[float]]       # anillo exterior abierto, UTM30N, redondeado a cm
 
 
+@dataclass(frozen=True)
+class MuroDispuesto:
+    """Un muro listo para el lienzo (segmento p1→p2 + grosor — herramienta de muro)."""
+    nombre: str                       # "Muro fachada" | "Muro medianera" | "Muro interior"
+    color: str
+    grosor: float                     # m (espesor normativo A2.4)
+    p1: list[float]                   # [x, y] UTM30N
+    p2: list[float]
+
+
 @dataclass
 class ResultadoPlanta:
     piezas: list[PiezaDispuesta] = field(default_factory=list)
+    muros: list[MuroDispuesto] = field(default_factory=list)
     incidencias: list[str] = field(default_factory=list)
     areas: dict[str, float] = field(default_factory=dict)
+
+
+# Categorías que van rodeadas de muro (criterio del estudio): unidades, patios y
+# locales. La circulación y los núcleos NO llevan muro propio; si una unidad está
+# pegada a un núcleo, el muro de esa frontera es el de la unidad (uno solo).
+CATEGORIAS_CON_MURO = frozenset({"unidad", "patio", "local"})
 
 
 # ─── Helpers de geometría (puros) ───────────────────────────────────────────
@@ -253,54 +271,6 @@ def _cortar_h(region: Polygon, y_lo: float, y_hi: float, area_obj: float) -> flo
 
 
 # ─── Muros: banda perimetral dimensionada a `muros_m2` ──────────────────────
-def _resolver_grosor_muros(fp_a: Polygon, bnds, muros_obj: float) -> float:
-    """Grosor `t` de la banda perimetral tal que su área = `muros_obj` (bisección).
-
-    La banda = huella − rectángulo interior reducido `t` por cada lado. Su área
-    crece monótona con `t`, así que la bisección converge.
-    """
-    mnx, mny, mxx, mxy = bnds
-    A = fp_a.area
-    if muros_obj <= 0 or A <= 0:
-        return 0.0
-    tmax = min(mxx - mnx, mxy - mny) * 0.45
-    lo, hi = 0.0, tmax
-    for _ in range(40):
-        t = (lo + hi) / 2.0
-        inner = fp_a.intersection(box(mnx + t, mny + t, mxx - t, mxy - t)).area
-        band = A - inner
-        if band < muros_obj:
-            lo = t
-        else:
-            hi = t
-    return (lo + hi) / 2.0
-
-
-def _muros_strips(fp_a: Polygon, bnds, t: float, edges: dict[str, EdgeTipo],
-                  placed: list[tuple[dict, Any]]) -> None:
-    """Descompone la banda perimetral en 4 tiras (esquinas a izquierda/derecha).
-
-    Cada tira se etiqueta fachada/medianera (A2.4: huecos solo en fachada). Las
-    tiras no se solapan: top/bottom van de `mnx+t` a `mxx-t`; las esquinas caen en
-    left/right. Para huellas cóncavas la tira puede partirse (se emiten varias).
-    """
-    if t <= 1e-6:
-        return
-    mnx, mny, mxx, mxy = bnds
-    tiras = [
-        (edges["xmin"], box(mnx, mny, mnx + t, mxy)),
-        (edges["xmax"], box(mxx - t, mny, mxx, mxy)),
-        (edges["ymin"], box(mnx + t, mny, mxx - t, mny + t)),
-        (edges["ymax"], box(mnx + t, mxy - t, mxx - t, mxy)),
-    ]
-    for tipo, bx in tiras:
-        g = fp_a.intersection(bx)
-        if g.is_empty or g.area < 1e-3:
-            continue
-        nombre = "Muro fachada" if tipo == "fachada" else "Muro medianera"
-        placed.append(({"nombre": nombre, "categoria": "muro"}, g))
-
-
 # ─── Treemap slice-and-dice (fallback robusto, áreas exactas) ───────────────
 def _treemap(region: Polygon, items: list[dict]) -> list[tuple[dict, Polygon]]:
     """Parte `region` en piezas con las áreas de `items` (orden preservado)."""
@@ -336,33 +306,6 @@ def _treemap(region: Polygon, items: list[dict]) -> list[tuple[dict, Polygon]]:
 
     rec(region, list(items))
     return out
-
-
-def _items_categorias(obj: ObjetivoPlanta, area_destino: float) -> list[dict]:
-    """Lista de bloques por categoría escalada a `area_destino` (cuadre exacto)."""
-    base: list[dict] = []
-    if obj.nucleo_m2 > 0:
-        base.append({"nombre": "Núcleo", "categoria": "nucleo", "area": obj.nucleo_m2})
-    if obj.circulacion_m2 > 0:
-        base.append({"nombre": "Circulación", "categoria": "circulacion", "area": obj.circulacion_m2})
-    if obj.patio_m2 > 0:
-        base.append({"nombre": "Patio", "categoria": "patio", "area": obj.patio_m2})
-    if obj.local_m2 > 0:
-        base.append({"nombre": "Local", "categoria": "local", "area": obj.local_m2})
-    for etiqueta, u in obj.unidades:
-        if u > 0:
-            base.append({"nombre": etiqueta, "categoria": "unidad", "area": u})
-    suma = sum(i["area"] for i in base)
-    resto = area_destino - suma
-    if resto > 0.5:
-        nombre = "Sótano" if obj.tipo == "sotano" else "Sup. libre"
-        base.append({"nombre": nombre, "categoria": "resto", "area": resto})
-        suma += resto
-    if suma > 0 and abs(suma - area_destino) > 1e-6:
-        k = area_destino / suma
-        for i in base:
-            i["area"] *= k
-    return base
 
 
 # ─── Esquema estructurado de vivienda (Anexo II) ────────────────────────────
@@ -574,14 +517,124 @@ def _rings_mundo(g: Any, mu) -> list[list[list[float]]]:
     return out
 
 
+def _area_total(g: Any) -> float:
+    """Área de un polígono/multipolígono (0 si vacío)."""
+    return float(g.area) if g is not None and not g.is_empty else 0.0
+
+
+def _segmentos_linea(geom: Any) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """Descompone un (Multi)LineString en segmentos rectos (pares de puntos)."""
+    if geom is None or geom.is_empty:
+        return []
+    lineas = geom.geoms if hasattr(geom, "geoms") else [geom]
+    out: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for ln in lineas:
+        if getattr(ln, "geom_type", "") != "LineString":
+            continue
+        cs = list(ln.coords)
+        for a, b in zip(cs[:-1], cs[1:]):
+            if math.hypot(b[0] - a[0], b[1] - a[1]) > 0.05:
+                out.append((a, b))
+    return out
+
+
+def _items_superficies(obj: ObjetivoPlanta, area_destino: float) -> list[dict]:
+    """Bloques por categoría (sin muros) escalados para LLENAR la huella.
+
+    No añade una categoría «muros»: los muros son líneas (piezas de muro) y su
+    área se descuenta luego de las superficies. El sótano deja su suelo como
+    «resto» (sin muro).
+    """
+    base: list[dict] = []
+    if obj.nucleo_m2 > 0:
+        base.append({"nombre": "Núcleo", "categoria": "nucleo", "area": obj.nucleo_m2})
+    if obj.circulacion_m2 > 0:
+        base.append({"nombre": "Circulación", "categoria": "circulacion", "area": obj.circulacion_m2})
+    if obj.patio_m2 > 0:
+        base.append({"nombre": "Patio", "categoria": "patio", "area": obj.patio_m2})
+    if obj.local_m2 > 0:
+        base.append({"nombre": "Local", "categoria": "local", "area": obj.local_m2})
+    for etiqueta, u in obj.unidades:
+        if u > 0:
+            base.append({"nombre": etiqueta, "categoria": "unidad", "area": u})
+    suma = sum(i["area"] for i in base)
+    if suma <= 1e-6:
+        nombre = "Sótano" if obj.tipo == "sotano" else "Sup. libre"
+        return [{"nombre": nombre, "categoria": "resto", "area": area_destino}]
+    if obj.tipo == "sotano" and area_destino - suma > 0.5:
+        base.append({"nombre": "Sótano", "categoria": "resto", "area": area_destino - suma})
+        suma = area_destino
+    k = area_destino / suma if suma > 0 else 1.0
+    for i in base:
+        i["area"] *= k
+    return base
+
+
+def _macro_regiones(fp_a: Polygon, obj: ObjetivoPlanta, pm: Parametros,
+                    edges: dict[str, EdgeTipo],
+                    incid: list[str]) -> list[tuple[dict, Polygon]]:
+    """Partición etiquetada que LLENA la huella (un bloque por categoría).
+
+    Reutiliza el esquema estructurado de vivienda; si no encaja, un treemap de las
+    superficies. Cada unidad es una región propia (luego se rodea de muro).
+    """
+    if obj.tipo in ("regular", "atico") and obj.unidades:
+        try:
+            est = _estructurado(fp_a, obj, pm, edges, incid)
+        except Exception:
+            est = None
+        if est:
+            return est
+        incid.append(
+            f"{obj.nombre}: disposición simplificada (la huella no admite el "
+            f"esquema núcleo + pasillo de doble crujía)."
+        )
+    return _treemap(fp_a, _items_superficies(obj, fp_a.area))
+
+
+def _clasificar_muro(a, b, fp_a: Polygon, segs: dict[str, MultiLineString],
+                     pm: Parametros) -> tuple[str, float]:
+    """Clasifica un segmento de muro y le asigna su grosor normativo (A2.4).
+
+    Exterior (sobre el contorno de la huella): fachada o medianera, según a qué
+    lado de la parcela esté más cerca → espesor de fachada / medianera. Interior
+    (entre unidades, unidad-circulación, unidad-núcleo, perímetro de patio/local):
+    espesor de separación entre unidades.
+    """
+    seg = LineString([a, b])
+    en_exterior = seg.intersection(fp_a.exterior.buffer(0.15)).length
+    if en_exterior >= 0.5 * seg.length:
+        # Fachada vs. medianera por el PUNTO MEDIO del segmento (no por la mínima
+        # distancia del segmento completo, que en las esquinas empata a 0 porque
+        # el extremo toca el lado contiguo).
+        mid = seg.interpolate(0.5, normalized=True)
+        fach, med = segs["fachada"], segs["medianera"]
+        df = mid.distance(fach) if not fach.is_empty else math.inf
+        dm = mid.distance(med) if not med.is_empty else math.inf
+        if dm < df:
+            return "Muro medianera", float(pm.diseno.espesor_muro_medianero)
+        return "Muro fachada", float(pm.diseno.espesor_muro_fachada)
+    return "Muro interior", float(pm.diseno.espesor_separacion_unidades)
+
+
 def disponer_planta(obj: ObjetivoPlanta, lados: list[LadoParcela],
                     pm: Parametros) -> ResultadoPlanta:
     """Reparte los m² objetivo de una planta en piezas del lienzo (Anexo II).
 
-    Pipeline: orienta la huella al eje largo, fija una fachada a la izquierda,
-    reserva la banda perimetral de muros (= `muros_m2`), y reparte el interior
-    con el esquema estructurado de vivienda; si no encaja, con un treemap. Las
-    áreas de cada categoría suman su m² calculado.
+    Un bloque (superficie) por categoría: unidad / circulación / núcleo / patio /
+    local. Los **muros se dibujan con la herramienta de muro** (piezas de muro:
+    segmento + grosor), NO como superficies. Topología (criterio del estudio):
+    - unidades, patios y locales van **rodeados de muro**;
+    - circulación y núcleos **no** llevan muro propio;
+    - unidad pegada a núcleo → **un solo** muro (el de la unidad);
+    - unidad↔unidad → un muro compartido (una vez); unidad↔exterior →
+      fachada/medianera. Esto sale por construcción de
+      `wall_lines = unión de fronteras de las regiones con muro`.
+
+    Los muros llevan su **espesor normativo** (A2.4: fachada/medianera 0,25 m,
+    separación entre unidades 0,20 m, configurables). Su banda se descuenta de las
+    superficies, así que la suma (superficies + muro) cuadra con la huella y cada
+    categoría se acerca a su m² calculado.
     """
     res = ResultadoPlanta()
     fp = _poly_safe(obj.footprint)
@@ -603,41 +656,42 @@ def disponer_planta(obj: ObjetivoPlanta, lados: list[LadoParcela],
         segs = _segmentos_por_tipo(lados, al)
         edges = _clasificar_box_edges(fp_a.bounds, segs)
 
-    bnds = fp_a.bounds
-    mnx, mny, mxx, mxy = bnds
+    # 1) Macro-regiones que llenan la huella (un bloque por categoría).
+    regiones = _macro_regiones(fp_a, obj, pm, edges, res.incidencias)
 
-    placed: list[tuple[dict, Any]] = []
+    # 2) Muros = contorno de las regiones con muro (unión → frontera compartida 1 vez).
+    con_muro = [_poly_safe(g) for meta, g in regiones
+                if meta["categoria"] in CATEGORIAS_CON_MURO and not _poly_safe(g).is_empty]
+    wall_lines = unary_union([g.boundary for g in con_muro]) if con_muro else MultiLineString([])
 
-    # Muros: banda perimetral dimensionada a `muros_m2`.
-    t = _resolver_grosor_muros(fp_a, bnds, obj.muros_m2)
-    _muros_strips(fp_a, bnds, t, edges, placed)
-    interior = _poly_safe(fp_a.intersection(box(mnx + t, mny + t, mxx - t, mxy - t)))
-    if interior.is_empty or interior.area < 1.0:
-        interior = fp_a  # huella diminuta: no se reserva banda
+    # Cada segmento → pieza de muro con su espesor normativo; su banda se carva.
+    muros_meta: list[tuple] = []
+    bandas: list[Polygon] = []
+    for a, b in _segmentos_linea(wall_lines):
+        nombre, grosor = _clasificar_muro(a, b, fp_a, segs, pm)
+        muros_meta.append((a, b, nombre, grosor))
+        bandas.append(LineString([a, b]).buffer(grosor / 2.0, cap_style=2, join_style=2))
+    wall_band = unary_union(bandas) if bandas else Polygon()
 
-    # Interior: esquema estructurado (plantas con unidades) o treemap.
-    estructura: list[tuple[dict, Polygon]] | None = None
-    if obj.tipo in ("regular", "atico") and obj.unidades:
-        try:
-            estructura = _estructurado(interior, obj, pm, edges, res.incidencias)
-        except Exception:
-            estructura = None
-    if estructura is None:
-        estructura = _treemap(interior, _items_categorias(obj, interior.area))
-        if obj.tipo in ("regular", "atico") and obj.unidades:
-            res.incidencias.append(
-                f"{obj.nombre}: disposición simplificada (la huella no admite el "
-                f"esquema núcleo + pasillo de doble crujía)."
-            )
-
-    placed += estructura
-
-    # Rasterizado a piezas del lienzo (mundo UTM30N).
-    for meta, g in placed:
+    # 3) Superficies: un bloque por categoría, descontando la banda de muro.
+    for meta, g in regiones:
         cat = meta["categoria"]
         color = COLORES.get(cat, COLORES["resto"])
-        for ring in _rings_mundo(g, mu):
+        g = _poly_safe(g)
+        visible = g.difference(wall_band) if not wall_band.is_empty else g
+        for ring in _rings_mundo(visible, mu):
             res.piezas.append(PiezaDispuesta(meta["nombre"], cat, color, ring))
-        res.areas[cat] = res.areas.get(cat, 0.0) + _poly_safe(g).area
+        res.areas[cat] = res.areas.get(cat, 0.0) + _area_total(visible)
+
+    # 4) Piezas de muro (mundo UTM30N).
+    for a, b, nombre, grosor in muros_meta:
+        p1 = mu(Point(a))
+        p2 = mu(Point(b))
+        res.muros.append(MuroDispuesto(
+            nombre=nombre, color=COLORES["muro"], grosor=round(grosor, 3),
+            p1=[round(p1.x, 2), round(p1.y, 2)], p2=[round(p2.x, 2), round(p2.y, 2)],
+        ))
+    if not wall_band.is_empty:
+        res.areas["muro"] = round(wall_band.intersection(fp_a).area, 2)
 
     return res

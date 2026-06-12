@@ -243,12 +243,24 @@ class AutodistribuirLienzo:
                 }
                 for j, pieza in enumerate(res.piezas)
             ]
-            plantas_out[str(i)] = {"figuras": figuras, "muros": []}
+            muros = [
+                {
+                    "id": f"autom-P{i}-{j}",
+                    "nombre": m.nombre,
+                    "color": m.color,
+                    "p1": m.p1,
+                    "p2": m.p2,
+                    "grosor": m.grosor,
+                }
+                for j, m in enumerate(res.muros)
+            ]
+            plantas_out[str(i)] = {"figuras": figuras, "muros": muros}
             incidencias.extend(res.incidencias)
             resumen.append({
                 "planta": cap.nombres_planta[i] if i < len(cap.nombres_planta) else f"P{i}",
                 "areas": {k: round(v, 2) for k, v in res.areas.items()},
                 "n_piezas": len(res.piezas),
+                "n_muros": len(res.muros),
             })
 
         persistido = 0
