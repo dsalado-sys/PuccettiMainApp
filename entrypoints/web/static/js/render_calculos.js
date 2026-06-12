@@ -30,6 +30,11 @@
   const modal = document.getElementById("rc-modal-normativa");
 
   const renderer = new window.RenderCanvas(canvasEl);
+  // El centro lo posee ahora el lienzo interactivo (rc_lienzo.js). Neutralizamos
+  // el render pasivo: las tablas/KPIs/alertas siguen funcionando, pero el canvas
+  // no se repinta con la envolvente automática. setRotation sigue siendo seguro
+  // (llama internamente a este dibujar noop).
+  renderer.dibujar = function () {};
 
   const fmt = {
     m2: new Intl.NumberFormat("es-ES", { maximumFractionDigits: 1, minimumFractionDigits: 1 }),

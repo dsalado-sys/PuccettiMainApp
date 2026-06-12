@@ -29,6 +29,11 @@ from app.contextos.render_calculos.casos_uso import (
     construir_parcela_metrica,
     parametros_desde_proyecto,
 )
+from app.contextos.render_calculos.casos_uso_lienzo import (
+    CalcularLienzo,
+    CargarLienzo,
+    GuardarLienzo,
+)
 from app.contextos.render_calculos.dominio import UsoEdificio
 from app.contextos.render_calculos.parametros import (
     ParametrosUrbanisticos,
@@ -245,6 +250,76 @@ def guardar(
 
     actualizado = GuardarRender(repo_proyectos=repo_proy).ejecutar(proyecto, params, resumen)
     return JSONResponse({"ok": True, "actualizado_en": actualizado.actualizado_en.isoformat()})
+
+
+# ─── Lienzo de dibujo manual sobre la parcela (§2.4 — capa manual) ──────────
+@router.get("/lienzo")
+def lienzo_cargar(
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+):
+    """Parcela (ring UTM + bbox) + dibujo guardado por planta."""
+    _exige_permiso(rol, PermisoModulo.VER)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    parcela = construir_parcela_metrica(proyecto)
+    if parcela is None:
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en §2.1.")
+    return JSONResponse(CargarLienzo().ejecutar(proyecto, parcela))
+
+
+@router.post("/lienzo/calcular")
+def lienzo_calcular(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+):
+    """Recorta las piezas a la parcela y devuelve m² + resumen por color (no persiste).
+
+    Contrato: el frontend envía los vértices YA rotados (en metros UTM30N); el
+    backend solo recorta. El ángulo de rotación se persiste como metadato pero no
+    se usa aquí.
+    """
+    _exige_permiso(rol, PermisoModulo.VER)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    parcela = construir_parcela_metrica(proyecto)
+    if parcela is None:
+        raise HTTPException(409, "El proyecto no tiene parcela asociada.")
+    figuras = payload.get("figuras")
+    muros = payload.get("muros")
+    if not isinstance(figuras, list) or not isinstance(muros, list):
+        raise HTTPException(422, "Se esperan listas 'figuras' y 'muros'.")
+    return JSONResponse(CalcularLienzo().ejecutar(parcela, figuras, muros))
+
+
+@router.post("/lienzo/guardar")
+def lienzo_guardar(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+    repo_proy: ProyectoRepositorio = Depends(repositorio_proyectos),
+):
+    """Persiste el dibujo de una planta (sin tocar parámetros ni cálculos)."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    try:
+        planta = int(payload.get("planta"))
+    except (TypeError, ValueError):
+        raise HTTPException(422, "Falta un índice de planta válido.")
+    figuras = payload.get("figuras")
+    muros = payload.get("muros")
+    if not isinstance(figuras, list) or not isinstance(muros, list):
+        raise HTTPException(422, "Se esperan listas 'figuras' y 'muros'.")
+    actualizado = GuardarLienzo(repo_proyectos=repo_proy).ejecutar(
+        proyecto, planta, figuras, muros
+    )
+    return JSONResponse({
+        "ok": True,
+        "planta": planta,
+        "actualizado_en": actualizado.actualizado_en.isoformat(),
+    })
 
 
 # ─── Normativa municipal: listado + lectura + escritura ─────────────────────

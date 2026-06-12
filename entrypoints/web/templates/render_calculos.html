@@ -49,6 +49,16 @@
       <span class="rc-tab rc-tab-vacio">Pulsa «Calcular capacidad» o cambia un parámetro para empezar.</span>
     </nav>
 
+    <div class="rc-lienzo-toolbar" id="rc-lienzo-toolbar" role="toolbar" aria-label="Herramientas de dibujo">
+      <button type="button" class="rc-tool rc-tool-activo" data-tool="seleccionar" title="Seleccionar / mover / rotar">◰ Seleccionar</button>
+      <button type="button" class="rc-tool" data-tool="rect" title="Pintar geometría (rectángulo)">▭ Geometría</button>
+      <button type="button" class="rc-tool" data-tool="poly" title="Pintar líneas (polígono): cierra en el primer punto o con Enter">⬠ Líneas</button>
+      <button type="button" class="rc-tool" data-tool="muro" title="Pintar muro: dos puntos">▬ Muro</button>
+      <span class="rc-tool-sep" aria-hidden="true"></span>
+      <button type="button" class="rc-tool rc-tool-goma" data-tool="goma-sup" title="Borrar superficie">⌫ Superficie</button>
+      <button type="button" class="rc-tool rc-tool-goma" data-tool="goma-muro" title="Borrar muro">⌫ Muro</button>
+    </div>
+
     <div class="rc-canvas-wrap">
       <canvas id="rc-canvas" width="800" height="600"></canvas>
       <div class="rc-brujula" id="rc-brujula" aria-label="Brújula y orientaciones cardinales"></div>
@@ -70,6 +80,26 @@
       <span class="rc-leg rc-leg-nucleo">Núcleo vertical</span>
       <span class="rc-leg rc-leg-patio">Patio interior</span>
     </footer>
+
+    <!-- Inspector contextual: nombre + color de la figura seleccionada -->
+    <div class="rc-lienzo-inspector" id="rc-lienzo-inspector" hidden>
+      <label class="rc-lienzo-campo">
+        <span>Nombre</span>
+        <input type="text" id="rc-lienzo-nombre" maxlength="40" autocomplete="off" placeholder="Ej: Salón" />
+      </label>
+      <div class="rc-lienzo-campo">
+        <span>Color</span>
+        <div class="rc-lienzo-colores" id="rc-lienzo-colores" role="radiogroup" aria-label="Color de la figura"></div>
+      </div>
+      <label class="rc-lienzo-campo rc-lienzo-campo-hex">
+        <span>Hex</span>
+        <input type="text" id="rc-lienzo-hex" maxlength="7" autocomplete="off" placeholder="#RRGGBB" />
+      </label>
+      <button type="button" id="rc-lienzo-borrar-sel" class="boton-secundario rc-lienzo-borrar">Eliminar figura</button>
+    </div>
+
+    <!-- Resumen agregado por color (superficies + muros) -->
+    <div class="rc-lienzo-resumen" id="rc-lienzo-resumen" aria-live="polite"></div>
   </section>
 
   <!-- ────────── Columna derecha: tabla + KPIs ────────── -->
@@ -140,4 +170,5 @@
 <script src="/static/js/rc_brujula.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_canvas.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/render_calculos.js?v={{ estaticos_version }}" defer></script>
+<script src="/static/js/rc_lienzo.js?v={{ estaticos_version }}" defer></script>
 {% endblock %}
