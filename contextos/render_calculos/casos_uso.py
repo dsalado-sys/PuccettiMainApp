@@ -8,12 +8,14 @@ parámetro (DI) y no conocen FastAPI ni SQLAlchemy.
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
 from pyproj import Transformer
+from shapely.errors import GEOSException
 from shapely.geometry import Polygon
 from shapely.ops import transform as shp_transform
 
@@ -29,7 +31,9 @@ from .dominio import (
 from .geometria.capacidad import DisenoPlanta, calcular_capacidad, capacidad_a_dict
 from .geometria.envolvente import construir_envolvente
 from .geometria.parcelas import LadoParcela, azimut_normal_exterior, orientacion_cardinal
+from .geometria.reparto_unidades import repartir_unidades
 from .geometria.serializacion import (
+    edificio_dispuesto_a_dict,
     lados_a_dict,
     ring,
     tabla_planta_desde_capacidad,
@@ -48,6 +52,9 @@ from .puertos import (
     CatalogoSuperficiesRepositorio,
     NormativaMunicipalRepositorio,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Reproyección WGS84 ↔ UTM30N (Iberia peninsular) ────────────────────────
@@ -299,7 +306,15 @@ class CalcularLayout:
         self,
         parcela: ParcelaMetrica,
         params: ParametrosRender,
+        *,
+        con_reparto: bool = True,
     ) -> dict[str, Any]:
+        """Capacidad + tablas + (si `con_reparto`) reparto geométrico del edificio.
+
+        `con_reparto=False` salta el reparto en planta (`edificio: None`) para
+        consumidores que solo necesitan las tablas (p. ej. `export.csv`), donde
+        es ~90× más rápido.
+        """
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
         try:
@@ -348,13 +363,43 @@ class CalcularLayout:
         tabla_planta = tabla_planta_desde_capacidad(cap, programa_uso=programa_uso)
         tabla_unidad = tabla_unidad_desde_capacidad(cap, params, programa_uso=programa_uso)
 
-        # 5) Indicadores y alertas (sin edificio dispuesto).
-        indicadores = _indicadores_disenho(parcela, envolvente.plantas)
+        # 5) Reparto geométrico de las unidades del cálculo (§2.5 + criterios
+        #    de diseño interior). El plano dibuja EXACTAMENTE las unidades que
+        #    dicta `cap`; si la geometría falla, el cálculo y las tablas siguen
+        #    siendo válidos (edificio: null + aviso). Except estrecho: un bug
+        #    de programación debe aflorar, no degradarse en silencio.
+        edificio = None
+        edificio_dict = None
+        alertas_reparto: list[Alerta] = []
+        if con_reparto:
+            try:
+                edificio = repartir_unidades(
+                    envolvente, parcela.lados, params_motor, cap,
+                    minimos_por_slug=self._minimos_por_slug(descriptores, descriptores_tipo),
+                    tipo_unidad=(programa_uso.tipo_unidad if programa_uso else "vivienda"),
+                    principales_m2=self._principales_m2(params, programa_uso),
+                    area_social_m2=area_comunes,
+                )
+                edificio_dict = edificio_dispuesto_a_dict(edificio)
+                alertas_reparto = [
+                    Alerta(a.nivel, a.regla, a.mensaje, a.elemento) for a in edificio.alertas
+                ]
+            except (ValueError, GEOSException):
+                logger.exception("Fallo geométrico en el reparto de unidades en planta")
+                alertas_reparto = [Alerta(
+                    "aviso", "Capacidad",
+                    "No se pudo generar el plano de distribución para esta parcela; "
+                    "los cálculos y las tablas siguen siendo válidos.",
+                )]
+
+        # 6) Indicadores y alertas.
+        indicadores = _indicadores_disenho(parcela, envolvente.plantas, edificio)
         alertas = _alertas_envolvente(envolvente, parcela, params)
         alertas += _alertas_capacidad(cap, params, programa_uso)
+        alertas += alertas_reparto
 
         return {
-            "edificio": None,                          # render geométrico en backlog
+            "edificio": edificio_dict,
             "capacidad": capacidad_a_dict(cap),         # fuente de verdad
             "tabla_planta": tabla_planta,
             "tabla_unidad": tabla_unidad,
@@ -500,6 +545,40 @@ class CalcularLayout:
         except Exception:
             return None
         return None
+
+    @staticmethod
+    def _minimos_por_slug(descriptores, descriptores_tipo) -> dict[str, float] | None:
+        """Útil mínimo del Anexo I por slug de tipología (PB + plantas tipo).
+
+        Vivienda no usa descriptores (devuelve None) y el reparto cae a
+        `util_minimo_vivienda(n_dorms)`.
+        """
+        minimos: dict[str, float] = {}
+        for lista in (descriptores, descriptores_tipo):
+            for d in lista or []:
+                minimos.setdefault(d.slug, float(d.util_minimo))
+        return minimos or None
+
+    @staticmethod
+    def _principales_m2(params: ParametrosRender, programa_uso):
+        """Callable (slug, n_dorms, util) → m² de estancias principales de la
+        unidad, para dimensionar su hueco de fachada (10% en el reparto)."""
+        from .geometria.serializacion import _estancias_por_unidad_dorms
+
+        def fn(slug: str, n_dorms: int, util: float) -> float:
+            try:
+                estancias = _estancias_por_unidad_dorms(
+                    params, n_dorms, util, programa_uso, slug
+                )
+                area = sum(
+                    e["area_target_m2"] for e in estancias
+                    if e.get("categoria") in ("publica", "privada")
+                )
+                return area if area > 0 else util * 0.70
+            except Exception:
+                return util * 0.70
+
+        return fn
 
     def _construir_programa_uso(
         self,

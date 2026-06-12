@@ -317,7 +317,8 @@ def export_csv(
         catalogo_hotel_apartamento=catalogo_hap,
         catalogo_hotelero=catalogo_hot,
     )
-    resultado = caso_uso.ejecutar(parcela, params)
+    # El CSV solo usa las tablas: no hace falta el reparto geométrico (~90× más lento).
+    resultado = caso_uso.ejecutar(parcela, params, con_reparto=False)
 
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")

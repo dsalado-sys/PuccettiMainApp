@@ -440,6 +440,27 @@ def calcular_capacidad(
     )
 
 
+def indices_adaptadas(cap: Capacidad, pct: float) -> set[tuple[int, int]]:
+    """Índices (planta i, unidad j) de las unidades adaptadas (DB SUA).
+
+    Criterio ÚNICO compartido por `tabla_unidad_desde_capacidad` y por el
+    reparto geométrico (`reparto_unidades`), para que tabla y plano marquen
+    exactamente las mismas unidades: las primeras `n` en orden (planta, unidad),
+    con `n = int(total × pct/100 + 0.5)`.
+    """
+    total = cap.n_viviendas_objetivo
+    n_adaptadas = int(total * max(0.0, float(pct)) / 100.0 + 0.5)
+    indices: set[tuple[int, int]] = set()
+    marcadas = 0
+    for i, unidades_i in enumerate(cap.unidades_por_planta):
+        for j in range(len(unidades_i)):
+            if marcadas >= n_adaptadas:
+                return indices
+            indices.add((i, j))
+            marcadas += 1
+    return indices
+
+
 def capacidad_a_dict(cap: Capacidad) -> dict:
     """Serializa Capacidad a JSON-friendly dict.
 

@@ -32,6 +32,12 @@ class ParametrosDiseno:
     luz_recta_patio_min: float = 3.00
     area_patio_min: float = 12.00
 
+    # Reparto de unidades en planta (§2.5 — criterios del estudio, configurables)
+    prof_min_unidad: float = 3.50    # fondo mínimo de banda para alojar unidades
+    prof_max_unidad: float = 8.00    # fondo máximo de unidad desde fachada (proporción real)
+    ancho_portal: float = 3.00       # zaguán de acceso PB (fachada → vestíbulo del núcleo)
+    plantas_para_ascensor: int = 3   # nº de plantas a partir del cual el ascensor es obligatorio (A2.1)
+
     # Porcentajes. Suma ≤ 90% por planta (validado en capacidad).
     pct_muros: float = 20.0
     pct_circulacion_pb: float = 8.0      # % circulación en planta baja

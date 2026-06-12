@@ -13,9 +13,11 @@ from typing import Any
 
 from shapely.geometry import Polygon
 
+from .capacidad import indices_adaptadas
 from .config import Parametros
 from .macro_layout import EdificioPlurifamiliar, PlantaPlurifamiliar, Unidad, Nucleo
 from .parcelas import LadoParcela, orientacion_cardinal
+from .reparto_unidades import EdificioDispuesto, PlantaDispuesta, UnidadDispuesta
 
 
 def ring(geom: Polygon, tol: float = 0.03) -> list[list[float]]:
@@ -369,6 +371,132 @@ def _estancias_por_unidad(params, util_por_unidad: float, programa_uso) -> list[
     return _estancias_por_unidad_dorms(params, n_dorms, util_por_unidad, programa_uso)
 
 
+# ─── Serialización del reparto geométrico (§2.5 — edificio dispuesto) ────────
+def _unidad_dispuesta_dict(u: UnidadDispuesta) -> dict[str, Any]:
+    """Contrato EXACTO que consume `rc_canvas.js` por unidad.
+
+    Invariantes del frontend: `area_util_m2` SIEMPRE numérico (0.0 si la unidad
+    no se ubicó) y polígonos como listas (vacías si no hay geometría).
+    """
+    return {
+        "id": u.id,
+        "tipo": u.tipo_unidad,
+        "tipologia": u.slug,
+        "n_dormitorios": u.n_dorms,
+        "estado": "ubicada" if u.ubicada else "no_ubicada",
+        "poligono_util": ring(u.geometry_util) if not u.geometry_util.is_empty else [],
+        "poligono_construido": ring(u.geometry_constr) if not u.geometry_constr.is_empty else [],
+        "area_util_m2": float(u.area_util_m2),
+        "area_construida_m2": float(u.area_constr_m2),
+        "util_objetivo_m2": float(u.util_objetivo_m2),
+        "area_min_m2": float(u.util_min_m2),
+        "acceso_pasillo": bool(u.acceso_pasillo),
+        "borde_pasillo_m": float(u.borde_pasillo_m),
+        "frente_fachada_m": float(u.frente_fachada_m),
+        "ventilacion": {
+            "tipo": u.ventilacion_tipo,
+            "borde_m": float(u.frente_fachada_m),
+            "hueco_requerido_m2": float(u.hueco_req_m2),
+            "hueco_disponible_m2": float(u.hueco_disp_m2),
+            "cumple": bool(u.ventila_ok),
+        },
+        "proporcion": {"fondo_frente": float(u.fondo_frente), "cumple": bool(u.proporcion_ok)},
+        "cumple_minimos": bool(u.cumple_min and u.ubicada),
+        "es_adaptada": bool(u.es_adaptada),
+        "incidencias": list(u.incidencias),
+    }
+
+
+def _planta_dispuesta_dict(pl: PlantaDispuesta) -> dict[str, Any]:
+    nucleo_dict = None
+    if pl.nucleo is not None:
+        n = pl.nucleo
+        nucleo_dict = {
+            "poligono": ring(n.geometry),
+            "escalera": ring(n.escalera),
+            "ascensor": ring(n.ascensor),
+            "vestibulo": ring(n.vestibulo),
+            "area_m2": round(n.area_m2, 2),
+            "es_caseton": bool(pl.nucleo_es_caseton),
+            "circulo_libre": {
+                "centro": [round(n.circulo_centro[0], 2), round(n.circulo_centro[1], 2)],
+                "radio_m": round(n.circulo_radio, 2),
+                "diametro_m": round(n.circulo_radio * 2, 2),
+                "cumple": bool(n.circulo_ok),
+            },
+        }
+
+    unidades = [_unidad_dispuesta_dict(u) for u in pl.unidades]
+    # Las piezas singulares (local, zonas sociales, restos) se dibujan con el
+    # mismo mecanismo que las unidades, sin contar como vivienda.
+    for p in pl.piezas:
+        unidades.append({
+            "id": p.nombre,
+            "tipo": p.tipo,
+            "tipologia": p.tipo,
+            "n_dormitorios": 0,
+            "estado": "ubicada",
+            "poligono_util": ring(p.geometry) if not p.geometry.is_empty else [],
+            "poligono_construido": ring(p.geometry) if not p.geometry.is_empty else [],
+            "area_util_m2": round(float(p.area_m2), 2),
+            "area_construida_m2": round(float(p.area_m2), 2),
+            "util_objetivo_m2": round(float(p.target_m2), 2),
+            "area_min_m2": 0.0,
+            "acceso_pasillo": True,
+            "borde_pasillo_m": 0.0,
+            "frente_fachada_m": float(p.frente_fachada_m),
+            "ventilacion": {"tipo": "fachada", "borde_m": float(p.frente_fachada_m),
+                            "hueco_requerido_m2": 0.0, "hueco_disponible_m2": 0.0, "cumple": True},
+            "proporcion": {"fondo_frente": 0.0, "cumple": True},
+            "cumple_minimos": True,
+            "es_adaptada": False,
+            "incidencias": [],
+        })
+
+    return {
+        "n": pl.n,
+        "nombre": pl.nombre,
+        "tipo": pl.tipo,
+        "footprint": ring(pl.footprint),
+        "muros_perimetrales": ring(pl.muros_perimetrales),
+        "nucleo": nucleo_dict,
+        "tipologia_circulacion": pl.tipologia_circulacion,
+        "pasillos": [
+            {"poligono": ring(c.geometry), "tipo": c.tipo, "ancho_m": round(c.ancho_m, 2),
+             "area_m2": round(c.area_m2, 2)}
+            for c in pl.circulaciones
+        ],
+        "patios": [
+            {"poligono": ring(p.geometry), "area_m2": round(p.area_m2, 2),
+             "luz_recta_m": round(p.luz_recta_m, 2)}
+            for p in pl.patios
+        ],
+        "unidades": unidades,
+        "superficies": dict(pl.superficies),
+        "conciliacion": dict(pl.conciliacion),
+        "n_viviendas": sum(1 for u in pl.unidades if u.ubicada),
+        "incidencias": list(pl.incidencias) + [
+            inc for u in pl.unidades for inc in u.incidencias
+        ],
+    }
+
+
+def edificio_dispuesto_a_dict(edif: EdificioDispuesto) -> dict[str, Any]:
+    """Serializa el resultado de `repartir_unidades` con el contrato del canvas.
+
+    Invariante: `plantas` tiene la MISMA longitud y orden que
+    `envolvente.plantas` / `cap.nombres_planta` (los tabs del frontend indexan
+    por posición).
+    """
+    return {
+        "estrategia": edif.estrategia,
+        "score": edif.score,
+        "n_unidades": edif.n_unidades,
+        "n_unidades_ubicadas": edif.n_unidades_ubicadas,
+        "plantas": [_planta_dispuesta_dict(pl) for pl in edif.plantas],
+    }
+
+
 def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[str, Any]]:
     """Una fila por unidad — n_dorms y útil REAL por unidad (no promediados).
 
@@ -393,10 +521,10 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
     util_obj = cap.util_objetivo_viv_m2
     tipo_unidad = programa_uso.tipo_unidad if programa_uso is not None else "vivienda"
 
-    total_unidades = cap.n_viviendas_objetivo
+    # Criterio compartido con el reparto geométrico: tabla y plano marcan las
+    # MISMAS unidades adaptadas.
     pct_adapt = max(0.0, float(getattr(params.programa, "pct_unidades_adaptadas", 0.0)))
-    n_adaptadas = int(total_unidades * pct_adapt / 100.0 + 0.5)
-    adaptadas_marcadas = 0
+    adaptadas = indices_adaptadas(cap, pct_adapt)
 
     local_pp = list(getattr(cap, "local_por_planta", [])) or [0.0] * len(cap.nombres_planta)
     pct_local_pb = float(getattr(cap, "pct_local_pb", 0.0))
@@ -435,9 +563,7 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
         for j, (n_dorms_u, util_u) in enumerate(unidades_i):
             letra = chr(ord('A') + j) if j < 26 else f"#{j+1}"
             slug_u = tipologias_i[j] if j < len(tipologias_i) else None
-            es_adapt = adaptadas_marcadas < n_adaptadas
-            if es_adapt:
-                adaptadas_marcadas += 1
+            es_adapt = (i, j) in adaptadas
             # Solo los MUROS perimetrales se prorratean a la unidad. La
             # circulación común y el núcleo son del edificio (tabla por planta).
             factor = util_u / util_i_consumido
