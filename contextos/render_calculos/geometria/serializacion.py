@@ -257,6 +257,16 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
     return rows
 
 
+# Usos cuyas unidades se rigen por normativa TURÍSTICA (computable ≠ útil total).
+USOS_TURISMO = ("apartamento", "hotel_apartamento", "habitacion")
+
+# Margen de circulación de acceso (vestíbulo/pasillo interior de la unidad) que NO
+# computa a efectos turísticos. Coincide con el 15% que `util_objetivo_* = mínimos
+# × 1.15` reserva en el Anexo I: las estancias computables ocupan `útil / 1.15` y
+# el resto (`útil − útil/1.15`) es la circulación de acceso no computable.
+PCT_CIRCULACION_TURISMO = 15.0
+
+
 # Diámetros mínimos inscribibles por nombre de estancia (m).
 # Aproximamos cada habitación como rectángulo 1:1.5 → lado_menor = √(area/1.5).
 # Cabe el círculo si lado_menor ≥ diametro_min_m.
@@ -324,6 +334,16 @@ def _estancias_por_unidad_dorms(
         return []
 
     tipo_unidad = getattr(programa_uso, "tipo_unidad", "vivienda") if programa_uso is not None else "vivienda"
+    es_turismo = tipo_unidad in USOS_TURISMO
+
+    # En usos turísticos reservamos el margen de circulación de acceso (no
+    # computable): los programas del Anexo I sólo dimensionan estancias
+    # computables, que se ajustan al presupuesto `útil / 1.15`. La vivienda
+    # gestiona su propia circulación internamente (emite `circulacion_interior`).
+    if es_turismo:
+        util_computable = util_por_unidad / (1.0 + PCT_CIRCULACION_TURISMO / 100.0)
+    else:
+        util_computable = util_por_unidad
 
     if tipo_unidad == "apartamento":
         cat = getattr(params.programa, "categoria_apartamentos", None)
@@ -331,17 +351,17 @@ def _estancias_por_unidad_dorms(
         grupo = getattr(params.programa, "grupo_apartamentos", None)
         grupo_v = grupo.value if grupo is not None else "edificios"
         tip_v = slug or _slug_principal(params, "apartamento")
-        estancias = programa_apartamentos(tip_v, cat_v, util_por_unidad, grupo_v)
+        estancias = programa_apartamentos(tip_v, cat_v, util_computable, grupo_v)
     elif tipo_unidad == "hotel_apartamento":
         cat = getattr(params.programa, "categoria_hotel_apartamento", None)
         cat_v = cat.value if cat is not None else "3E"
         tip_v = slug or _slug_principal(params, "hotel_apartamento")
-        estancias = programa_hotel_apartamento(tip_v, cat_v, util_por_unidad)
+        estancias = programa_hotel_apartamento(tip_v, cat_v, util_computable)
     elif tipo_unidad == "habitacion":
         cat = getattr(params.programa, "categoria_hotelero", None)
         cat_v = cat.value if cat is not None else "hotel_3"
         tip_v = slug or _slug_principal(params, "habitacion")
-        estancias = programa_habitacion(tip_v, cat_v, util_por_unidad)
+        estancias = programa_habitacion(tip_v, cat_v, util_computable)
     else:
         salon_open = bool(getattr(params.programa, "salon_cocina_open", False))
         estancias = programa_vivienda(n_dorms, util_por_unidad, salon_open)
@@ -356,7 +376,28 @@ def _estancias_por_unidad_dorms(
             "area_min_m2": round(e.area_min_m2, 2),
             "diametro_min_m": diam,
             "cabe_diametro": cabe,
+            # Computa a efectos turísticos todo salvo la circulación de acceso
+            # (vestíbulos/pasillos). Los pasillos internos de una estancia ya están
+            # descontados porque los mínimos del Anexo son superficies netas.
+            "computa_turismo": e.categoria != "circulacion",
         })
+
+    # Circulación de acceso (NO computable) como estancia explícita en turismo, si
+    # el programa no la incluyó ya: remanente del útil tras las estancias computables.
+    if es_turismo and not any(not e["computa_turismo"] for e in salida):
+        computable_total = sum(e["area_target_m2"] for e in salida)
+        circ = round(max(0.0, util_por_unidad - computable_total), 2)
+        if circ > 0.05:
+            cabe, diam = _cabe_diametro("circulacion_interior", circ)
+            salida.append({
+                "nombre": "circulacion_interior",
+                "categoria": "circulacion",
+                "area_target_m2": circ,
+                "area_min_m2": 0.0,
+                "diametro_min_m": diam,
+                "cabe_diametro": cabe,
+                "computa_turismo": False,
+            })
     return salida
 
 
@@ -452,10 +493,13 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
             # menos la suma de las estancias que NO son circulación. En vivienda
             # coincide con la estancia "circulacion_interior" (15% del útil); en
             # apartamentos/hoteles es el remanente del útil tras las estancias.
-            util_estancias_no_circ = sum(
-                e["area_target_m2"] for e in estancias if e.get("categoria") != "circulacion"
+            # Superficie computable (turismo) = estancias que computan; la
+            # circulación de acceso (vestíbulo/pasillo) NO computa. En vivienda la
+            # estancia `circulacion_interior` (15% del útil) también se excluye.
+            computable_u = sum(
+                e["area_target_m2"] for e in estancias if e.get("computa_turismo", e.get("categoria") != "circulacion")
             )
-            circ_interior_u = max(0.0, util_u - util_estancias_no_circ)
+            circ_interior_u = max(0.0, util_u - computable_u)
 
             rows.append({
                 "planta": nombre_planta,
@@ -466,6 +510,7 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
                 "util_m2_objetivo": util_obj,
                 "construida_por_unidad_m2": round(construida_u, 2),
                 "util_por_unidad_m2": round(util_u, 2),
+                "computable_turismo_por_unidad_m2": round(computable_u, 2),
                 "muros_por_unidad_m2": round(muros_u, 2),
                 "circulacion_interior_por_unidad_m2": round(circ_interior_u, 2),
                 "adaptada": es_adapt,

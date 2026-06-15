@@ -59,16 +59,30 @@ def programa_apartamentos(
     util_disponible: float,
     grupo: str = "edificios",
 ) -> list[Estancia]:
-    """Lista de `Estancia` de un apartamento turístico (categoría/tipología/grupo)."""
+    """Estancias COMPUTABLES de un apartamento turístico (categoría/tipología/grupo).
+
+    Devuelve únicamente las estancias que **computan** a efectos de la normativa
+    turística (salón-comedor, dormitorio, cocina, baño). La circulación de acceso
+    (vestíbulo/pasillo interior de la unidad) NO se modela aquí: es un espacio NO
+    computable que la capa de serialización añade como remanente del útil.
+
+    `util_disponible` es el presupuesto COMPUTABLE a repartir entre estancias: las
+    estancias devueltas suman ese presupuesto (cocina y baño en su mínimo práctico;
+    salón-comedor y dormitorio escalan proporcionalmente a sus mínimos del Anexo,
+    nunca por debajo de ellos). Con `util_disponible=0` cada estancia cae a su
+    mínimo (lo aprovecha `_base_util`).
+    """
     cat = _cat_validada(categoria, grupo)
     tip = _tip_validada(tipologia)
     bano_min = MIN_BANO[cat]
 
     if tip == "estudio":
         est = MIN_ESTUDIO[cat]
+        bano_t = bano_min
+        salon_t = max(est, util_disponible - bano_t)
         return [
-            Estancia("salon_comedor", "publica", est, max(est, util_disponible * 0.78)),
-            Estancia("bano", "servicio", bano_min, bano_min + 1.0),
+            Estancia("salon_comedor", "publica", est, round(salon_t, 2)),
+            Estancia("bano", "servicio", bano_min, round(bano_t, 2)),
         ]
 
     plazas = PLAZAS.get(tip, 2)
@@ -77,15 +91,33 @@ def programa_apartamentos(
     dorm_min = MIN_DORMITORIO[tip][cat]
     cocina_min = MIN_COCINA[cat]
 
-    estancias = [
-        Estancia("salon_comedor", "publica", salon_min, max(salon_min, util_disponible * 0.32)),
-        Estancia("dormitorio_1", "privada", dorm_min, dorm_min + 2.0),
-        Estancia("cocina", "publica", cocina_min, cocina_min + 1.0),
-        Estancia("bano", "servicio", bano_min, bano_min + 1.0),
-    ]
+    # Cocina y baño: tamaño práctico fijo en su mínimo (no escalan con la superficie).
+    cocina_t = cocina_min
+    bano_t = bano_min
+    fijas_t = cocina_t + bano_t
     # Conjuntos (A1.4): 2º baño obligatorio si más de 5 usuarios.
-    if grupo == "conjuntos" and plazas > 5:
-        estancias.append(Estancia("aseo", "servicio", bano_min, bano_min))
+    segundo_bano = grupo == "conjuntos" and plazas > 5
+    if segundo_bano:
+        fijas_t += bano_min
+
+    # Salón-comedor y dormitorio absorben el resto del presupuesto computable,
+    # proporcional a sus mínimos; nunca por debajo del mínimo del Anexo.
+    resto = max(0.0, util_disponible - fijas_t)
+    base = salon_min + dorm_min
+    if base > 0 and resto > 0:
+        salon_t = max(salon_min, resto * salon_min / base)
+        dorm_t = max(dorm_min, resto * dorm_min / base)
+    else:
+        salon_t, dorm_t = salon_min, dorm_min
+
+    estancias = [
+        Estancia("salon_comedor", "publica", salon_min, round(salon_t, 2)),
+        Estancia("dormitorio_1", "privada", dorm_min, round(dorm_t, 2)),
+        Estancia("cocina", "publica", cocina_min, round(cocina_t, 2)),
+        Estancia("bano", "servicio", bano_min, round(bano_t, 2)),
+    ]
+    if segundo_bano:
+        estancias.append(Estancia("aseo", "servicio", bano_min, round(bano_min, 2)))
     return estancias
 
 

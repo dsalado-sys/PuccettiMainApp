@@ -21,8 +21,9 @@
         <table class="rc-mu-tabla">
           <tbody>
             <tr><th>Construida</th><td id="rc-mu-construida">—</td></tr>
-            <tr><th>Útil</th><td id="rc-mu-util">—</td></tr>
-            <tr><th>Circulación interior</th><td id="rc-mu-circ">—</td></tr>
+            <tr><th>Útil total</th><td id="rc-mu-util">—</td></tr>
+            <tr class="rc-mu-fila-turismo"><th>Computable turismo</th><td id="rc-mu-computable">—</td></tr>
+            <tr><th id="rc-mu-circ-label">Circulación interior</th><td id="rc-mu-circ">—</td></tr>
             <tr><th>Muros</th><td id="rc-mu-muros">—</td></tr>
           </tbody>
         </table>
@@ -30,10 +31,30 @@
 
       <section class="rc-mu-estancias">
         <h3>Estancias (Anexo I)</h3>
-        <ul id="rc-mu-estancias-lista" class="rc-mu-estancias-lista">
-          <li class="rc-vacio">—</li>
-        </ul>
-        <p class="rc-mu-total">Total objetivo: <span id="rc-mu-total-estancias">—</span></p>
+        <table class="rc-mu-est-tabla" id="rc-mu-est-tabla">
+          <thead>
+            <tr>
+              <th>Estancia</th>
+              <th>Categoría</th>
+              <th class="rc-num">Útil</th>
+              <th class="rc-num rc-mu-col-comp">Computable</th>
+            </tr>
+          </thead>
+          <tbody id="rc-mu-estancias-lista">
+            <tr><td colspan="4" class="rc-vacio">—</td></tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <th colspan="2">Totales</th>
+              <td class="rc-num" id="rc-mu-total-util">—</td>
+              <td class="rc-num rc-mu-col-comp" id="rc-mu-total-computable">—</td>
+            </tr>
+          </tfoot>
+        </table>
+        <p class="rc-mu-nota rc-mu-fila-turismo">
+          Computable a efectos turísticos = estancias interiores (dormitorios, salón,
+          cocina, baño) excluyendo vestíbulos y pasillos de acceso de la unidad.
+        </p>
       </section>
     </div>
   </article>

@@ -297,33 +297,49 @@
     setT("rc-mu-adapt", ds.adaptada === "1" ? "Sí" : "No");
     setT("rc-mu-construida", fmt.m2.format(parseFloat(ds.construida || 0)) + " m²");
     setT("rc-mu-util", fmt.m2.format(parseFloat(ds.util || 0)) + " m²");
-    setT("rc-mu-circ", fmt.m2.format(parseFloat(ds.circ || 0)) + " m²");
     setT("rc-mu-muros", fmt.m2.format(parseFloat(ds.muros || 0)) + " m²");
+
+    // Computable turismo aplica a apartamentos turísticos, hoteles-apartamento y
+    // habitaciones de hotel. En vivienda/local se oculta la columna y las filas.
+    const esTurismo = ["apartamento", "hotel_apartamento", "habitacion"].includes(ds.tipo);
+    modalEl.classList.toggle("rc-mu-no-turismo", !esTurismo);
+    setT("rc-mu-circ-label", esTurismo ? "Circulación de acceso (no computable)" : "Circulación interior");
 
     let estancias = [];
     try { estancias = JSON.parse(ds.estancias || "[]"); } catch (e) { estancias = []; }
-    const ul = document.getElementById("rc-mu-estancias-lista");
-    if (ul) {
-      ul.innerHTML = "";
+    const tbody = document.getElementById("rc-mu-estancias-lista");
+    let totalUtil = 0, totalComputable = 0;
+    if (tbody) {
+      tbody.innerHTML = "";
       if (!estancias.length) {
-        ul.innerHTML = '<li class="rc-vacio">Sin programa de estancias para esta unidad.</li>';
+        tbody.innerHTML = '<tr><td colspan="4" class="rc-vacio">Sin programa de estancias para esta unidad.</td></tr>';
       } else {
         estancias.forEach(e => {
-          const li = document.createElement("li");
-          li.className = "rc-mu-estancia rc-mu-estancia-" + (e.categoria || "");
+          const util = e.area_target_m2 || 0;
+          const computa = e.computa_turismo !== false && e.categoria !== "circulacion";
+          totalUtil += util;
+          if (computa) totalComputable += util;
+          const tr = document.createElement("tr");
+          tr.className = "rc-mu-estancia rc-mu-estancia-" + (e.categoria || "");
+          if (e.cabe_diametro === false) tr.classList.add("rc-mu-estancia-warn");
           const warn = (e.cabe_diametro === false)
             ? `<span class="rc-mu-est-warn" title="No cabe Ø ${e.diametro_min_m} m">⚠</span>`
             : "";
-          if (e.cabe_diametro === false) li.classList.add("rc-mu-estancia-warn");
-          li.innerHTML = `${warn}<span class="rc-mu-est-nombre">${e.nombre}</span>
-            <span class="rc-mu-est-cat">${e.categoria || ""}</span>
-            <span class="rc-mu-est-m2">${fmt.m2.format(e.area_target_m2)} m²</span>`;
-          ul.appendChild(li);
+          const compCelda = computa
+            ? `${fmt.m2.format(util)} m²`
+            : '<span class="rc-mu-nocomp">no computa</span>';
+          tr.innerHTML = `<td class="rc-mu-est-nombre">${warn}${e.nombre}</td>
+            <td class="rc-mu-est-cat">${e.categoria || ""}</td>
+            <td class="rc-num">${fmt.m2.format(util)} m²</td>
+            <td class="rc-num rc-mu-col-comp">${compCelda}</td>`;
+          tbody.appendChild(tr);
         });
       }
     }
-    const totalEst = estancias.reduce((acc, e) => acc + (e.area_target_m2 || 0), 0);
-    setT("rc-mu-total-estancias", fmt.m2.format(totalEst) + " m²");
+    setT("rc-mu-total-util", fmt.m2.format(totalUtil) + " m²");
+    setT("rc-mu-total-computable", fmt.m2.format(totalComputable) + " m²");
+    setT("rc-mu-computable", fmt.m2.format(totalComputable) + " m²");
+    setT("rc-mu-circ", fmt.m2.format(Math.max(0, totalUtil - totalComputable)) + " m²");
 
     if (typeof modalEl.showModal === "function") modalEl.showModal();
     else modalEl.setAttribute("open", "");

@@ -330,10 +330,13 @@ def export_csv(
                          r["circulacion_m2"], r.get("nucleo_m2", 0.0)])
     writer.writerow([])
     writer.writerow(["# Tabla por unidad (iter. 3 — sintética desde cálculo)"])
-    writer.writerow(["planta", "vivienda", "dorms", "tipo", "util_m2_objetivo", "adaptada"])
+    writer.writerow(["planta", "vivienda", "dorms", "tipo", "util_m2_objetivo",
+                     "util_total_m2", "computable_turismo_m2", "circulacion_acceso_m2", "adaptada"])
     for r in resultado.get("tabla_unidad", []):
         writer.writerow([r["planta"], r["vivienda"], r["dorms"], r.get("tipo", "vivienda"),
-                         r["util_m2_objetivo"], r["adaptada"]])
+                         r["util_m2_objetivo"], r.get("util_por_unidad_m2", 0.0),
+                         r.get("computable_turismo_por_unidad_m2", 0.0),
+                         r.get("circulacion_interior_por_unidad_m2", 0.0), r["adaptada"]])
     return Response(
         content=buf.getvalue().encode("utf-8-sig"),
         media_type="text/csv; charset=utf-8",
