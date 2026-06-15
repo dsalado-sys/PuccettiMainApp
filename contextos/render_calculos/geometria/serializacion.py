@@ -252,8 +252,12 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
     # hotel-apartamento, hotelero) están ya distribuidas dentro de
     # `circulacion_por_planta[i]` (suma de `pct_circ × construida` + cuota de
     # `area_servicios_obligatorios_m2 / n_plantas_habitables`). No se añade
-    # fila aparte: duplicaría m² y la suma de columnas dejaría de cuadrar con
-    # `construida_i` (huella).
+    # fila aparte: duplicaría m².
+    #
+    # El patio interior NO computa como construido (vacío a cielo abierto): la
+    # columna `construida_m2` es la huella menos el patio, así que la identidad
+    # por planta es `construida = útil + muros + circulación + núcleo + local`
+    # y la columna `patios_m2` queda fuera de esa suma (se reporta aparte).
     return rows
 
 
