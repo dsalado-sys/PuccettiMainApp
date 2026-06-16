@@ -16,11 +16,17 @@ del salón-comedor crece con la *superficie adicional por plaza* a partir de la 
 """
 from __future__ import annotations
 
+from .combinador_tipologias import ComboDormitorios
 from .programa import Estancia
 from .programa_uso import ProgramaUso, TipologiaUnidadDescriptor
 
 
 TIPOLOGIAS = ("estudio", "individual", "doble", "triple", "cuadruple")
+
+# Tamaños de dormitorio válidos en una combinación (§2.5): el alfabeto del
+# combinador. Excluye "estudio", que es la unidad entera (combinación N=0), no
+# un tamaño de dormitorio.
+TAMANOS_DORMITORIO = ("individual", "doble", "triple", "cuadruple")
 
 # ─── Anexo I.3/I.4 — m² mínimos por categoría (1L–4L) ─────────────────────
 # Dormitorio por ocupación. 1L/2L coinciden con el grupo "conjuntos" (A1.4).
@@ -136,6 +142,122 @@ def util_minimo_apartamento(categoria: str, tipologia: str, grupo: str = "edific
     return round(_base_util(categoria, tipologia, grupo), 2)
 
 
+# ─── Programa interior por COMBINACIÓN de dormitorios (§2.5 · paradigma nuevo) ──
+# Un apartamento turístico se clasifica por su nº de dormitorios; cada dormitorio
+# se dimensiona por su ocupación. Una `ComboDormitorios` describe la combinación
+# concreta de ocupaciones (p. ej. 1 individual + 1 doble). El estudio es N=0 y se
+# delega al sizer monodormitorio (`tipologia="estudio"`, misma pieza única del
+# Anexo). El resto compone: salón-comedor + N dormitorios + cocina + baño(s).
+#
+# Las plazas (ocupación) totales de la unidad son la SUMA de las de sus
+# dormitorios: gobiernan la superficie adicional del salón (desde la 5ª plaza) y
+# el 2º baño obligatorio en conjuntos (A1.4, >5 usuarios).
+def _plazas_combo(combo: ComboDormitorios) -> int:
+    """Ocupación total = Σ plazas de los dormitorios (PLAZAS por ocupación)."""
+    return combo.plazas(PLAZAS)
+
+
+def util_minimo_combo(
+    combo: ComboDormitorios, categoria: str, grupo: str = "edificios",
+) -> float:
+    """Útil mínimo viable de la combinación (suma de mínimos del Anexo)."""
+    cat = _cat_validada(categoria, grupo)
+    if combo.es_estudio:
+        return util_minimo_apartamento(cat, "estudio", grupo)
+    plazas = _plazas_combo(combo)
+    salon_min = MIN_SALON_COMEDOR[cat] + SUP_ADICIONAL_PLAZA[cat] * max(0, plazas - 4)
+    dorm_min_total = sum(
+        MIN_DORMITORIO[tam][cat] * n for tam, n in combo.composicion.items()
+    )
+    total = salon_min + dorm_min_total + MIN_COCINA[cat] + MIN_BANO[cat]
+    if grupo == "conjuntos" and plazas > 5:
+        total += MIN_BANO[cat]
+    return round(total, 2)
+
+
+def util_objetivo_combo(
+    combo: ComboDormitorios, categoria: str, grupo: str = "edificios",
+) -> float:
+    """Objetivo de m² útil de la combinación: mínimos + 15% (circulación interna)."""
+    return round(util_minimo_combo(combo, categoria, grupo) * 1.15, 2)
+
+
+def descriptor_tipologia_combo(
+    combo: ComboDormitorios, categoria: str, grupo: str = "edificios",
+) -> TipologiaUnidadDescriptor:
+    """Descriptor para el reparto multi-tipología a partir de una combinación.
+
+    El `slug` es el slug canónico de la combinación (`"doble*1+individual*1"`),
+    que la serialización reconoce vía `es_slug_combo` para regenerar el programa.
+    """
+    cat = _cat_validada(categoria, grupo)
+    util_obj = util_objetivo_combo(combo, cat, grupo)
+    util_min = util_minimo_combo(combo, cat, grupo)
+    return TipologiaUnidadDescriptor(
+        slug=combo.slug,
+        util_objetivo=util_obj,
+        util_minimo=util_min,
+        util_maximo=round(util_obj * 1.25, 2),
+        n_dorms_label=combo.n_dorms,
+        tipo_unidad="apartamento",
+        plazas=_plazas_combo(combo),
+    )
+
+
+def programa_apartamentos_combo(
+    combo: ComboDormitorios,
+    categoria: str,
+    util_disponible: float,
+    grupo: str = "edificios",
+) -> list[Estancia]:
+    """Estancias COMPUTABLES de un apartamento de N dormitorios (combinación).
+
+    Análogo a `programa_apartamentos` pero con un dormitorio por cada elemento de
+    la combinación (`dormitorio_1 … dormitorio_N`, en orden canónico). El estudio
+    (N=0) reusa el sizer monodormitorio. Cocina y baño(s) van a su mínimo; el
+    salón-comedor y los dormitorios absorben el presupuesto computable restante,
+    proporcional a sus mínimos y nunca por debajo de ellos (con `util_disponible=0`
+    cada estancia cae a su mínimo, igual que el sizer base).
+    """
+    cat = _cat_validada(categoria, grupo)
+    if combo.es_estudio:
+        return programa_apartamentos("estudio", cat, util_disponible, grupo)
+
+    plazas = _plazas_combo(combo)
+    salon_min = MIN_SALON_COMEDOR[cat] + SUP_ADICIONAL_PLAZA[cat] * max(0, plazas - 4)
+    cocina_min = MIN_COCINA[cat]
+    bano_min = MIN_BANO[cat]
+    segundo_bano = grupo == "conjuntos" and plazas > 5
+
+    # Un dormitorio por unidad de la composición (orden canónico = orden del slug).
+    dorms: list[tuple[str, float]] = []
+    for tam in sorted(combo.composicion):
+        for _ in range(combo.composicion[tam]):
+            dorms.append((tam, MIN_DORMITORIO[tam][cat]))
+    dorm_min_total = sum(m for _, m in dorms)
+
+    # Cocina y baño(s): tamaño práctico fijo en su mínimo.
+    fijas_t = cocina_min + bano_min + (bano_min if segundo_bano else 0.0)
+
+    # Salón-comedor y dormitorios escalan proporcionalmente a sus mínimos.
+    resto = max(0.0, util_disponible - fijas_t)
+    base = salon_min + dorm_min_total
+    factor = (resto / base) if (base > 0 and resto > 0) else 1.0
+
+    estancias = [
+        Estancia("salon_comedor", "publica", salon_min, round(max(salon_min, salon_min * factor), 2)),
+    ]
+    for i, (_tam, dmin) in enumerate(dorms, start=1):
+        estancias.append(
+            Estancia(f"dormitorio_{i}", "privada", dmin, round(max(dmin, dmin * factor), 2))
+        )
+    estancias.append(Estancia("cocina", "publica", cocina_min, round(cocina_min, 2)))
+    estancias.append(Estancia("bano", "servicio", bano_min, round(bano_min, 2)))
+    if segundo_bano:
+        estancias.append(Estancia("aseo", "servicio", bano_min, round(bano_min, 2)))
+    return estancias
+
+
 # ─── Áreas comunes obligatorias (Decreto 194/2010) ────────────────────────
 def areas_comunes_obligatorias(
     n_unidades_estimado: int,
@@ -190,6 +312,32 @@ def descriptor_tipologia_apartamento(
         n_dorms_label=PLAZAS.get(tip, 2),
         tipo_unidad="apartamento",
         plazas=PLAZAS.get(tip, 2),
+    )
+
+
+def programa_uso_apartamento_combo(
+    combo: ComboDormitorios,
+    categoria: str,
+    n_unidades_estimado: int = 1,
+    grupo: str = "edificios",
+) -> ProgramaUso:
+    """Descriptor de uso para una combinación de dormitorios (§2.5).
+
+    Hermano de `programa_uso_apartamento` pero dimensionado desde la combinación;
+    las áreas comunes obligatorias son idénticas (dependen de la categoría y del
+    nº de unidades, no de la composición de la unidad).
+    """
+    cat = _cat_validada(categoria, grupo)
+    util_obj = util_objetivo_combo(combo, cat, grupo)
+    util_min = util_minimo_combo(combo, cat, grupo)
+    comunes = total_comunes_obligatorias_m2(n_unidades_estimado, cat, grupo)
+    return ProgramaUso(
+        util_objetivo_unidad_m2=util_obj,
+        area_min_unidad_m2=util_min,
+        util_max_unidad_m2=round(util_obj * 1.25, 2),
+        n_dormitorios=combo.n_dorms,
+        tipo_unidad="apartamento",
+        area_servicios_obligatorios_m2=comunes,
     )
 
 
