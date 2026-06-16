@@ -60,6 +60,50 @@ def _sin_tildes(s: str) -> str:
     return "".join(c for c in desc if unicodedata.category(c) != "Mn")
 
 
+# ── Parseo de superficies del Catastro  ──────
+def _superficie_catastro(valor: Any) -> float:
+    """Convierte una superficie del Catastro a float SIN redondear ni truncar.
+
+    Los endpoints DNPRC devuelven las superficies como cadenas en formato
+    español: el punto es separador de millares y la coma, separador decimal
+    (p. ej. ``"1.087"`` = 1087 m², ``"1.234,56"`` = 1234.56 m²). Aplicar
+    ``float()`` directamente interpretaría ``"1.087"`` como 1.087 m² (el origen
+    del bug en metaparcelas con inmuebles de ≥ 1.000 m²). Normalizamos el
+    formato antes de convertir y conservamos todos los decimales.
+
+    Acepta también ``int``/``float`` ya nativos (los devuelve intactos) y
+    cae a ``0.0`` ante valores vacíos o no numéricos.
+    """
+    if valor is None:
+        return 0.0
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    s = str(valor).strip()
+    if not s:
+        return 0.0
+    # Formato español: '.' = millares, ',' = decimal.
+    s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _superficie_construida_de_parcela(p: ParcelaCatastral) -> float | None:
+    """Suma la superficie construida de las regiones (locales/elementos) de una
+    parcela con parseo correcto del formato español.
+
+    ESCatastroLib calcula ``superficie_construida`` como ``sum(float(stl))`` y
+    rompe igual que ``sfc`` cuando alguna región mide ≥ 1.000 m². Recalculamos
+    aquí desde ``p.regiones`` (ya cargadas, sin llamadas extra al Catastro).
+    Devuelve ``None`` si la librería no expone regiones.
+    """
+    regiones = getattr(p, "regiones", None)
+    if not regiones:
+        return None
+    return sum(_superficie_catastro(r.get("superficie")) for r in regiones)
+
+
 # ── Rate limit  ──────────────────────────────
 def _detectar_rate_limit(respuesta: requests.Response) -> None:
     """Lanza RateLimitCatastro si la respuesta indica bloqueo por límite horario.
@@ -137,15 +181,11 @@ def _subref_de_item(item: dict) -> Subreferencia:
     if es: partes.append(f"Es {es}")
     if pt: partes.append(f"Pl {pt}")
     if pu: partes.append(f"Pt {pu}")
-    try:
-        sup = float(debi.get("sfc") or 0)
-    except (TypeError, ValueError):
-        sup = 0.0
     return Subreferencia(
         rc=rc20,
         localizacion=" · ".join(partes),
         uso=(debi.get("luso") or "").strip(),
-        superficie_construida_m2=sup,
+        superficie_construida_m2=_superficie_catastro(debi.get("sfc")),
     )
 
 
@@ -203,15 +243,17 @@ def _resolver_con_escatastro(rc: str | None = None, direccion: dict | None = Non
     subref = _subreferencias_por_rc14(primer.rc[:14])
     if not subref:
         # Fallback: si DNPRC no devuelve subrefs detallados, montar a partir de mp.parcelas.
-        subref = [
-            Subreferencia(
+        subref = []
+        for p in mp.parcelas:
+            sup_p = _superficie_construida_de_parcela(p)
+            if sup_p is None:
+                sup_p = _superficie_catastro(getattr(p, "superficie_construida", 0))
+            subref.append(Subreferencia(
                 rc=p.rc,
                 localizacion="",
                 uso=(getattr(p, "uso", "") or "").strip(),
-                superficie_construida_m2=float(getattr(p, "superficie_construida", 0) or 0),
-            )
-            for p in mp.parcelas
-        ]
+                superficie_construida_m2=sup_p,
+            ))
     return primer, subref
 
 
@@ -273,19 +315,19 @@ def _parcela_a_raw(
                 anio = s.anio_construccion
                 break
 
-    # Superficie construida total: si es metaparcela, suma de subrefs; si no,
-    # el atributo `superficie_construida` que ESCatastroLib calcula sumando
-    # las regiones.
+    # Superficie construida total: si es metaparcela, suma de subrefs; si es
+    # parcela única, suma de sus regiones. En ambos casos con parseo correcto
+    # del formato español (ESCatastroLib usaría float() directo y rompería los
+    # valores de ≥ 1.000 m²).
     sup_construida: float | None = None
     if subreferencias:
         suma = sum(s.superficie_construida_m2 or 0.0 for s in subreferencias)
         sup_construida = suma if suma > 0 else None
     else:
-        try:
-            v = float(getattr(p, "superficie_construida", 0) or 0)
-            sup_construida = v if v > 0 else None
-        except (TypeError, ValueError):
-            sup_construida = None
+        v = _superficie_construida_de_parcela(p)
+        if v is None:
+            v = _superficie_catastro(getattr(p, "superficie_construida", 0))
+        sup_construida = v if v and v > 0 else None
 
     # Plantas sobre/bajo rasante: una llamada extra al WFS de edificios. Fallo
     # suave — no es bloqueante para el módulo.
