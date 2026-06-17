@@ -674,16 +674,56 @@
     btnToggleCards.hidden = subref.classList.contains("oculto");
   }
 
-  // ── Botón "Guardar como proyecto": indicar estado de carga ──────────────
+  // ── Guardar como proyecto: spinner + bloqueo al enviar ──────────────────
+  function marcarGuardando(boton) {
+    if (boton) {
+      boton.disabled = true;
+      boton.textContent = "Guardando…";
+    }
+    mostrarSpinner();
+  }
+
+  // Caso con proyecto activo: un clic guarda directamente.
   const formGuardar = document.getElementById("form-guardar");
   if (formGuardar) {
     formGuardar.addEventListener("submit", function () {
-      const btn = document.getElementById("btn-guardar");
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = "Guardando… (cargando detalles del Catastro)";
-      }
-      mostrarSpinner();
+      marcarGuardando(document.getElementById("btn-guardar"));
+    });
+  }
+
+  // Caso sin proyecto activo: el botón abre un modal para nombrar el proyecto.
+  const overlay = document.getElementById("modal-guardar-overlay");
+  const btnAbrirModal = document.getElementById("btn-abrir-modal-guardar");
+  const btnCancelarModal = document.getElementById("btn-cancelar-modal");
+  const inpNombre = document.getElementById("inp-nombre-proyecto");
+  const formGuardarModal = document.getElementById("form-guardar-modal");
+
+  function abrirModal() {
+    if (!overlay) return;
+    // Sugerir un nombre a partir de la parcela en pantalla (dirección o RC).
+    if (inpNombre && !inpNombre.value && parcelaActual) {
+      inpNombre.value = parcelaActual.direccion || parcelaActual.referencia_catastral || "";
+    }
+    overlay.classList.remove("oculto");
+    if (inpNombre) { inpNombre.focus(); inpNombre.select(); }
+  }
+  function cerrarModal() {
+    if (overlay) overlay.classList.add("oculto");
+  }
+
+  if (btnAbrirModal) btnAbrirModal.addEventListener("click", abrirModal);
+  if (btnCancelarModal) btnCancelarModal.addEventListener("click", cerrarModal);
+  if (overlay) {
+    overlay.addEventListener("click", function (ev) {
+      if (ev.target === overlay) cerrarModal();
+    });
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape" && !overlay.classList.contains("oculto")) cerrarModal();
+    });
+  }
+  if (formGuardarModal) {
+    formGuardarModal.addEventListener("submit", function () {
+      marcarGuardando(document.getElementById("btn-confirmar-guardar"));
     });
   }
 
