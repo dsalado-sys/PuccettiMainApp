@@ -261,11 +261,23 @@
                {% if prog.salon_cocina_open %}checked{% endif %} data-bloque="programa">
         <span>Salón-cocina integrado</span>
       </label>
-      <label class="rc-campo" data-visible-en-planta="pb">
+      <label class="rc-campo" data-cuando-uso="vivienda apartamentos_turisticos" data-visible-en-planta="pb">
         <span class="rc-campo-label">% local en planta baja</span>
         <input type="number" name="pct_local_pb" min="0" max="100" step="1"
                value="{{ prog.pct_local_pb }}" data-bloque="programa">
-        <small class="rc-hint">Reduce útiles de PB para uso no residencial.</small>
+        <small class="rc-hint">Reduce útiles de PB para local comercial.</small>
+      </label>
+      <label class="rc-campo" data-visible-en-planta="pb">
+        <span class="rc-campo-label">% otros en planta baja</span>
+        <input type="number" name="pct_otros_pb" min="0" max="100" step="1"
+               value="{{ prog.pct_otros_pb }}" data-bloque="programa">
+        <small class="rc-hint">Reduce útiles de PB para otros usos.</small>
+      </label>
+      <label class="rc-campo" data-cuando-uso="apartamentos_turisticos hotel_apartamento hotelero" data-visible-en-planta="pb">
+        <span class="rc-campo-label">% usos comunes en planta baja</span>
+        <input type="number" name="pct_usos_comunes_pb" min="0" max="100" step="1"
+               value="{{ prog.pct_usos_comunes_pb }}" data-bloque="programa">
+        <small class="rc-hint">Reduce útiles de PB para zonas comunes del establecimiento.</small>
       </label>
     </div>
   </details>

@@ -119,6 +119,8 @@ class ParametrosPrograma:
     # cuadruple/multiple).
     tipologias_extra: list[str] = field(default_factory=list)
     pct_local_pb: float = 0.0                       # % útil PB destinado a local no residencial
+    pct_otros_pb: float = 0.0                       # % útil PB destinado a otros usos
+    pct_usos_comunes_pb: float = 0.0                # % útil PB para usos comunes (AT / hoteles)
     pct_unidades_adaptadas: float = 5.0
 
 
@@ -241,6 +243,8 @@ class ParametrosRender:
                 pct_unidades_adaptadas=programa.pct_unidades_adaptadas,
                 tipologias_extra=tipologias_extra_n,
                 pct_local_pb=max(0.0, min(100.0, float(programa.pct_local_pb))),
+                pct_otros_pb=max(0.0, min(100.0, float(programa.pct_otros_pb))),
+                pct_usos_comunes_pb=max(0.0, min(100.0, float(programa.pct_usos_comunes_pb))),
             ),
             seed=self.seed,
         )
@@ -277,6 +281,8 @@ def _programa_a_dict(prog: ParametrosPrograma) -> dict[str, Any]:
         "salon_cocina_open": prog.salon_cocina_open,
         "tipologias_extra": list(prog.tipologias_extra),
         "pct_local_pb": prog.pct_local_pb,
+        "pct_otros_pb": prog.pct_otros_pb,
+        "pct_usos_comunes_pb": prog.pct_usos_comunes_pb,
         "pct_unidades_adaptadas": prog.pct_unidades_adaptadas,
     }
 
@@ -425,6 +431,8 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             salon_cocina_open=_b(node, "salon_cocina_open", base_prog.salon_cocina_open),
             tipologias_extra=tip_extra,
             pct_local_pb=max(0.0, min(100.0, _f(node, "pct_local_pb", base_prog.pct_local_pb))),
+            pct_otros_pb=max(0.0, min(100.0, _f(node, "pct_otros_pb", base_prog.pct_otros_pb))),
+            pct_usos_comunes_pb=max(0.0, min(100.0, _f(node, "pct_usos_comunes_pb", base_prog.pct_usos_comunes_pb))),
             pct_unidades_adaptadas=_f(node, "pct_unidades_adaptadas", base_prog.pct_unidades_adaptadas),
         )
 
@@ -500,6 +508,8 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             "categoria_hotelero": programa.categoria_hotelero.value,
             "salon_cocina_open": programa.salon_cocina_open,
             "pct_local_pb": programa.pct_local_pb,
+            "pct_otros_pb": programa.pct_otros_pb,
+            "pct_usos_comunes_pb": programa.pct_usos_comunes_pb,
             "pct_unidades_adaptadas": programa.pct_unidades_adaptadas,
             "categoria_vivienda": prog_tipo_node.get("categoria_vivienda", programa.categoria_vivienda.value),
             "tipologia_apartamento": prog_tipo_node.get("tipologia_apartamento", programa.tipologia_apartamento.value),

@@ -4,7 +4,8 @@ Iteración 5: diferenciación PB / planta tipo + multi-tipología + local en PB.
 
 El patio interior es un vacío a cielo abierto: NO computa como superficie
 construida. Por eso la `construida` que se reporta por planta es la HUELLA
-menos el patio, y se cumple `construida = útil + muros + circ + núcleo + local`
+menos el patio, y se cumple
+`construida = útil + muros + circ + núcleo + local + otros + usos comunes`
 (el patio queda fuera y se reporta en su columna aparte).
 
 Planta baja (idx_visual == 0, tipo "regular"):
@@ -85,6 +86,8 @@ class Capacidad:
     pct_nucleo: float
     pct_muros_normativo: float = 20.0
     pct_local_pb: float = 0.0
+    pct_otros_pb: float = 0.0
+    pct_usos_comunes_pb: float = 0.0
     viv_por_planta: list[int] = field(default_factory=list)
     construida_por_planta: list[float] = field(default_factory=list)
     util_por_planta: list[float] = field(default_factory=list)
@@ -94,6 +97,8 @@ class Capacidad:
     nucleo_por_planta: list[float] = field(default_factory=list)
     patio_por_planta: list[float] = field(default_factory=list)
     local_por_planta: list[float] = field(default_factory=list)
+    otros_por_planta: list[float] = field(default_factory=list)
+    usos_comunes_por_planta: list[float] = field(default_factory=list)
     tipo_planta: list[str] = field(default_factory=list)
     nombres_planta: list[str] = field(default_factory=list)
     viviendas_por_tipologia: list[dict[str, int]] = field(default_factory=list)
@@ -219,7 +224,20 @@ def calcular_capacidad(
     dis_pb = disenos["pb"]
     dis_tipo = disenos["tipo"]
     pct_muros_normativo = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_normativo", 20.0))))
+    uso_edificio = str(getattr(params.programa, "uso", "vivienda"))
     pct_local_pb = max(0.0, min(100.0, float(getattr(params.programa, "pct_local_pb", 0.0))))
+    pct_otros_pb = max(0.0, min(100.0, float(getattr(params.programa, "pct_otros_pb", 0.0))))
+    pct_usos_comunes_pb = max(0.0, min(100.0, float(getattr(params.programa, "pct_usos_comunes_pb", 0.0))))
+    # Reservas de PB por uso (todas viven solo en planta baja):
+    #   · "local"        → vivienda + apartamentos turísticos (no hoteles).
+    #   · "usos comunes" → AT + hoteles (todo lo no residencial).
+    #   · "otros"        → todos los usos.
+    # El uso pone a 0 la reserva que no le corresponde, de modo que su columna/fila
+    # no aparezca (el frontend la oculta además por uso).
+    if uso_edificio not in ("vivienda", "apartamentos_turisticos"):
+        pct_local_pb = 0.0
+    if uso_edificio == "vivienda":
+        pct_usos_comunes_pb = 0.0
     # Verificación de no quedar útil: usamos el % de circulación más exigente.
     pct_total_max = dis_pb.pct_muros + max(dis_pb.pct_circulacion, dis_tipo.pct_circulacion) + dis_pb.pct_nucleo
 
@@ -290,6 +308,8 @@ def calcular_capacidad(
     nucleo_por_planta: list[float] = []
     patio_por_planta: list[float] = []
     local_por_planta: list[float] = []
+    otros_por_planta: list[float] = []
+    usos_comunes_por_planta: list[float] = []
     tipo_planta: list[str] = []
     nombres_planta: list[str] = []
     viviendas_por_tipologia: list[dict[str, int]] = []
@@ -328,6 +348,8 @@ def calcular_capacidad(
         circ_i = construida_i * dis.pct_circulacion / 100.0
         patio_i = min(area_patio_norm, construida_i * 0.20) if area_patio_norm > 0 else 0.0
         local_i = 0.0
+        otros_i = 0.0
+        comunes_i = 0.0
         viv_i = 0
         util_disponible_planta = 0.0   # útil neto de la planta (lo que se reparte)
         mix_i: dict[str, int] = {}
@@ -358,8 +380,14 @@ def calcular_capacidad(
                 construida_i - muros_i - circ_i - nucl_i - patio_i,
             )
             if es_pb:
+                # Reservas de PB, todas como % del útil bruto de planta baja y en
+                # paralelo: local (vivienda/AT), otros (todos) y usos comunes (AT/hoteles).
+                # El uso ya ha puesto a 0 las que no le corresponden. La suma se acota
+                # con max(0, ...) para no dejar útil negativo si superan el 100%.
                 local_i = util_bruto_i * pct_local_pb / 100.0
-                util_disponible_i = util_bruto_i - local_i
+                otros_i = util_bruto_i * pct_otros_pb / 100.0
+                comunes_i = util_bruto_i * pct_usos_comunes_pb / 100.0
+                util_disponible_i = max(0.0, util_bruto_i - local_i - otros_i - comunes_i)
                 es_primera_regular = False
             else:
                 util_disponible_i = util_bruto_i
@@ -399,6 +427,8 @@ def calcular_capacidad(
         nucleo_por_planta.append(nucl_i)
         patio_por_planta.append(patio_i)
         local_por_planta.append(local_i)
+        otros_por_planta.append(otros_i)
+        usos_comunes_por_planta.append(comunes_i)
         tipo_planta.append(p.tipo)
         nombres_planta.append(nombre)
         viviendas_por_tipologia.append(mix_i)
@@ -439,6 +469,8 @@ def calcular_capacidad(
         pct_nucleo=dis_pb.pct_nucleo,
         pct_muros_normativo=pct_muros_normativo,
         pct_local_pb=pct_local_pb,
+        pct_otros_pb=pct_otros_pb,
+        pct_usos_comunes_pb=pct_usos_comunes_pb,
         viv_por_planta=viv_por_planta,
         construida_por_planta=construida_por_planta,
         util_por_planta=util_por_planta,
@@ -448,6 +480,8 @@ def calcular_capacidad(
         nucleo_por_planta=nucleo_por_planta,
         patio_por_planta=patio_por_planta,
         local_por_planta=local_por_planta,
+        otros_por_planta=otros_por_planta,
+        usos_comunes_por_planta=usos_comunes_por_planta,
         tipo_planta=tipo_planta,
         nombres_planta=nombres_planta,
         viviendas_por_tipologia=viviendas_por_tipologia,
@@ -485,6 +519,8 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "pct_circulacion_tipo": cap.pct_circulacion_tipo,
         "pct_nucleo": cap.pct_nucleo,
         "pct_local_pb": cap.pct_local_pb,
+        "pct_otros_pb": cap.pct_otros_pb,
+        "pct_usos_comunes_pb": cap.pct_usos_comunes_pb,
         "util_objetivo_viv_m2": round(cap.util_objetivo_viv_m2, 2),
         "util_planta_disponible_m2": round(cap.util_planta_disponible_m2, 2),
         "n_dormitorios": cap.n_dormitorios,
@@ -499,6 +535,8 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "nucleo_total_m2": round(sum(cap.nucleo_por_planta), 2),
         "patio_total_m2": round(sum(cap.patio_por_planta), 2),
         "local_total_m2": round(sum(cap.local_por_planta), 2),
+        "otros_total_m2": round(sum(cap.otros_por_planta), 2),
+        "usos_comunes_total_m2": round(sum(cap.usos_comunes_por_planta), 2),
         "construida_por_planta": _l2(cap.construida_por_planta),
         "util_por_planta": _l2(cap.util_por_planta),
         "muros_por_planta": _l2(cap.muros_por_planta),
@@ -507,6 +545,8 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "nucleo_por_planta": _l2(cap.nucleo_por_planta),
         "patio_por_planta": _l2(cap.patio_por_planta),
         "local_por_planta": _l2(cap.local_por_planta),
+        "otros_por_planta": _l2(cap.otros_por_planta),
+        "usos_comunes_por_planta": _l2(cap.usos_comunes_por_planta),
         "tipo_planta": list(cap.tipo_planta),
         "nombres_planta": list(cap.nombres_planta),
         "viviendas_por_tipologia": list(cap.viviendas_por_tipologia),

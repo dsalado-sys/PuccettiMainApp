@@ -134,6 +134,9 @@
 }
 .rc-fila-unidad-local small { color: #888; font-style: normal; }
 
+/* Columnas de la tabla "por planta" ocultadas según el uso (Local / Usos com.). */
+.rc-col-oculta { display: none; }
+
 .rc-tip {
   width: 18px; height: 18px; border-radius: 999px;
   border: 1px solid var(--dorado); background: var(--blanco); color: var(--dorado);

@@ -188,10 +188,10 @@
     if (!tablaPlantaBody) return;
     tablaPlantaBody.innerHTML = "";
     if (!filas || !filas.length) {
-      tablaPlantaBody.innerHTML = '<tr><td colspan="10" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
+      tablaPlantaBody.innerHTML = '<tr><td colspan="12" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
       return;
     }
-    const tot = { c: 0, u: 0, mur: 0, murEst: 0, circ: 0, nuc: 0, pat: 0, loc: 0, viv: 0 };
+    const tot = { c: 0, u: 0, mur: 0, murEst: 0, circ: 0, nuc: 0, pat: 0, loc: 0, otr: 0, com: 0, viv: 0 };
     filas.forEach(r => {
       tot.c += r.construida_m2 || 0;
       tot.u += r.util_viviendas_m2 || 0;
@@ -201,6 +201,8 @@
       tot.nuc += r.nucleo_m2 || 0;
       tot.pat += r.patios_m2 || 0;
       tot.loc += r.local_m2 || 0;
+      tot.otr += r.otros_m2 || 0;
+      tot.com += r.usos_comunes_m2 || 0;
       tot.viv += r.viviendas || 0;
       const tr = document.createElement("tr");
       const tipo = r.tipo || "regular";
@@ -218,7 +220,9 @@
         <td>${fmt.m2.format(r.circulacion_m2 || 0)}</td>
         <td>${fmt.m2.format(r.nucleo_m2 || 0)}</td>
         <td>${fmt.m2.format(r.patios_m2 || 0)}</td>
-        <td>${fmt.m2.format(r.local_m2 || 0)}</td>`;
+        <td class="rc-col-local">${fmt.m2.format(r.local_m2 || 0)}</td>
+        <td>${fmt.m2.format(r.otros_m2 || 0)}</td>
+        <td class="rc-col-comunes">${fmt.m2.format(r.usos_comunes_m2 || 0)}</td>`;
       tablaPlantaBody.appendChild(tr);
     });
     const trTot = document.createElement("tr");
@@ -234,8 +238,11 @@
       <td>${fmt.m2.format(tot.circ)}</td>
       <td>${fmt.m2.format(tot.nuc)}</td>
       <td>${fmt.m2.format(tot.pat)}</td>
-      <td>${fmt.m2.format(tot.loc)}</td>`;
+      <td class="rc-col-local">${fmt.m2.format(tot.loc)}</td>
+      <td>${fmt.m2.format(tot.otr)}</td>
+      <td class="rc-col-comunes">${fmt.m2.format(tot.com)}</td>`;
     tablaPlantaBody.appendChild(trTot);
+    _gatearColumnasUso();
   }
 
   // Etiqueta legible de una tipología (busca en todos los conjuntos de opciones).
@@ -256,8 +263,8 @@
     }
     filas.forEach(r => {
       const tr = document.createElement("tr");
-      const esLocal = r.tipo === "local";
-      tr.className = esLocal ? "rc-fila-unidad-local" : "rc-fila-unidad-clicable";
+      const esReserva = r.tipo === "local" || r.tipo === "otros" || r.tipo === "usos_comunes";
+      tr.className = esReserva ? "rc-fila-unidad-local" : "rc-fila-unidad-clicable";
       tr.dataset.id = r.vivienda;
       tr.dataset.planta = r.planta;
       tr.dataset.tipo = r.tipo || "vivienda";
@@ -269,7 +276,7 @@
       tr.dataset.circ = r.circulacion_interior_por_unidad_m2 ?? 0;
       tr.dataset.muros = r.muros_por_unidad_m2 ?? 0;
       tr.dataset.estancias = JSON.stringify(r.estancias || []);
-      const utilCelda = esLocal
+      const utilCelda = esReserva
         ? `${fmt.m2.format(r.util_por_unidad_m2 ?? 0)} <small>(${fmt.pct.format(r.pct_util_destinado ?? 0)}% útil)</small>`
         : fmt.m2.format(r.util_por_unidad_m2 ?? 0);
       // En vivienda la columna muestra nº de dormitorios; en el resto, la tipología.
@@ -284,7 +291,7 @@
         <td>${fmt.m2.format(r.construida_por_unidad_m2 ?? 0)}</td>
         <td>${utilCelda}</td>
         <td>${r.adaptada ? "✓" : "—"}</td>`;
-      if (!esLocal) tr.addEventListener("click", () => abrirModalUnidad(tr));
+      if (!esReserva) tr.addEventListener("click", () => abrirModalUnidad(tr));
       tablaUnidadBody.appendChild(tr);
     });
   }
@@ -880,6 +887,19 @@
         || el.dataset.visibleEnPlanta.split(/\s+/).includes(cat);
       el.hidden = !(usoOk && plantaOk);
     });
+    _gatearColumnasUso();
+  }
+
+  // Columnas de la tabla "por planta" condicionadas por uso: "Local" en vivienda
+  // y AT; "Usos com." en AT / hoteles (no vivienda). "Otros" se ve siempre.
+  function _gatearColumnasUso() {
+    const tabla = document.getElementById("rc-tabla-planta");
+    if (!tabla) return;
+    const uso = usoActivoForm();
+    const localAplica = uso === "vivienda" || uso === "apartamentos_turisticos";
+    const comunesAplica = uso !== "vivienda";
+    tabla.querySelectorAll(".rc-col-local").forEach(el => el.classList.toggle("rc-col-oculta", !localAplica));
+    tabla.querySelectorAll(".rc-col-comunes").forEach(el => el.classList.toggle("rc-col-oculta", !comunesAplica));
   }
 
   // ─── Opciones condicionales dentro del panel ──────────────────────────

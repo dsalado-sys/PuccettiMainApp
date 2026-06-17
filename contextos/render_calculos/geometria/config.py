@@ -73,6 +73,8 @@ class ParametrosPrograma:
     pct_unidades_adaptadas: float = 5.0       # mínimo accesibilidad
     tipologias_extra: list[int] = field(default_factory=list)  # nº dormitorios adicionales
     pct_local_pb: float = 0.0                 # % útil PB destinado a local no residencial
+    pct_otros_pb: float = 0.0                 # % útil PB destinado a otros usos
+    pct_usos_comunes_pb: float = 0.0          # % útil PB destinado a usos comunes (AT / hoteles)
 
 
 @dataclass
