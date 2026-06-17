@@ -51,12 +51,24 @@ PLAZAS: dict[str, int] = {"estudio": 2, "individual": 1, "doble": 2, "triple": 3
 PLAZAS_SALON = 2
 
 
+def ocupacion_unidad(plazas_dormitorios: int) -> int:
+    """Ocupación total de la unidad = plazas de los dormitorios + PLAZAS_SALON.
+
+    Las 2 plazas del salón-comedor (sofá-cama) cuentan SIEMPRE, también en una
+    unidad de 1 dormitorio: un dormitorio doble (2) + sofá-cama (2) = 4 personas;
+    un estudio = 2 (cama) + 2 (sofá) = 4. Es la base común de las dos reglas que
+    dependen de la ocupación: el 2º baño (`banos_apartamento`) y la superficie
+    adicional del salón (`salon_min_apartamento`).
+    """
+    return plazas_dormitorios + PLAZAS_SALON
+
+
 def banos_apartamento(categoria: str, plazas_dormitorios: int) -> int:
     """Nº de baños de un apartamento turístico (Decreto 194/2010).
 
     Siempre 1 baño, salvo que la ocupación de la unidad supere el umbral de su
     categoría (en llaves), en cuyo caso se añade un 2º baño. La ocupación es
-    `personas = plazas de los dormitorios + PLAZAS_SALON` (2 del salón-comedor):
+    `ocupacion_unidad` = plazas de los dormitorios + PLAZAS_SALON (2 del salón):
 
       - 1L / 2L → 2 baños si la unidad alberga MÁS DE 5 personas.
       - 3L / 4L → 2 baños si la unidad alberga MÁS DE 4 personas.
@@ -64,9 +76,25 @@ def banos_apartamento(categoria: str, plazas_dormitorios: int) -> int:
     Ej.: 2 dormitorios dobles = 4 plazas + 2 del salón = 6 personas → 2 baños en
     cualquier categoría. Todos los baños son completos (ducha, inodoro, lavabo).
     """
-    personas = plazas_dormitorios + PLAZAS_SALON
+    personas = ocupacion_unidad(plazas_dormitorios)
     umbral = 5 if categoria in ("1L", "2L") else 4
     return 2 if personas > umbral else 1
+
+
+def salon_min_apartamento(categoria: str, plazas_dormitorios: int) -> float:
+    """m² mínimos del salón-comedor de un apartamento turístico (Anexo A1.3/A1.4).
+
+    El salón-comedor base cubre "hasta 4 personas"; por cada persona por encima de
+    la 4ª se añade `SUP_ADICIONAL_PLAZA[categoria]`. La ocupación incluye las 2
+    plazas del salón (ver `ocupacion_unidad`): un estudio o una unidad de 1
+    dormitorio doble (4 personas) se quedan en el mínimo; a partir de la 5ª persona
+    el salón crece.
+
+    Ej. (4L, SUP = 4): doble (2+2=4) → 16; triple (3+2=5) → 20; cuádruple
+    (4+2=6) → 24; 2 dobles (4+2=6) → 24.
+    """
+    extra = max(0, ocupacion_unidad(plazas_dormitorios) - 4)
+    return MIN_SALON_COMEDOR[categoria] + SUP_ADICIONAL_PLAZA[categoria] * extra
 
 
 def _cat_validada(categoria: str, grupo: str) -> str:
@@ -114,8 +142,8 @@ def programa_apartamentos(
         ]
 
     plazas = PLAZAS.get(tip, 2)
-    # Salón-comedor base "hasta 4 personas" + superficie adicional desde la 5ª plaza.
-    salon_min = MIN_SALON_COMEDOR[cat] + SUP_ADICIONAL_PLAZA[cat] * max(0, plazas - 4)
+    # Salón-comedor: mínimo del Anexo + adicional por ocupación > 4 (incl. salón).
+    salon_min = salon_min_apartamento(cat, plazas)
     dorm_min = MIN_DORMITORIO[tip][cat]
     cocina_min = MIN_COCINA[cat]
 
@@ -168,9 +196,10 @@ def util_minimo_apartamento(categoria: str, tipologia: str, grupo: str = "edific
 # delega al sizer monodormitorio (`tipologia="estudio"`, misma pieza única del
 # Anexo). El resto compone: salón-comedor + N dormitorios + cocina + baño(s).
 #
-# Las plazas (ocupación) totales de la unidad son la SUMA de las de sus
-# dormitorios: gobiernan la superficie adicional del salón (desde la 5ª plaza) y
-# el 2º baño obligatorio en conjuntos (A1.4, >5 usuarios).
+# La ocupación de la unidad = Σ plazas de los dormitorios + 2 del salón
+# (`ocupacion_unidad`): gobierna la superficie adicional del salón (por cada
+# persona por encima de la 4ª) y el 2º baño obligatorio (>5 personas en 1L/2L,
+# >4 en 3L/4L).
 def _plazas_combo(combo: ComboDormitorios) -> int:
     """Ocupación total = Σ plazas de los dormitorios (PLAZAS por ocupación)."""
     return combo.plazas(PLAZAS)
@@ -184,7 +213,7 @@ def util_minimo_combo(
     if combo.es_estudio:
         return util_minimo_apartamento(cat, "estudio", grupo)
     plazas = _plazas_combo(combo)
-    salon_min = MIN_SALON_COMEDOR[cat] + SUP_ADICIONAL_PLAZA[cat] * max(0, plazas - 4)
+    salon_min = salon_min_apartamento(cat, plazas)
     dorm_min_total = sum(
         MIN_DORMITORIO[tam][cat] * n for tam, n in combo.composicion.items()
     )
@@ -242,7 +271,7 @@ def programa_apartamentos_combo(
         return programa_apartamentos("estudio", cat, util_disponible, grupo)
 
     plazas = _plazas_combo(combo)
-    salon_min = MIN_SALON_COMEDOR[cat] + SUP_ADICIONAL_PLAZA[cat] * max(0, plazas - 4)
+    salon_min = salon_min_apartamento(cat, plazas)
     cocina_min = MIN_COCINA[cat]
     bano_min = MIN_BANO[cat]
 

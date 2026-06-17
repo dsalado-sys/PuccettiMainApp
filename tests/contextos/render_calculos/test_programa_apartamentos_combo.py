@@ -27,13 +27,14 @@ from app.contextos.render_calculos.geometria.programa_apartamentos import (
 
 # ── Útil mínimo de la combinación ────────────────────────────────────────────
 def test_util_minimo_combo_suma_piezas_del_anexo():
-    # 1 individual + 1 doble en categoría 3L (grupo edificios). Plazas dormitorios
-    # = 1+2 = 3 (< 4 → sin superficie adicional de salón), pero 3 + 2 del salón = 5
-    # personas > 4 (umbral 3L) → 2 baños.
+    # 1 individual + 1 doble en 3L (grupo edificios). Plazas dormitorios = 1+2 = 3;
+    # con las 2 del salón → 5 personas: 1 por encima de 4 → +1 adicional de salón, y
+    # 5 > 4 (umbral 3L) → 2 baños.
     combo = ComboDormitorios({"individual": 1, "doble": 1})
     cat = "3L"
     esperado = (
         MIN_SALON_COMEDOR[cat]
+        + SUP_ADICIONAL_PLAZA[cat]
         + MIN_DORMITORIO["individual"][cat]
         + MIN_DORMITORIO["doble"][cat]
         + MIN_COCINA[cat]
@@ -42,12 +43,12 @@ def test_util_minimo_combo_suma_piezas_del_anexo():
     assert util_minimo_combo(combo, cat) == round(esperado, 2)
 
 
-def test_util_minimo_combo_aplica_adicional_salon_desde_quinta_plaza():
-    # 2 triples = 6 plazas → 2 plazas por encima de 4 → 2 × adicional de salón.
-    # Además, 6 plazas ≥ 5 → 2 baños obligatorios en el mínimo viable.
+def test_util_minimo_combo_aplica_adicional_salon_por_personas_sobre_4():
+    # 2 triples = 6 plazas + 2 del salón = 8 personas → 4 por encima de 4 →
+    # 4 × adicional de salón. Además, 8 personas → 2 baños obligatorios.
     combo = ComboDormitorios({"triple": 2})
     cat = "4L"
-    salon = MIN_SALON_COMEDOR[cat] + SUP_ADICIONAL_PLAZA[cat] * 2
+    salon = MIN_SALON_COMEDOR[cat] + SUP_ADICIONAL_PLAZA[cat] * 4
     esperado = salon + 2 * MIN_DORMITORIO["triple"][cat] + MIN_COCINA[cat] + 2 * MIN_BANO[cat]
     assert util_minimo_combo(combo, cat) == round(esperado, 2)
 
