@@ -219,8 +219,9 @@ sin asignar). La política nueva resuelve este desajuste.
    explícita en el detalle, categoría `circulacion`).
 2. **Servicios fijos** — tamaño FIJO desde BBDD:
    - Cocina = 8 m² (MIN_COCINA + 1)
-   - Baño = 5 m² (MIN_BANO + 2)
-   - Aseo = 2.5 m² (MIN_ASEO + 1)
+   - Baño = 5 m² (MIN_BANO + 2) — todos los baños son completos.
+   - Nº de baños por nº de dormitorios (`banos_vivienda`): 1 hasta 2 dorms,
+     2 desde 3 dorms (`bano` / `bano_1` + `bano_2`).
 3. **Salón + dormitorios** escalan proporcionales a su `area_min_m2`
    para consumir el restante:
    `util_principal = util − circulación − Σ servicios`.
@@ -231,7 +232,7 @@ sin asignar). La política nueva resuelve este desajuste.
 |---------|-------|-------|-------|-------|--------|-----------|-------------|----------|
 | 1d | 20.46 | 17.54 | — | — | 8.00 | bano 5.00 | 9.00 | **60.00** |
 | 2d | 20.67 | 15.50 | 10.33 | — | 8.00 | bano 5.00 | 10.50 | **70.00** |
-| 3d | 23.87 | 15.91 | 10.61 | 10.61 | 8.00 | bano₁ 5 + aseo 2.5 | 13.50 | **90.00** |
+| 3d | 22.89 | 15.26 | 10.17 | 10.17 | 8.00 | bano₁ 5 + bano₂ 5 | 13.50 | **90.00** |
 
 **Estudio (n_dorms = 0)** — rediseño completo: salón+cocina+cama en un
 único `espacio_principal`. Suma fija = 25 m² (umbral VPO mínimo

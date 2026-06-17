@@ -179,9 +179,9 @@
       {% set lbl_hab = {"individual":"Individual","doble":"Doble","triple":"Triple","cuadruple":"Cuádruple","multiple":"Múltiple (albergue)"} %}
       {% set lbl_hotelero = {"hotel_5":"Hotel 5★","hotel_4":"Hotel 4★","hotel_3":"Hotel 3★","hotel_2":"Hotel 2★","hotel_1":"Hotel 1★","hostal_2":"Hostal 2★","hostal_1":"Hostal 1★","pension":"Pensión","albergue":"Albergue"} %}
 
-      {# ── VIVIENDA (Anexo I.5) — tipología por planta (PB / tipo) ── #}
-      {{ tip_bloque("vivienda", "vivienda", lbl_viv, "categoria_vivienda", prog, "programa", "pb", "rc-tip-vivienda") }}
-      {{ tip_bloque("vivienda", "vivienda", lbl_viv, "categoria_vivienda", prog_t, "programa_tipo", "tipo", "rc-tip-vivienda-tipo") }}
+      {# ── VIVIENDA (Anexo I.5): igual que apartamentos, se define por su Nº DE
+         DORMITORIOS (individual/doble). El bloque común de abajo
+         (data-cuando-uso="vivienda apartamentos_turisticos") lo gestiona. ── #}
 
       {# ── APARTAMENTOS TURÍSTICOS (Anexo I.3/I.4) — categoría global (PB) ── #}
       <label class="rc-campo" data-cuando-uso="apartamentos_turisticos" data-visible-en-planta="pb">
@@ -202,8 +202,28 @@
         </select>
         <small class="rc-hint">"Conjuntos" acota a 1L/2L con mínimos menores.</small>
       </label>
-      {{ tip_bloque("apartamentos_turisticos", "apartamento", lbl_apt, "tipologia_apartamento", prog, "programa", "pb", "rc-tip-apartamentos") }}
-      {{ tip_bloque("apartamentos_turisticos", "apartamento", lbl_apt, "tipologia_apartamento", prog_t, "programa_tipo", "tipo", "rc-tip-apartamentos-tipo") }}
+      {# §2.5 — Vivienda y apartamento turístico se definen por su Nº DE
+         DORMITORIOS. El sistema enumera todas las combinaciones de tamaños por
+         dormitorio (vivienda: individual/doble; apartamento: +triple/cuádruple),
+         calcula cuántas unidades caben de cada una y el técnico elige una en el
+         modal. La elección es temporal. #}
+      <div class="rc-campo" data-cuando-uso="vivienda apartamentos_turisticos" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Nº de dormitorios por unidad</span>
+        <div class="rc-ndorms">
+          <input type="number" id="rc-apt-ndorms" min="0" step="1" value="0"
+                 aria-label="Número de dormitorios por unidad">
+          <button type="button" class="boton-secundario rc-btn-pequeno" id="rc-btn-combinaciones">
+            Ver combinaciones
+          </button>
+        </div>
+        <small class="rc-hint">0 = estudio.</small>
+        <div id="rc-combo-elegido" class="rc-combo-elegido" hidden>
+          <span class="rc-combo-elegido-pre">Combinación aplicada:</span>
+          <span class="rc-badge rc-badge-dorado" id="rc-combo-elegido-txt"></span>
+          <button type="button" class="rc-tip-quitar" id="rc-combo-limpiar"
+                  aria-label="Quitar combinación elegida">−</button>
+        </div>
+      </div>
 
       {# ── HOTEL-APARTAMENTO (Anexo I.2) — categoría global (PB) ── #}
       <label class="rc-campo" data-cuando-uso="hotel_apartamento" data-visible-en-planta="pb">
@@ -232,7 +252,7 @@
       {{ tip_bloque("hotelero", "hotelero", lbl_hab, "tipologia_habitacion", prog_t, "programa_tipo", "tipo", "rc-tip-hotelero-tipo") }}
 
       <label class="rc-campo" data-visible-en-planta="pb">
-        <span class="rc-campo-label">% unidades adaptadas (DB SUA)</span>
+        <span class="rc-campo-label">% unidades adaptadas (Normativa)</span>
         <input type="number" name="pct_unidades_adaptadas" min="0" max="100" step="1"
                value="{{ prog.pct_unidades_adaptadas }}" data-bloque="programa">
       </label>

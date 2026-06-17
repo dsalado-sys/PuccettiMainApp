@@ -216,12 +216,16 @@ def construir_envolvente(parcela: Polygon, params: Parametros, lados=None) -> En
         if patio is not None:
             i = i.difference(patio.geometry)
             patios.append(patio)
+        # El patio interior (vacío a cielo abierto) no computa como construido:
+        # la construida de la planta es la huella menos el área de patio. La
+        # edificabilidad consumida, en cambio, se mide sobre la huella completa.
+        patios_area = sum(pt.area_m2 for pt in patios)
         plantas.append(Planta(
             n=n,
             footprint=f,
             interior=i,
             patios=patios,
-            area_construida_m2=f.area,
+            area_construida_m2=max(0.0, f.area - patios_area),
             area_util_m2=i.area,
             computa_edif=True,
             tipo="regular",

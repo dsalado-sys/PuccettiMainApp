@@ -44,11 +44,20 @@
     abortPreview: null,
     abortCalcular: null,
     debounceId: null,
+    // §2.5 — combinación de dormitorios elegida en el modal (apartamentos
+    // turísticos). Temporal: se inyecta en /calcular como `combo_dormitorios`
+    // pero NO se persiste en el formulario ni en /guardar.
+    comboDormitorios: null,   // { slug, etiqueta } | null
   };
 
   function usoActivoForm() {
     const sel = form.querySelector('select[name="uso"]');
     return sel ? sel.value : "vivienda";
+  }
+
+  // §2.5 — usos que se definen por nº de dormitorios + combinaciones.
+  function usoUsaCombo() {
+    return ["vivienda", "apartamentos_turisticos"].includes(usoActivoForm());
   }
 
   // ─── Lectura del formulario → payload backend ─────────────────────────
@@ -297,33 +306,63 @@
     setT("rc-mu-adapt", ds.adaptada === "1" ? "Sí" : "No");
     setT("rc-mu-construida", fmt.m2.format(parseFloat(ds.construida || 0)) + " m²");
     setT("rc-mu-util", fmt.m2.format(parseFloat(ds.util || 0)) + " m²");
-    setT("rc-mu-circ", fmt.m2.format(parseFloat(ds.circ || 0)) + " m²");
     setT("rc-mu-muros", fmt.m2.format(parseFloat(ds.muros || 0)) + " m²");
+
+    // La columna/fila "Computable" (útil − circulación) se muestra en vivienda y
+    // en usos turísticos; en local (sin estancias) se oculta. La nota turística y
+    // el matiz "de acceso" de la circulación solo aplican a usos turísticos.
+    const esTurismo = ["apartamento", "hotel_apartamento", "habitacion"].includes(ds.tipo);
+    const mostrarComputable = esTurismo || ds.tipo === "vivienda";
+    modalEl.classList.toggle("rc-mu-no-turismo", !esTurismo);
+    modalEl.classList.toggle("rc-mu-no-comp", !mostrarComputable);
+    setT("rc-mu-circ-label", esTurismo ? "Circulación de acceso (no computable)" : "Circulación interior");
+    setT("rc-mu-comp-label", esTurismo ? "Computable turismo" : "Computable");
 
     let estancias = [];
     try { estancias = JSON.parse(ds.estancias || "[]"); } catch (e) { estancias = []; }
-    const ul = document.getElementById("rc-mu-estancias-lista");
-    if (ul) {
-      ul.innerHTML = "";
+    const tbody = document.getElementById("rc-mu-estancias-lista");
+    let totalUtil = 0, totalComputable = 0;
+    if (tbody) {
+      tbody.innerHTML = "";
       if (!estancias.length) {
-        ul.innerHTML = '<li class="rc-vacio">Sin programa de estancias para esta unidad.</li>';
+        tbody.innerHTML = '<tr><td colspan="3" class="rc-vacio">Sin programa de estancias para esta unidad.</td></tr>';
       } else {
         estancias.forEach(e => {
-          const li = document.createElement("li");
-          li.className = "rc-mu-estancia rc-mu-estancia-" + (e.categoria || "");
-          const warn = (e.cabe_diametro === false)
-            ? `<span class="rc-mu-est-warn" title="No cabe Ø ${e.diametro_min_m} m">⚠</span>`
-            : "";
-          if (e.cabe_diametro === false) li.classList.add("rc-mu-estancia-warn");
-          li.innerHTML = `${warn}<span class="rc-mu-est-nombre">${e.nombre}</span>
-            <span class="rc-mu-est-cat">${e.categoria || ""}</span>
-            <span class="rc-mu-est-m2">${fmt.m2.format(e.area_target_m2)} m²</span>`;
-          ul.appendChild(li);
+          const util = e.area_target_m2 || 0;
+          const esCirculacion = e.categoria === "circulacion";
+          const computa = e.computa_turismo !== false && !esCirculacion;
+          totalUtil += util;
+          if (computa) totalComputable += util;
+          // La circulación interior/de acceso no se lista como estancia (vive en
+          // el reparto de m² de arriba).
+          if (esCirculacion) return;
+          const tr = document.createElement("tr");
+          tr.className = "rc-mu-estancia rc-mu-estancia-" + (e.categoria || "");
+          // Dos niveles de fallo del círculo mínimo inscribible (Ø):
+          //  · rojo    → no cabe ni en planta cuadrada (imposible geométricamente).
+          //  · amarillo → cabe en cuadrado pero no con la proporción realista 1:1.5.
+          const nivel = e.nivel_diametro || (e.cabe_diametro === false ? "amarillo" : "ok");
+          let warn = "";
+          if (nivel === "rojo") {
+            tr.classList.add("rc-mu-estancia-rojo");
+            warn = `<span class="rc-mu-est-warn rc-mu-est-warn-rojo" title="No cabe el círculo de Ø ${e.diametro_min_m} m ni en planta cuadrada">⚠</span>`;
+          } else if (nivel === "amarillo") {
+            tr.classList.add("rc-mu-estancia-amarillo");
+            warn = `<span class="rc-mu-est-warn rc-mu-est-warn-amarillo" title="El círculo de Ø ${e.diametro_min_m} m solo cabe en planta cuadrada; no con proporción 1:1.5">⚠</span>`;
+          }
+          const compCelda = computa
+            ? `${fmt.m2.format(util)} m²`
+            : '<span class="rc-mu-nocomp">no computa</span>';
+          tr.innerHTML = `<td class="rc-mu-est-nombre">${warn}${e.etiqueta || e.nombre}</td>
+            <td class="rc-mu-est-cat">${e.categoria || ""}</td>
+            <td class="rc-num rc-mu-col-comp">${compCelda}</td>`;
+          tbody.appendChild(tr);
         });
       }
     }
-    const totalEst = estancias.reduce((acc, e) => acc + (e.area_target_m2 || 0), 0);
-    setT("rc-mu-total-estancias", fmt.m2.format(totalEst) + " m²");
+    setT("rc-mu-total-computable", fmt.m2.format(totalComputable) + " m²");
+    setT("rc-mu-computable", fmt.m2.format(totalComputable) + " m²");
+    setT("rc-mu-circ", fmt.m2.format(Math.max(0, totalUtil - totalComputable)) + " m²");
 
     if (typeof modalEl.showModal === "function") modalEl.showModal();
     else modalEl.setAttribute("open", "");
@@ -407,10 +446,16 @@
 
   // ─── Fetch /preview (rápido) ──────────────────────────────────────────
   function payloadConNormativa(bloques) {
+    const p = { ...bloques };
     if (ESTADO_NORM.aplicada && ESTADO_NORM.aplicada.urbanisticos) {
-      return { ...bloques, normativa_referencia: { urbanisticos: ESTADO_NORM.aplicada.urbanisticos } };
+      p.normativa_referencia = { urbanisticos: ESTADO_NORM.aplicada.urbanisticos };
     }
-    return bloques;
+    // §2.5 — combinación elegida (vivienda / apartamentos). El preview la
+    // ignora; en /calcular sustituye la tipología por la combinación.
+    if (usoUsaCombo() && ESTADO.comboDormitorios) {
+      p.combo_dormitorios = ESTADO.comboDormitorios.slug;
+    }
+    return p;
   }
 
   async function pedirPreview() {
@@ -715,6 +760,112 @@
     mostrarToast(`Normativa "${data.nombre}" aplicada`);
     pedirPreview();
   }
+
+  // ─── Modal "Combinaciones de dormitorios" (§2.5 — apartamentos) ───────
+  const modalTip = document.getElementById("rc-modal-tipologias");
+  const btnCombinaciones = document.getElementById("rc-btn-combinaciones");
+  const inpNdorms = document.getElementById("rc-apt-ndorms");
+  const comboElegidoBox = document.getElementById("rc-combo-elegido");
+  const comboElegidoTxt = document.getElementById("rc-combo-elegido-txt");
+  const btnComboLimpiar = document.getElementById("rc-combo-limpiar");
+
+  function refrescarChipCombo() {
+    if (!comboElegidoBox) return;
+    if (ESTADO.comboDormitorios) {
+      comboElegidoBox.hidden = false;
+      comboElegidoTxt.textContent = ESTADO.comboDormitorios.etiqueta;
+    } else {
+      comboElegidoBox.hidden = true;
+      comboElegidoTxt.textContent = "";
+    }
+  }
+
+  function fijarCombo(combo) {
+    ESTADO.comboDormitorios = combo;   // { slug, etiqueta } | null
+    refrescarChipCombo();
+  }
+
+  async function abrirModalCombinaciones() {
+    if (!modalTip) return;
+    if (estado !== "ok") { mostrarToast("Localiza primero la parcela", true); return; }
+    const nDorms = Math.max(0, parseInt(inpNdorms && inpNdorms.value, 10) || 0);
+    const bloques = leerFormulario();
+    const sub = document.getElementById("rc-modal-tip-sub");
+    const body = document.getElementById("rc-modal-tip-body");
+    const vacio = document.getElementById("rc-modal-tip-vacio");
+    const podadas = document.getElementById("rc-modal-tip-podadas");
+    body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Calculando…</td></tr>';
+    vacio.hidden = true;
+    podadas.hidden = true;
+    if (typeof modalTip.showModal === "function") modalTip.showModal();
+    else modalTip.setAttribute("open", "");
+    try {
+      const resp = await fetch("/modulos/render-calculos/tipologias-dormitorios", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...bloques, n_dormitorios: nDorms }),
+      });
+      if (resp.status === 409) {
+        body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Localiza primero la parcela.</td></tr>';
+        return;
+      }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${err.detail || "Error"}</td></tr>`;
+        return;
+      }
+      const data = await resp.json();
+      if (data.error) {
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${data.error}</td></tr>`;
+        return;
+      }
+      const lbl = nDorms === 0 ? "estudio (0 dormitorios)" : `${nDorms} dormitorio${nDorms > 1 ? "s" : ""}`;
+      sub.textContent = `Combinaciones para ${lbl} · categoría ${data.categoria}.`;
+      const combos = data.combinaciones || [];
+      body.innerHTML = "";
+      if (!combos.length) {
+        vacio.hidden = false;
+        return;
+      }
+      for (const c of combos) {
+        const tr = document.createElement("tr");
+        const elegida = ESTADO.comboDormitorios && ESTADO.comboDormitorios.slug === c.slug;
+        tr.className = "rc-modal-tip-fila" + (elegida ? " rc-modal-tip-elegida" : "");
+        tr.innerHTML =
+          `<td>${c.etiqueta}</td>` +
+          `<td class="rc-num">${c.plazas}</td>` +
+          `<td class="rc-num">${fmt.m2.format(c.util_objetivo_m2)} m²</td>` +
+          `<td class="rc-num"><strong>${fmt.int.format(c.n_unidades)}</strong></td>` +
+          `<td><button type="button" class="boton-secundario rc-btn-pequeno rc-modal-tip-elegir">Elegir</button></td>`;
+        tr.querySelector(".rc-modal-tip-elegir").addEventListener("click", () => {
+          fijarCombo({ slug: c.slug, etiqueta: c.etiqueta });
+          modalTip.close();
+          mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
+          pedirCalculo();
+        });
+        body.appendChild(tr);
+      }
+      if (data.podadas > 0) {
+        podadas.hidden = false;
+        podadas.textContent = `Se descartaron ${data.podadas} combinación(es) que no caben en la envolvente actual.`;
+      }
+    } catch (e) {
+      body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Error de red</td></tr>';
+    }
+  }
+
+  if (btnCombinaciones) btnCombinaciones.addEventListener("click", abrirModalCombinaciones);
+  const btnModalTipCerrar = document.getElementById("rc-modal-tip-cerrar");
+  if (btnModalTipCerrar && modalTip) btnModalTipCerrar.addEventListener("click", () => modalTip.close());
+  if (btnComboLimpiar) btnComboLimpiar.addEventListener("click", () => {
+    fijarCombo(null);
+    pedirCalculo();
+  });
+  // Cambiar el nº de dormitorios invalida la combinación elegida (era de otro N).
+  if (inpNdorms) inpNdorms.addEventListener("change", () => {
+    if (ESTADO.comboDormitorios) fijarCombo(null);
+  });
+  refrescarChipCombo();
 
   // ─── Visibilidad combinada: uso × categoría de planta ─────────────────
   // Un campo se ve solo si su `data-cuando-uso` (si lo tiene) incluye el uso activo

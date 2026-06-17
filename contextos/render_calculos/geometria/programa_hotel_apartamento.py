@@ -49,24 +49,42 @@ def programa_hotel_apartamento(
     categoria: str,
     util_disponible: float,
 ) -> list[Estancia]:
-    """Lista de `Estancia` de un hotel-apartamento (salón-comedor-cocina + dormitorio + baño)."""
+    """Estancias COMPUTABLES de un hotel-apartamento (salón-comedor-cocina + dormitorio + baño).
+
+    Devuelve solo las estancias que **computan** a efectos turísticos. La
+    circulación de acceso (vestíbulo/pasillo interior, NO computable) la añade la
+    capa de serialización como remanente del útil. `util_disponible` es el
+    presupuesto COMPUTABLE que reparten las estancias: el baño se fija en su
+    mínimo y salón-comedor + dormitorio escalan proporcionalmente a sus mínimos
+    (nunca por debajo de ellos).
+    """
     cat = _cat_validada(categoria)
     tip = _tip_validada(tipologia)
     bano_min = MIN_BANO_HAP[cat]
 
     if tip == "estudio":
         est = MIN_ESTUDIO_HAP[cat]
+        bano_t = bano_min
+        salon_t = max(est, util_disponible - bano_t)
         return [
-            Estancia("salon_comedor", "publica", est, max(est, util_disponible * 0.78)),
-            Estancia("bano", "servicio", bano_min, bano_min + 1.0),
+            Estancia("salon_comedor", "publica", est, round(salon_t, 2)),
+            Estancia("bano", "servicio", bano_min, round(bano_t, 2)),
         ]
 
     salon_min = MIN_SALON_COMEDOR_HAP[cat]
     dorm_min = MIN_DORMITORIO_HAP[tip][cat]
+    bano_t = bano_min
+    resto = max(0.0, util_disponible - bano_t)
+    base = salon_min + dorm_min
+    if base > 0 and resto > 0:
+        salon_t = max(salon_min, resto * salon_min / base)
+        dorm_t = max(dorm_min, resto * dorm_min / base)
+    else:
+        salon_t, dorm_t = salon_min, dorm_min
     return [
-        Estancia("salon_comedor", "publica", salon_min, max(salon_min, util_disponible * 0.40)),
-        Estancia("dormitorio_1", "privada", dorm_min, dorm_min + 2.0),
-        Estancia("bano", "servicio", bano_min, bano_min + 1.0),
+        Estancia("salon_comedor", "publica", salon_min, round(salon_t, 2)),
+        Estancia("dormitorio_1", "privada", dorm_min, round(dorm_t, 2)),
+        Estancia("bano", "servicio", bano_min, round(bano_t, 2)),
     ]
 
 

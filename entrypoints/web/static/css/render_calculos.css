@@ -115,6 +115,19 @@
 .rc-tip-quitar:hover { background: rgba(140,42,31,0.08); }
 .rc-btn-pequeno { font-size: 12px; padding: 4px 10px; }
 
+/* ─── Apartamentos turísticos: nº de dormitorios + combinación (§2.5) ── */
+.rc-ndorms { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.rc-ndorms input[type="number"] { width: 72px; }
+.rc-ndorms .rc-btn-pequeno { white-space: nowrap; }
+.rc-combo-elegido { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.rc-combo-elegido-pre { font-size: 11px; color: #666; }
+.rc-modal-tip-card { max-width: 640px; width: 92vw; }
+.rc-modal-tip-sub { color: #555; font-size: 13px; margin: 0 0 10px; }
+.rc-modal-tip-tabla { width: 100%; }
+.rc-modal-tip-fila:hover { background: rgba(184,150,12,0.06); }
+.rc-modal-tip-elegida { background: rgba(184,150,12,0.12); }
+.rc-modal-tip-elegir { white-space: nowrap; }
+
 .rc-fila-unidad-local {
   background: rgba(184,150,12,0.06);
   color: #555; font-style: italic; cursor: default;
@@ -523,25 +536,42 @@
 }
 .rc-mu-tabla tr + tr { border-top: 1px solid rgba(0,0,0,0.06); }
 
-.rc-mu-estancias-lista {
-  list-style: none; padding: 0; margin: 0;
-  display: flex; flex-direction: column; gap: 4px;
+.rc-mu-est-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rc-mu-est-tabla thead th {
+  text-align: left; font-size: 11px; font-weight: 500; color: #6e6a60;
+  text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 8px;
+  border-bottom: 1px solid rgba(0,0,0,0.1);
 }
-.rc-mu-estancia {
-  display: grid; grid-template-columns: 1fr auto auto; gap: 10px;
-  padding: 4px 8px; border-left: 3px solid #ccc;
-  background: var(--gris-suave, #f4f2ec); font-size: 13px;
-}
-.rc-mu-estancia-publica { border-left-color: #B8960C; }
-.rc-mu-estancia-privada { border-left-color: #6e6a60; }
-.rc-mu-estancia-servicio { border-left-color: #9b9b9b; }
-.rc-mu-estancia-circulacion { border-left-color: #c9a84c; font-style: italic; }
+.rc-mu-est-tabla td { padding: 4px 8px; }
+.rc-mu-est-tabla .rc-num { text-align: right; font-weight: 600; white-space: nowrap; }
+.rc-mu-est-tabla tbody tr { background: var(--gris-suave, #f4f2ec); }
+.rc-mu-est-tabla tbody tr + tr { border-top: 2px solid #fff; }
+.rc-mu-est-tabla tbody td:first-child { border-left: 3px solid #ccc; }
+.rc-mu-estancia-publica td:first-child { border-left-color: #B8960C; }
+.rc-mu-estancia-privada td:first-child { border-left-color: #6e6a60; }
+.rc-mu-estancia-servicio td:first-child { border-left-color: #9b9b9b; }
+.rc-mu-estancia-circulacion { font-style: italic; }
+.rc-mu-estancia-circulacion td:first-child { border-left-color: #c9a84c; }
 .rc-mu-est-nombre { font-weight: 600; }
 .rc-mu-est-cat { font-size: 11px; color: #6e6a60; text-transform: uppercase; }
-.rc-mu-est-m2 { font-weight: 600; }
-.rc-mu-est-warn {
-  color: var(--error); font-size: 14px; margin-right: 4px;
-  cursor: help;
+.rc-mu-nocomp { color: #9b9b9b; font-style: italic; font-weight: 400; }
+.rc-mu-est-warn { font-size: 14px; margin-right: 4px; cursor: help; }
+/* Rojo: el círculo no cabe ni en planta cuadrada (área < Ø²) — imposible. */
+.rc-mu-est-warn-rojo { color: var(--error); }
+.rc-mu-estancia-rojo td { background: rgba(140,42,31,0.10); }
+/* Amarillo: cabe en cuadrado pero no con la proporción realista 1:1.5. */
+.rc-mu-est-warn-amarillo { color: var(--dorado); }
+.rc-mu-estancia-amarillo td { background: rgba(184,150,12,0.12); }
+.rc-mu-est-tabla tfoot th,
+.rc-mu-est-tabla tfoot td {
+  padding: 6px 8px; font-weight: 700;
+  border-top: 2px solid rgba(0,0,0,0.18);
 }
-.rc-mu-estancia-warn { background: rgba(140,42,31,0.08); }
-.rc-mu-total { font-size: 12px; color: #6e6a60; margin: 4px 0 0; text-align: right; }
+.rc-mu-est-tabla tfoot th { text-align: left; }
+.rc-mu-nota { font-size: 11px; color: #6e6a60; margin: 8px 0 0; line-height: 1.4; }
+/* La columna/fila "Computable" se muestra en vivienda y turismo; solo se oculta
+   donde no aplica (local, sin estancias). */
+.rc-mu-no-comp .rc-mu-col-comp,
+.rc-mu-no-comp .rc-mu-fila-comp { display: none; }
+/* La nota "computable a efectos turísticos" solo aplica a usos turísticos. */
+.rc-mu-no-turismo .rc-mu-nota-turismo { display: none; }

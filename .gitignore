@@ -1,0 +1,25 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Base de datos local (solo backups; puccetti.sqlite se trackea)
+app/data/*.db
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Huevos y distribución
+*.egg-info/
+dist/
+build/
+
+# Variables de entorno
+.env
+.env.local
+
+# Editores
+.vscode/
+.idea/
+*.swp

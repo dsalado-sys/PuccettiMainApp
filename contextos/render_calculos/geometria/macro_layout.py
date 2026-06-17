@@ -558,8 +558,10 @@ def _generar_candidato(
     circ = (pas_geom.area if not pas_geom.is_empty else 0.0) + \
            (nucleo.area_m2 if nucleo is not None else 0.0)
     patios_area = sum(p.area_m2 for p in patios_world)
-    construida = footprint.area
-    muros_area = max(0.0, construida - util_unidades - circ - patios_area)
+    # El patio interior es un vacío a cielo abierto: NO computa como construido.
+    # La construida de la planta es la huella menos los patios.
+    construida = max(0.0, footprint.area - patios_area)
+    muros_area = max(0.0, construida - util_unidades - circ)
 
     incidencias = [inc for u in unidades for inc in u.incidencias]
     if nucleo is None:

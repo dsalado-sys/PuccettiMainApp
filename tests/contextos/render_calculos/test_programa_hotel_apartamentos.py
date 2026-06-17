@@ -64,13 +64,15 @@ def test_hotel_apartamento_areas_sociales_como_hotel():
 
 # ── Apartamento turístico por ocupación de dormitorio (A1.3) ────────────────
 def test_apartamento_salon_comedor_dormitorio_cocina_bano():
-    # 4L cuádruple (4 plazas): salón base "hasta 4 personas" sin adicional.
+    # 4L cuádruple: 4 plazas + 2 del salón = 6 personas > 4 (umbral 3L/4L) → 2 baños.
+    # Y 6 personas → 2 por encima de 4 → salón = 16 + 2 × 4 (SUP 4L) = 24.
     est = {e.nombre: e for e in pa.programa_apartamentos("cuadruple", "4L", 0.0)}
-    assert list(est) == ["salon_comedor", "dormitorio_1", "cocina", "bano"]
-    assert est["salon_comedor"].area_min_m2 == pytest.approx(16.0)   # 4L, ≤4 personas → sin adicional
+    assert list(est) == ["salon_comedor", "dormitorio_1", "cocina", "bano_1", "bano_2"]
+    assert est["salon_comedor"].area_min_m2 == pytest.approx(24.0)   # 16 base + 2 plazas × 4 (SUP 4L)
     assert est["dormitorio_1"].area_min_m2 == pytest.approx(27.0)    # dormitorio cuádruple 4L
     assert est["cocina"].area_min_m2 == pytest.approx(8.0)
-    assert est["bano"].area_min_m2 == pytest.approx(4.0)
+    assert est["bano_1"].area_min_m2 == pytest.approx(4.0)
+    assert est["bano_2"].area_min_m2 == pytest.approx(4.0)
 
 
 # ── A1.4 Apartamentos conjuntos ─────────────────────────────────────────────

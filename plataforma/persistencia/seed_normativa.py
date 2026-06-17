@@ -17,7 +17,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contextos.render_calculos.geometria.programa import (
-    MIN_ASEO,
     MIN_BANO,
     MIN_COCINA,
     MIN_DORM_DOBLE,
@@ -25,6 +24,8 @@ from app.contextos.render_calculos.geometria.programa import (
     SALON_MAS_COCINA_MIN,
     SALON_MIN,
     UTIL_MAX,
+    banos_vivienda,
+    nombres_banos,
 )
 
 from .catalogo_superficies_sqlalchemy import AnexoIViviendaORM, ParametrosMotorViviendaORM
@@ -92,8 +93,9 @@ def _filas_anexo_i_vivienda() -> list[tuple[int, str, float, float, float | None
 
     Política de targets sembrada (suma exacta = util_maximo VPO):
     - Estudio (0d): espacio_principal=18 + bano=4 + circulacion=3 = 25 m².
-    - 1d+: cocina=8, bano=5, aseo=2.5 fijos; salón + dormitorios escalan al
-      restante tras descontar la circulación interior (15% del útil).
+    - 1d+: cocina=8, baño(s)=5 fijos; salón + dormitorios escalan al restante
+      tras descontar la circulación interior (15% del útil). Nº de baños por nº
+      de dormitorios (Anexo I.5): 1 hasta 2 dorms, 2 desde 3 dorms.
     """
     filas: list[tuple[int, str, float, float, float | None]] = []
     # Estudio: 3 estancias con target absoluto sumando UTIL_MAX[0].
@@ -111,11 +113,9 @@ def _filas_anexo_i_vivienda() -> list[tuple[int, str, float, float, float | None
         filas.append((n, "dormitorio_1", MIN_DORM_DOBLE, util_max, None))
         for i in range(2, n + 1):
             filas.append((n, f"dormitorio_{i}", MIN_DORM_INDIVIDUAL, util_max, None))
-        if util_max > 70 or n >= 3:
-            filas.append((n, "bano_1", MIN_BANO, util_max, MIN_BANO + 2.0))
-            filas.append((n, "aseo", MIN_ASEO, util_max, MIN_ASEO + 1.0))
-        else:
-            filas.append((n, "bano", MIN_BANO, util_max, MIN_BANO + 2.0))
+        # Baños completos por nº de dormitorios: 1 hasta 2 dorms, 2 desde 3 dorms.
+        for nombre in nombres_banos(banos_vivienda(n)):
+            filas.append((n, nombre, MIN_BANO, util_max, MIN_BANO + 2.0))
     return filas
 
 

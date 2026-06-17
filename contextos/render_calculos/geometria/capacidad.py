@@ -2,14 +2,20 @@
 
 Iteración 5: diferenciación PB / planta tipo + multi-tipología + local en PB.
 
+El patio interior es un vacío a cielo abierto: NO computa como superficie
+construida. Por eso la `construida` que se reporta por planta es la HUELLA
+menos el patio, y se cumple `construida = útil + muros + circ + núcleo + local`
+(el patio queda fuera y se reporta en su columna aparte).
+
 Planta baja (idx_visual == 0, tipo "regular"):
-    construida_i  = huella_planta (ya con retranqueos + ocupación)
-    muros_i       = construida_i × pct_muros / 100
-    circ_i_pb     = construida_i × pct_circulacion_pb / 100
-    nucleo_i      = construida_i × pct_nucleo / 100
-    patio_i       = min(area_patio_min, construida_i × 0.20)
-    local_i       = (construida_i − muros_i − circ_i_pb − nucleo_i − patio_i) × pct_local_pb / 100
-    util_unidades_pb = construida_i − muros_i − circ_i_pb − nucleo_i − patio_i − local_i − comunes_planta
+    huella_i      = huella_planta (ya con retranqueos + ocupación)
+    muros_i       = huella_i × pct_muros / 100
+    circ_i_pb     = huella_i × pct_circulacion_pb / 100
+    nucleo_i      = huella_i × pct_nucleo / 100
+    patio_i       = min(area_patio_min, huella_i × 0.20)
+    local_i       = (huella_i − muros_i − circ_i_pb − nucleo_i − patio_i) × pct_local_pb / 100
+    util_unidades_pb = huella_i − muros_i − circ_i_pb − nucleo_i − patio_i − local_i − comunes_planta
+    construida_i  = huella_i − patio_i  (el patio no computa a construido)
 
 Planta tipo / ático:
     Mismo esquema pero con pct_circulacion_tipo, sin local. El patio se
@@ -299,10 +305,15 @@ def calcular_capacidad(
     es_primera_regular = True
 
     for i, p in enumerate(plantas):
+        # `construida_i` aquí es la HUELLA de la planta. Sirve de base para los
+        # porcentajes de muros/circulación/núcleo y para la edificabilidad. La
+        # construida que se REPORTA (sin patio) se calcula más abajo, una vez
+        # conocido `patio_i`.
         construida_i = p.footprint.area
-        construida_total += construida_i
         admitida = i in plantas_admitidas_idx
         if p.computa_edif and admitida:
+            # La edificabilidad (techo consumido) se sigue midiendo sobre la
+            # huella completa; es un concepto distinto del construido.
             construida_computable_efectiva += construida_i
 
         cat = _categoria_planta(p, es_primera_regular)
@@ -337,8 +348,9 @@ def calcular_capacidad(
             pct_circ_planta = dis.pct_circulacion
             # La circulación de la planta engloba: pasillos comunes
             # (`pct_circulacion_*`) + cuota de áreas comunes obligatorias del
-            # uso (`descuento_por_planta`, sólo no-vivienda). Así la tabla
-            # cuadra: construida_i = util + muros + circ + núcleo + patio + local.
+            # uso (`descuento_por_planta`, sólo no-vivienda). Así la huella
+            # cuadra: huella_i = util + muros + circ + núcleo + patio + local
+            # (y la construida reportada = huella_i − patio_i).
             circ_i = construida_i * pct_circ_planta / 100.0 + descuento_por_planta
 
             util_bruto_i = max(
@@ -353,8 +365,9 @@ def calcular_capacidad(
                 util_disponible_i = util_bruto_i
 
             # Útil neto de la planta (independiente de cuántas unidades quepan):
-            # construida(huella) = útil + muros + circ + núcleo + patio + local
-            # (+ comunes obligatorias, que se muestran en su fila aparte).
+            # huella = útil + muros + circ + núcleo + patio + local
+            # (+ comunes obligatorias, que se muestran en su fila aparte). El
+            # patio se excluye de la construida reportada (vacío a cielo abierto).
             util_disponible_planta = util_disponible_i
             util_total += util_disponible_planta
 
@@ -369,10 +382,16 @@ def calcular_capacidad(
             nombre = _nombre_planta(idx_visual, p.tipo)
             idx_visual += 1
 
+        # El patio interior es un vacío a cielo abierto: NO computa como
+        # superficie construida. La construida reportada es la huella menos el
+        # patio, de modo que `construida = útil + muros + circ + núcleo + local`.
+        construida_neta_i = max(0.0, construida_i - patio_i)
+        construida_total += construida_neta_i
+
         # Se guardan los m² SIN redondear (precisión completa). El redondeo a
         # 2 decimales se aplica solo en la serialización (capa de presentación).
         viv_por_planta.append(viv_i)
-        construida_por_planta.append(construida_i)
+        construida_por_planta.append(construida_neta_i)
         util_por_planta.append(util_disponible_planta)
         muros_por_planta.append(muros_i)
         muros_estimados_por_planta.append(muros_est_i)

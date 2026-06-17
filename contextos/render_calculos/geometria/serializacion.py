@@ -252,9 +252,23 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
     # hotel-apartamento, hotelero) están ya distribuidas dentro de
     # `circulacion_por_planta[i]` (suma de `pct_circ × construida` + cuota de
     # `area_servicios_obligatorios_m2 / n_plantas_habitables`). No se añade
-    # fila aparte: duplicaría m² y la suma de columnas dejaría de cuadrar con
-    # `construida_i` (huella).
+    # fila aparte: duplicaría m².
+    #
+    # El patio interior NO computa como construido (vacío a cielo abierto): la
+    # columna `construida_m2` es la huella menos el patio, así que la identidad
+    # por planta es `construida = útil + muros + circulación + núcleo + local`
+    # y la columna `patios_m2` queda fuera de esa suma (se reporta aparte).
     return rows
+
+
+# Usos cuyas unidades se rigen por normativa TURÍSTICA (computable ≠ útil total).
+USOS_TURISMO = ("apartamento", "hotel_apartamento", "habitacion")
+
+# Margen de circulación de acceso (vestíbulo/pasillo interior de la unidad) que NO
+# computa a efectos turísticos. Coincide con el 15% que `util_objetivo_* = mínimos
+# × 1.15` reserva en el Anexo I: las estancias computables ocupan `útil / 1.15` y
+# el resto (`útil − útil/1.15`) es la circulación de acceso no computable.
+PCT_CIRCULACION_TURISMO = 15.0
 
 
 # Diámetros mínimos inscribibles por nombre de estancia (m).
@@ -270,7 +284,7 @@ _DIAMETROS_MIN_M: dict[str, float] = {
     "habitacion": 2.70,          # unidad de alojamiento hotelera (Anexo I.1)
     "espacio_principal": 3.00,   # estudio: salón+cocina+zona dormir integrados
     "cocina": 1.60,
-    "bano": 1.20, "bano_1": 1.20, "aseo": 1.20,
+    "bano": 1.20, "bano_1": 1.20, "bano_2": 1.20, "aseo": 1.20, "aseo_2": 1.20,
     "vestibulo": 1.20,
     "pasillo": 1.00,
     "circulacion_interior": 1.00,
@@ -278,17 +292,66 @@ _DIAMETROS_MIN_M: dict[str, float] = {
 }
 
 
-def _cabe_diametro(nombre: str, area_target_m2: float) -> tuple[bool, float]:
-    """Devuelve (cabe, diametro_min_requerido_m).
+def _nivel_diametro(nombre: str, area_target_m2: float) -> tuple[str, float]:
+    """Nivel de holgura para inscribir el círculo mínimo en la estancia.
 
-    Asume habitación rectangular 1:1.5; lado_menor = √(area/1.5).
-    Si la estancia no está en el catálogo de mínimos, devuelve (True, 0.0).
+    Devuelve (nivel, diametro_min_requerido_m) con nivel ∈ {"ok", "amarillo", "rojo"}:
+
+    - "rojo":     ni siquiera en planta cuadrada cabe el círculo. Para contener un
+                  círculo de Ø=D un rectángulo necesita ambos lados ≥ D, luego
+                  área ≥ D². Si `área < D²` es **imposible** geométricamente.
+    - "amarillo": el círculo cabe en planta cuadrada, pero no con la proporción
+                  realista 1:1.5 (lado menor = √(área/1.5) < D). Fallo "blando":
+                  depende de la forma que adopte la estancia.
+    - "ok":       cabe con holgura asumiendo la proporción 1:1.5.
+
+    Si la estancia no está en el catálogo de mínimos, devuelve ("ok", 0.0).
     """
     diam = _DIAMETROS_MIN_M.get(nombre, 0.0)
     if diam <= 0 or area_target_m2 <= 0:
-        return True, diam
-    lado_menor = (area_target_m2 / 1.5) ** 0.5
-    return lado_menor + 1e-6 >= diam, diam
+        return "ok", diam
+    if area_target_m2 + 1e-6 < diam * diam:            # ni en planta cuadrada
+        return "rojo", diam
+    lado_menor = (area_target_m2 / 1.5) ** 0.5         # proporción realista 1:1.5
+    if lado_menor + 1e-6 < diam:
+        return "amarillo", diam
+    return "ok", diam
+
+
+# Etiquetas legibles para el detalle por unidad (la clave es el nombre máquina
+# que emiten los programas del Anexo I). Los dormitorios se numeran aparte.
+_ETIQUETAS_ESTANCIA: dict[str, str] = {
+    "salon": "Salón",
+    "salon_cocina": "Salón-cocina",
+    "salon_comedor": "Salón-comedor",
+    "cocina": "Cocina",
+    "espacio_principal": "Espacio principal",
+    "habitacion": "Habitación",
+    "estudio": "Estudio",
+    "dormitorio": "Dormitorio",
+    "bano": "Baño",
+    "bano_1": "Baño 1",
+    "bano_2": "Baño 2",
+    "aseo": "Aseo",
+    "aseo_2": "Aseo 2",
+    "vestibulo": "Vestíbulo",
+    "circulacion_interior": "Circulación interior",
+}
+
+
+def _etiqueta_estancia(nombre: str) -> str:
+    """Etiqueta legible de una estancia para el detalle por unidad.
+
+    Con ≥5 plazas los dos baños obligatorios llegan como `bano_1`/`bano_2` y se
+    muestran "Baño 1"/"Baño 2". Los dormitorios se numeran (`dormitorio_2` →
+    "Dormitorio 2"); el resto sale del diccionario o, por defecto, capitaliza
+    sustituyendo guiones bajos por espacios.
+    """
+    if nombre in _ETIQUETAS_ESTANCIA:
+        return _ETIQUETAS_ESTANCIA[nombre]
+    if nombre.startswith("dormitorio_"):
+        return "Dormitorio " + nombre.split("_", 1)[1]
+    return nombre.replace("_", " ").capitalize()
 
 
 def _slug_principal(params, tipo_unidad: str) -> str:
@@ -315,8 +378,9 @@ def _estancias_por_unidad_dorms(
     `slug` es la tipología REAL de esta unidad (mezcla multi-tipología); si falta,
     se usa la tipología principal del proyecto.
     """
-    from .programa import programa_vivienda
-    from .programa_apartamentos import programa_apartamentos
+    from .combinador_tipologias import es_slug_combo, slug_a_combo
+    from .programa import programa_vivienda, programa_vivienda_combo
+    from .programa_apartamentos import programa_apartamentos, programa_apartamentos_combo
     from .programa_hotel_apartamento import programa_hotel_apartamento
     from .programa_hotelero import programa_habitacion
 
@@ -324,6 +388,16 @@ def _estancias_por_unidad_dorms(
         return []
 
     tipo_unidad = getattr(programa_uso, "tipo_unidad", "vivienda") if programa_uso is not None else "vivienda"
+    es_turismo = tipo_unidad in USOS_TURISMO
+
+    # En usos turísticos reservamos el margen de circulación de acceso (no
+    # computable): los programas del Anexo I sólo dimensionan estancias
+    # computables, que se ajustan al presupuesto `útil / 1.15`. La vivienda
+    # gestiona su propia circulación internamente (emite `circulacion_interior`).
+    if es_turismo:
+        util_computable = util_por_unidad / (1.0 + PCT_CIRCULACION_TURISMO / 100.0)
+    else:
+        util_computable = util_por_unidad
 
     if tipo_unidad == "apartamento":
         cat = getattr(params.programa, "categoria_apartamentos", None)
@@ -331,32 +405,69 @@ def _estancias_por_unidad_dorms(
         grupo = getattr(params.programa, "grupo_apartamentos", None)
         grupo_v = grupo.value if grupo is not None else "edificios"
         tip_v = slug or _slug_principal(params, "apartamento")
-        estancias = programa_apartamentos(tip_v, cat_v, util_por_unidad, grupo_v)
+        # §2.5 paradigma nuevo: si el slug codifica una combinación de dormitorios
+        # ("doble*1+individual*1"), el programa lo genera por composición; un slug
+        # de ocupación heredado ("doble") sigue la vía monodormitorio.
+        if es_slug_combo(tip_v):
+            estancias = programa_apartamentos_combo(slug_a_combo(tip_v), cat_v, util_computable, grupo_v)
+        else:
+            estancias = programa_apartamentos(tip_v, cat_v, util_computable, grupo_v)
     elif tipo_unidad == "hotel_apartamento":
         cat = getattr(params.programa, "categoria_hotel_apartamento", None)
         cat_v = cat.value if cat is not None else "3E"
         tip_v = slug or _slug_principal(params, "hotel_apartamento")
-        estancias = programa_hotel_apartamento(tip_v, cat_v, util_por_unidad)
+        estancias = programa_hotel_apartamento(tip_v, cat_v, util_computable)
     elif tipo_unidad == "habitacion":
         cat = getattr(params.programa, "categoria_hotelero", None)
         cat_v = cat.value if cat is not None else "hotel_3"
         tip_v = slug or _slug_principal(params, "habitacion")
-        estancias = programa_habitacion(tip_v, cat_v, util_por_unidad)
+        estancias = programa_habitacion(tip_v, cat_v, util_computable)
     else:
         salon_open = bool(getattr(params.programa, "salon_cocina_open", False))
-        estancias = programa_vivienda(n_dorms, util_por_unidad, salon_open)
+        # §2.5 paradigma nuevo: si el slug codifica una combinación de dormitorios,
+        # la vivienda se genera por composición (individual/doble); un slug
+        # heredado (n_dorms como "2") sigue la vía int-based.
+        if slug and es_slug_combo(slug):
+            estancias = programa_vivienda_combo(slug_a_combo(slug), util_por_unidad, salon_open)
+        else:
+            estancias = programa_vivienda(n_dorms, util_por_unidad, salon_open)
 
     salida: list[dict[str, Any]] = []
     for e in estancias:
-        cabe, diam = _cabe_diametro(e.nombre, e.area_target_m2)
+        nivel, diam = _nivel_diametro(e.nombre, e.area_target_m2)
         salida.append({
             "nombre": e.nombre,
+            "etiqueta": _etiqueta_estancia(e.nombre),
             "categoria": e.categoria,
             "area_target_m2": round(e.area_target_m2, 2),
             "area_min_m2": round(e.area_min_m2, 2),
             "diametro_min_m": diam,
-            "cabe_diametro": cabe,
+            "cabe_diametro": nivel == "ok",
+            "nivel_diametro": nivel,
+            # Computa a efectos turísticos todo salvo la circulación de acceso
+            # (vestíbulos/pasillos). Los pasillos internos de una estancia ya están
+            # descontados porque los mínimos del Anexo son superficies netas.
+            "computa_turismo": e.categoria != "circulacion",
         })
+
+    # Circulación de acceso (NO computable) como estancia explícita en turismo, si
+    # el programa no la incluyó ya: remanente del útil tras las estancias computables.
+    if es_turismo and not any(not e["computa_turismo"] for e in salida):
+        computable_total = sum(e["area_target_m2"] for e in salida)
+        circ = round(max(0.0, util_por_unidad - computable_total), 2)
+        if circ > 0.05:
+            nivel, diam = _nivel_diametro("circulacion_interior", circ)
+            salida.append({
+                "nombre": "circulacion_interior",
+                "etiqueta": _etiqueta_estancia("circulacion_interior"),
+                "categoria": "circulacion",
+                "area_target_m2": circ,
+                "area_min_m2": 0.0,
+                "diametro_min_m": diam,
+                "cabe_diametro": nivel == "ok",
+                "nivel_diametro": nivel,
+                "computa_turismo": False,
+            })
     return salida
 
 
@@ -452,10 +563,13 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
             # menos la suma de las estancias que NO son circulación. En vivienda
             # coincide con la estancia "circulacion_interior" (15% del útil); en
             # apartamentos/hoteles es el remanente del útil tras las estancias.
-            util_estancias_no_circ = sum(
-                e["area_target_m2"] for e in estancias if e.get("categoria") != "circulacion"
+            # Superficie computable (turismo) = estancias que computan; la
+            # circulación de acceso (vestíbulo/pasillo) NO computa. En vivienda la
+            # estancia `circulacion_interior` (15% del útil) también se excluye.
+            computable_u = sum(
+                e["area_target_m2"] for e in estancias if e.get("computa_turismo", e.get("categoria") != "circulacion")
             )
-            circ_interior_u = max(0.0, util_u - util_estancias_no_circ)
+            circ_interior_u = max(0.0, util_u - computable_u)
 
             rows.append({
                 "planta": nombre_planta,
@@ -466,6 +580,7 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
                 "util_m2_objetivo": util_obj,
                 "construida_por_unidad_m2": round(construida_u, 2),
                 "util_por_unidad_m2": round(util_u, 2),
+                "computable_turismo_por_unidad_m2": round(computable_u, 2),
                 "muros_por_unidad_m2": round(muros_u, 2),
                 "circulacion_interior_por_unidad_m2": round(circ_interior_u, 2),
                 "adaptada": es_adapt,
