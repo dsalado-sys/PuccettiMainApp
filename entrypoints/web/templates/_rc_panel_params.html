@@ -256,7 +256,10 @@
         <input type="number" name="pct_unidades_adaptadas" min="0" max="100" step="1"
                value="{{ prog.pct_unidades_adaptadas }}" data-bloque="programa">
       </label>
-      <label class="rc-checkbox" data-visible-en-planta="pb">
+      {# Salón-cocina integrado: solo aplica a vivienda (Anexo I.5). El uso
+         turístico/hotelero lo ignora; al cambiar de uso este campo se oculta y
+         no entra al payload, así que no "arrastra" un valor activado. #}
+      <label class="rc-checkbox" data-cuando-uso="vivienda" data-visible-en-planta="pb">
         <input type="checkbox" name="salon_cocina_open"
                {% if prog.salon_cocina_open %}checked{% endif %} data-bloque="programa">
         <span>Salón-cocina integrado</span>
