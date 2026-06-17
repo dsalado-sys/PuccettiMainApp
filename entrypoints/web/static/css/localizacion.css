@@ -299,6 +299,51 @@
 .loc-acciones button[disabled] { opacity: 0.55; cursor: not-allowed; }
 .loc-acciones .loc-hint { margin-top: 6px; font-size: 11.5px; }
 
+/* ── Modal "Guardar como proyecto" ──────────────────────────────────────── */
+.loc-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(10, 10, 10, 0.55);
+  backdrop-filter: blur(2px);
+}
+.loc-modal-overlay.oculto { display: none; }
+.loc-modal {
+  width: 100%;
+  max-width: 420px;
+  background: var(--blanco);
+  border: 1px solid var(--negro);
+  border-top: 4px solid var(--dorado);
+  border-radius: var(--radio);
+  padding: 22px 24px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.loc-modal h3 { margin: 0 0 8px; font-size: 16px; color: var(--negro); }
+.loc-modal .loc-hint { margin-bottom: 16px; }
+.loc-modal-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: #444;
+  margin-bottom: 18px;
+}
+.loc-modal-campo input {
+  padding: 9px 11px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1px solid #C9C5B5;
+  border-radius: var(--radio);
+  background: var(--blanco);
+  box-sizing: border-box;
+}
+.loc-modal-campo input:focus { outline: 2px solid var(--dorado); outline-offset: 1px; }
+.loc-modal-acciones { display: flex; justify-content: flex-end; gap: 10px; }
+
 /* Pestaña colapsable de simplificación + lados */
 .loc-detalles {
   margin-top: 16px;
