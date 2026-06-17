@@ -9,7 +9,6 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.contextos.localizacion.casos_uso import (
     CargarDetalleSubreferencia,
-    CargarTodosLosDetalles,
     CorregirLado,
     CorregirOrientacionLado,
     LocalizarPorCoordenada,
@@ -29,19 +28,20 @@ from app.contextos.localizacion.dominio import (
     TipoLado,
 )
 from app.contextos.localizacion.puertos import CallejeroPort, CatastroPort
+from app.contextos.proyectos.casos_uso import CrearProyecto
 from app.contextos.proyectos.puertos import ProyectoRepositorio
 from app.nucleo.modelo import ModuloPuccetti, Proyecto, Rol
 from app.nucleo.modelo.rol import PermisoModulo, puede_acceder
 
 from ..dependencias import (
     COOKIE_PARCELA,
+    COOKIE_PROYECTO,
     callejero_adapter,
     cargar_detalle_subref_uc,
-    cargar_todos_detalles_uc,
     catastro_adapter,
     corregir_lado_uc,
     corregir_orientacion_uc,
-    exige_proyecto,
+    crear_proyecto_uc,
     localizar_por_coordenada_uc,
     localizar_por_direccion_uc,
     localizar_por_rc_uc,
@@ -156,29 +156,30 @@ def pantalla_buscar(
 
     # Con proyecto activo: la parcela del proyecto manda sobre cualquier
     # parcela suelta que pudiera quedar en la cookie temporal.
-    #   1. Si el proyecto tiene RC, se busca en Catastro para tener datos
-    #      frescos (una llamada por entrada al módulo).
-    #   2. Si la llamada falla (rate limit, offline) se reconstruye desde el
-    #      JSON guardado en datos_por_modulo — degradación suave.
+    #   1. Si el proyecto ya tiene la parcela guardada, se reconstruye desde el
+    #      JSON de datos_por_modulo — SIN tocar Catastro (no quemar la API al
+    #      reabrir un proyecto: todos los datos se cachean al guardar).
+    #   2. Solo si no hay datos guardados (proyectos antiguos) y hay RC, se
+    #      re-resuelve en Catastro como respaldo.
     # Sin proyecto: respetamos la parcela en cookie temporal (si la hay).
     cookie_a_setear: str | None = None
     if proyecto is not None:
-        rc_proyecto = (proyecto.referencia_catastral or "").strip()
         parcela_proyecto_obj: Parcela | None = None
-        if rc_proyecto:
-            try:
-                parcela_proyecto_obj = uc_rc.ejecutar(rc_proyecto)
-            except ParcelaError as exc:
-                log.warning(
-                    "No se pudo re-resolver RC %s del proyecto %s: %s",
-                    rc_proyecto, proyecto.id, exc,
-                )
+        datos = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value)
+        if isinstance(datos, dict):
+            parcela_proyecto_obj = restaurar_parcela_desde_proyecto(datos)
+            if parcela_proyecto_obj is not None:
+                repo_parcelas.guardar(parcela_proyecto_obj)
         if parcela_proyecto_obj is None:
-            datos = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value)
-            if isinstance(datos, dict):
-                parcela_proyecto_obj = restaurar_parcela_desde_proyecto(datos)
-                if parcela_proyecto_obj is not None:
-                    repo_parcelas.guardar(parcela_proyecto_obj)
+            rc_proyecto = (proyecto.referencia_catastral or "").strip()
+            if rc_proyecto:
+                try:
+                    parcela_proyecto_obj = uc_rc.ejecutar(rc_proyecto)
+                except ParcelaError as exc:
+                    log.warning(
+                        "No se pudo re-resolver RC %s del proyecto %s: %s",
+                        rc_proyecto, proyecto.id, exc,
+                    )
         if parcela_proyecto_obj is not None:
             parcela_temp = parcela_proyecto_obj
             cookie_a_setear = parcela_proyecto_obj.id
@@ -354,26 +355,53 @@ def detalle_subreferencia(
     }
 
 
-@router.post("/asociar-a-proyecto")
-def asociar(
+@router.post("/guardar-como-proyecto")
+def guardar_como_proyecto(
     rol: Rol = Depends(rol_activo),
-    proyecto: Proyecto = Depends(exige_proyecto),
+    nombre: Annotated[str, Form()] = "",
+    proyecto: Proyecto | None = Depends(proyecto_activo),
     parcela: Parcela | None = Depends(obtener_parcela_temporal),
-    bulk: CargarTodosLosDetalles = Depends(cargar_todos_detalles_uc),
+    crear_uc: CrearProyecto = Depends(crear_proyecto_uc),
     repo_proyectos: ProyectoRepositorio = Depends(repositorio_proyectos),
 ):
+    """Vuelca la parcela actual a un proyecto y lo deja activo.
+
+    - Con proyecto activo: guarda la parcela en él (un clic, sin pedir nombre).
+    - Sin proyecto activo: crea uno nuevo con el `nombre` del modal y lo activa.
+
+    No toca Catastro: serializa lo que ya está en sesión (metaparcela con sus
+    datos de edificio + subreferencias, o la parcela catastral concreta elegida).
+    Así el proyecto queda con todos los datos cacheados y no se vuelve a llamar
+    a la API al reabrirlo.
+    """
     _exige_permiso(rol, PermisoModulo.EDITAR)
     if parcela is None:
-        raise HTTPException(status_code=409, detail="No hay parcela en sesión.")
-    # Antes de copiar al aggregate, completamos los detalles que faltan
-    # (coef. participación + año constr.) de todas las subreferencias.
-    try:
-        parcela = bulk.ejecutar(parcela.id)
-    except ParcelaError as exc:
-        raise _mapear_error(exc)
+        raise HTTPException(status_code=409, detail="No hay parcela en sesión para guardar.")
+
+    es_nuevo = proyecto is None
+    if proyecto is None:
+        nombre_limpio = (nombre or "").strip() or (
+            parcela.direccion or parcela.referencia_catastral or ""
+        ).strip()
+        try:
+            proyecto = crear_uc.ejecutar(
+                nombre=nombre_limpio,
+                referencia_catastral=parcela.referencia_catastral or None,
+                direccion=parcela.direccion or None,
+                creado_por=rol.value,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
     asociar_a_proyecto(parcela, proyecto)
     repo_proyectos.guardar(proyecto)
-    return RedirectResponse(url="/modulos/localizacion", status_code=303)
+
+    respuesta = RedirectResponse(url="/modulos/localizacion", status_code=303)
+    if es_nuevo:
+        respuesta.set_cookie(
+            COOKIE_PROYECTO, proyecto.id, httponly=True, samesite="lax"
+        )
+    return respuesta
 
 
 # ── Callejero local (sin tocar Catastro) ───────────────────────────────────

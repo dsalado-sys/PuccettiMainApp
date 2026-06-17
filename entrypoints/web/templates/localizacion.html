@@ -122,21 +122,46 @@
       </details>
 
       <div class="loc-acciones">
-        {% if puede_editar and proyecto_activo %}
-        <form method="post" action="/modulos/localizacion/asociar-a-proyecto" id="form-guardar">
-          <button type="submit" class="boton-primario" id="btn-guardar">
-            Guardar como proyecto «{{ proyecto_activo.nombre }}»
+        {% if puede_editar %}
+          {% if proyecto_activo %}
+          <form method="post" action="/modulos/localizacion/guardar-como-proyecto" id="form-guardar">
+            <button type="submit" class="boton-primario" id="btn-guardar">
+              Guardar en «{{ proyecto_activo.nombre }}»
+            </button>
+          </form>
+          {% else %}
+          <button type="button" class="boton-primario" id="btn-abrir-modal-guardar">
+            Guardar como proyecto
           </button>
-        </form>
-        {% elif not proyecto_activo %}
-        <button type="button" class="boton-primario" disabled title="Abre o crea un proyecto desde el menú primero">
-          Guardar como proyecto
-        </button>
-        <p class="loc-hint">Abre o crea un proyecto desde el menú para guardar esta parcela.</p>
+          <p class="loc-hint">Se guardarán todos los datos de la parcela en un proyecto nuevo.</p>
+          {% endif %}
         {% endif %}
       </div>
     </section>
   </aside>
+
+  {% if puede_editar and not proyecto_activo %}
+  <div class="loc-modal-overlay oculto" id="modal-guardar-overlay">
+    <div class="loc-modal" role="dialog" aria-modal="true" aria-labelledby="modal-guardar-titulo">
+      <h3 id="modal-guardar-titulo">Guardar como proyecto</h3>
+      <p class="loc-hint">
+        Se creará un proyecto nuevo con esta parcela y todos sus datos catastrales.
+        No se volverá a consultar al Catastro al reabrirlo.
+      </p>
+      <form method="post" action="/modulos/localizacion/guardar-como-proyecto" id="form-guardar-modal" autocomplete="off">
+        <label class="loc-modal-campo">
+          Nombre del proyecto
+          <input type="text" name="nombre" id="inp-nombre-proyecto" maxlength="120"
+            placeholder="Ej. Residencial Macarena 12" required />
+        </label>
+        <div class="loc-modal-acciones">
+          <button type="button" class="boton-secundario" id="btn-cancelar-modal">Cancelar</button>
+          <button type="submit" class="boton-primario" id="btn-confirmar-guardar">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 
   <div id="loc-subref" class="loc-subref oculto">
     <h3 class="loc-subref-titulo">Inmuebles en la parcela</h3>
