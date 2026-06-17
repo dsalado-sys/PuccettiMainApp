@@ -17,13 +17,13 @@ class IncidenciaAdyacencia:
 
 
 def _cat_de(nombre: str) -> str:
-    if nombre.startswith('salon') or nombre == 'cocina' or nombre == 'comedor':
+    if nombre.startswith('salon') or nombre == 'cocina' or nombre == 'comedor' or nombre == 'espacio_principal':
         return 'publica'
     if nombre.startswith('dormitorio') or nombre == 'vestidor':
         return 'privada'
     if nombre.startswith('bano') or nombre == 'aseo':
         return 'servicio'
-    if nombre in ('pasillo', 'vestibulo', 'distribuidor'):
+    if nombre in ('pasillo', 'vestibulo', 'distribuidor', 'circulacion_interior'):
         return 'circulacion'
     return 'otra'
 

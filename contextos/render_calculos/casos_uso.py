@@ -9,7 +9,7 @@ parámetro (DI) y no conocen FastAPI ni SQLAlchemy.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,15 +26,14 @@ from .dominio import (
     ResumenEnvolvente,
     UsoEdificio,
 )
-from .geometria import macro_layout as ml
+from .geometria.capacidad import DisenoPlanta, calcular_capacidad, capacidad_a_dict
 from .geometria.envolvente import construir_envolvente
-from .geometria.parcelas import LadoParcela, orientacion_cardinal
+from .geometria.parcelas import LadoParcela, azimut_normal_exterior, orientacion_cardinal
 from .geometria.serializacion import (
-    edificio_a_dict,
     lados_a_dict,
     ring,
-    tabla_por_planta,
-    tabla_por_unidad,
+    tabla_planta_desde_capacidad,
+    tabla_unidad_desde_capacidad,
 )
 from .parametros import (
     ParametrosRender,
@@ -42,7 +41,13 @@ from .parametros import (
     parametros_a_dict,
     parametros_desde_dict,
 )
-from .puertos import NormativaMunicipalRepositorio
+from .puertos import (
+    CatalogoApartamentosRepositorio,
+    CatalogoHotelApartamentoRepositorio,
+    CatalogoHoteleroRepositorio,
+    CatalogoSuperficiesRepositorio,
+    NormativaMunicipalRepositorio,
+)
 
 
 # ─── Reproyección WGS84 ↔ UTM30N (Iberia peninsular) ────────────────────────
@@ -60,6 +65,28 @@ def _lado_a_utm(p1: tuple[float, float], p2: tuple[float, float]) -> tuple[tuple
     a = _WGS84_A_UTM.transform(p1[0], p1[1])
     b = _WGS84_A_UTM.transform(p2[0], p2[1])
     return a, b
+
+
+def _disenos_por_categoria(params: ParametrosRender) -> dict[str, DisenoPlanta]:
+    """% muros/circulación/núcleo por categoría de planta (pb/tipo/atico/sotano).
+
+    PB lee `pct_circulacion_pb`; el resto de categorías `pct_circulacion_tipo` de su
+    propio bucket. Permite que PB sea independiente de las plantas tipo y que ático y
+    sótano tengan su propio % muros y % circulación.
+    """
+    def dp(diseno, circ_field: str) -> DisenoPlanta:
+        return DisenoPlanta(
+            max(0.0, min(80.0, float(diseno.pct_muros))),
+            max(0.0, min(50.0, float(getattr(diseno, circ_field)))),
+            max(0.0, min(30.0, float(diseno.pct_nucleo))),
+        )
+
+    return {
+        "pb": dp(params.diseno, "pct_circulacion_pb"),
+        "tipo": dp(params.diseno_tipo, "pct_circulacion_tipo"),
+        "atico": dp(params.diseno_atico, "pct_circulacion_tipo"),
+        "sotano": dp(params.diseno_sotano, "pct_circulacion_tipo"),
+    }
 
 
 # ─── Construcción de la parcela métrica desde el proyecto ───────────────────
@@ -108,6 +135,7 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
         azimut_grados = (math.degrees(math.atan2(b[0] - a[0], b[1] - a[1]))) % 360
         lados.append(LadoParcela(
             p1=a, p2=b, tipo=tipo, longitud_m=long_m, azimut=azimut_grados,
+            normal_azimut=azimut_normal_exterior(a, b, poly),
         ))
 
     if not lados:
@@ -123,6 +151,7 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
             azimut_grados = (math.degrees(math.atan2(p2[0] - p1[0], p2[1] - p1[1]))) % 360
             lados.append(LadoParcela(
                 p1=p1, p2=p2, tipo="fachada", longitud_m=long_m, azimut=azimut_grados,
+                normal_azimut=azimut_normal_exterior(p1, p2, poly),
             ))
 
     centroide_raw = datos.get("centroide_lonlat")
@@ -143,7 +172,7 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
 # ─── Caso de uso 1: CalcularEnvolvente (§2.4 — preview rápido) ──────────────
 @dataclass
 class CalcularEnvolvente:
-    """req. 8 — huella + plantas + patios. Sin macro_layout (rápido)."""
+    """req. 8 — huella + plantas + patios. Sin distribución interior (rápido)."""
 
     def ejecutar(
         self,
@@ -151,8 +180,9 @@ class CalcularEnvolvente:
         params: ParametrosRender,
     ) -> dict[str, Any]:
         params_motor = params.a_parametros_motor()
+        params_motor_tipo = params.a_parametros_motor_tipo()
         try:
-            envolvente = construir_envolvente(parcela.poligono_utm, params_motor)
+            envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
         except ValueError as exc:
             return {
                 "error": str(exc),
@@ -161,8 +191,14 @@ class CalcularEnvolvente:
                 "indicadores": None,
             }
 
-        from .geometria.capacidad import calcular_capacidad
-        cap = calcular_capacidad(envolvente, params_motor)
+        # Diferenciación por planta también en el preview (KPI nº viviendas): en
+        # preview no se construyen descriptores, así que la mezcla por planta usa la
+        # vía int-based de vivienda (igual que antes), pero con % y tipología por planta.
+        cap = calcular_capacidad(
+            envolvente, params_motor,
+            params_tipo=params_motor_tipo,
+            disenos=_disenos_por_categoria(params),
+        )
 
         indicadores = _indicadores_disenho(parcela, envolvente.plantas)
         alertas = _alertas_envolvente(envolvente, parcela, params)
@@ -171,7 +207,6 @@ class CalcularEnvolvente:
         resumen = ResumenEnvolvente(
             huella_m2=round(envolvente.plantas[0].footprint.area, 2) if envolvente.plantas else 0.0,
             n_plantas=len(envolvente.plantas),
-            altura_planta_m=params.urbanisticos.altura_planta_m,
             edificabilidad_max_m2=round(envolvente.edificabilidad_max, 2),
             edificabilidad_consumida_m2=round(envolvente.edificabilidad_consumida, 2),
             n_viviendas_objetivo=cap.n_viviendas_objetivo,
@@ -179,26 +214,12 @@ class CalcularEnvolvente:
             bbox_world=(round(bbox[0], 2), round(bbox[1], 2), round(bbox[2], 2), round(bbox[3], 2)),
         )
 
-        plantas_dict = []
-        for pl in envolvente.plantas:
-            plantas_dict.append({
-                "n": pl.n,
-                "nombre": "PB" if pl.n == 0 else f"P{pl.n}",
-                "footprint": ring(pl.footprint),
-                "patios": [
-                    {"poligono": ring(p.geometry), "area_m2": round(p.area_m2, 2),
-                     "luz_recta_m": round(p.luz_recta_m, 2)}
-                    for p in pl.patios
-                ],
-                "construida_m2": round(pl.area_construida_m2, 2),
-                "util_m2": round(pl.area_util_m2, 2),
-            })
+        plantas_dict = _plantas_envolvente_a_dict(envolvente)
 
         return {
             "envolvente": {
                 "huella_m2": resumen.huella_m2,
                 "n_plantas": resumen.n_plantas,
-                "altura_planta_m": resumen.altura_planta_m,
                 "edificabilidad_max_m2": resumen.edificabilidad_max_m2,
                 "edificabilidad_consumida_m2": resumen.edificabilidad_consumida_m2,
                 "n_viviendas_objetivo": resumen.n_viviendas_objetivo,
@@ -219,67 +240,326 @@ class CalcularEnvolvente:
         }
 
 
-# ─── Caso de uso 2: CalcularLayout (§2.4+§2.5 — completo) ───────────────────
+def _plantas_envolvente_a_dict(envolvente) -> list[dict[str, Any]]:
+    """Serializa la lista de plantas de una envolvente para el canvas.
+
+    No incluye unidades/núcleo/pasillos: el render geométrico de unidades
+    queda en backlog (ver iteración 3 — `edificio: null`).
+    """
+    out: list[dict[str, Any]] = []
+    idx_visual = 0
+    for pl in envolvente.plantas:
+        tipo = getattr(pl, "tipo", "regular")
+        if tipo == "sotano":
+            nombre = "S1"
+        elif tipo == "atico":
+            nombre = "Ático"
+        else:
+            nombre = "PB" if idx_visual == 0 else f"P{idx_visual}"
+            idx_visual += 1
+        out.append({
+            "n": pl.n,
+            "nombre": nombre,
+            "tipo": tipo,
+            "computa_edif": getattr(pl, "computa_edif", True),
+            "footprint": ring(pl.footprint),
+            "patios": [
+                {"poligono": ring(p.geometry), "area_m2": round(p.area_m2, 2),
+                 "luz_recta_m": round(p.luz_recta_m, 2)}
+                for p in pl.patios
+            ],
+            "construida_m2": round(pl.area_construida_m2, 2),
+            "util_m2": round(pl.area_util_m2, 2),
+        })
+    return out
+
+
+# ─── Caso de uso 2: CalcularLayout (§2.4+§2.5 — calculations-first iter. 3) ─
 @dataclass
 class CalcularLayout:
-    """req. 8+12 — envolvente + macro_layout + interiores + tabla."""
+    """req. 8+12 — capacidad numérica + tablas sintéticas, sin macro_layout.
+
+    Desde iteración 3 la fuente de verdad es `calcular_capacidad()`. El render
+    geométrico de unidades queda en backlog; la respuesta lleva `edificio: null`
+    explícito y los datos viven en `capacidad` + `tabla_planta` + `tabla_unidad`.
+
+    Inyectables opcionales (si faltan → fallback a constantes del motor):
+    - `catalogo_vivienda`: Anexo I.5 (vivienda).
+    - `catalogo_apartamentos`: Anexo I.3/I.4 (apartamentos turísticos).
+    - `catalogo_hotel_apartamento`: Anexo I.2 (hoteles-apartamento).
+    - `catalogo_hotelero`: Anexo I.1 (hoteles / hostales / pensiones / albergues).
+    """
+
+    catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
+    catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
+    catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
+    catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
 
     def ejecutar(
         self,
         parcela: ParcelaMetrica,
         params: ParametrosRender,
     ) -> dict[str, Any]:
-        # MVP: solo vivienda. Hotel y apartamentos se devuelven con aviso.
-        if params.programa.uso != UsoEdificio.VIVIENDA:
-            ce = CalcularEnvolvente().ejecutar(parcela, params)
-            aviso = Alerta(
-                "aviso",
-                "Alcance MVP",
-                f"La distribución interior para uso '{params.programa.uso.value}' "
-                "está en desarrollo. La envolvente sí se calcula. "
-                "Para vivienda plurifamiliar usa el modo 'Vivienda'.",
-            )
-            ce["alertas"] = [_alerta_dict(aviso)] + list(ce.get("alertas", []))
-            ce["plantas"] = []
-            ce["tabla_planta"] = []
-            ce["tabla_unidad"] = []
-            ce["edificio"] = None
-            return ce
-
         params_motor = params.a_parametros_motor()
+        params_motor_tipo = params.a_parametros_motor_tipo()
         try:
-            envolvente = construir_envolvente(parcela.poligono_utm, params_motor)
+            envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
         except ValueError as exc:
             return {
                 "error": str(exc),
                 "edificio": None,
+                "capacidad": None,
                 "alertas": [_alerta_dict(Alerta("incumplimiento", "Geometría", str(exc)))],
                 "tabla_planta": [],
                 "tabla_unidad": [],
                 "indicadores": None,
+                "envolvente": None,
             }
 
-        n_viv_pp = params.programa.n_viviendas_por_planta_objetivo
-        edificio = ml.generar_edificio(
-            envolvente,
-            parcela.lados,
-            params_motor,
-            n_viviendas_por_planta=n_viv_pp,
-            seed=params.seed,
+        # 1) Resolver tamaño objetivo de la tipología principal (PB y plantas tipo).
+        util_objetivo = self._resolver_util_objetivo(params)
+        util_objetivo_tipo = self._resolver_util_objetivo(params, params.programa_tipo)
+
+        # 2) Descriptores de tipología (principal + extras → mezcla), PB y tipo.
+        descriptores = self._construir_descriptores_tipologia(params, util_objetivo)
+        descriptores_tipo = self._construir_descriptores_tipologia(
+            params, util_objetivo_tipo, params.programa_tipo
         )
 
-        edif_dict = edificio_a_dict(edificio, params_motor, lados=parcela.lados)
-        indicadores = _indicadores_disenho(parcela, envolvente.plantas, edificio=edificio)
+        # 3) Construir programa_uso (áreas comunes/sociales obligatorias — de edificio).
+        programa_uso = self._construir_programa_uso(
+            params, envolvente, params_motor, util_objetivo, descriptores
+        )
+        area_comunes = programa_uso.area_servicios_obligatorios_m2 if programa_uso else 0.0
+
+        # 4) Cálculo puro — diferenciando PB / plantas tipo / ático / sótano.
+        cap = calcular_capacidad(
+            envolvente, params_motor,
+            util_objetivo_por_unidad=util_objetivo,
+            area_servicios_comunes_m2=area_comunes,
+            descriptores_tipologia=descriptores,
+            params_tipo=params_motor_tipo,
+            util_objetivo_por_unidad_tipo=util_objetivo_tipo,
+            descriptores_tipologia_tipo=descriptores_tipo,
+            disenos=_disenos_por_categoria(params),
+        )
+
+        # 4) Tablas sintéticas derivadas del cálculo (no de geometría).
+        tabla_planta = tabla_planta_desde_capacidad(cap, programa_uso=programa_uso)
+        tabla_unidad = tabla_unidad_desde_capacidad(cap, params, programa_uso=programa_uso)
+
+        # 5) Indicadores y alertas (sin edificio dispuesto).
+        indicadores = _indicadores_disenho(parcela, envolvente.plantas)
         alertas = _alertas_envolvente(envolvente, parcela, params)
-        alertas += _alertas_edificio(edificio, params)
+        alertas += _alertas_capacidad(cap, params, programa_uso)
 
         return {
-            "edificio": edif_dict,
-            "tabla_planta": tabla_por_planta(edificio),
-            "tabla_unidad": tabla_por_unidad(edificio),
+            "edificio": None,                          # render geométrico en backlog
+            "capacidad": capacidad_a_dict(cap),         # fuente de verdad
+            "tabla_planta": tabla_planta,
+            "tabla_unidad": tabla_unidad,
             "indicadores": _indicadores_dict(indicadores),
             "alertas": [_alerta_dict(a) for a in alertas],
+            "envolvente": {
+                "huella_m2": round(envolvente.plantas[0].footprint.area, 2) if envolvente.plantas else 0.0,
+                "n_plantas": len(envolvente.plantas),
+                "edificabilidad_max_m2": round(envolvente.edificabilidad_max, 2),
+                "edificabilidad_consumida_m2": round(envolvente.edificabilidad_consumida, 2),
+                "bbox": [round(v, 2) for v in envolvente.parcela.bounds],
+                "plantas": _plantas_envolvente_a_dict(envolvente),
+            },
+            "parcela": {
+                "poligono": ring(parcela.poligono_utm),
+                "area_m2": round(parcela.poligono_utm.area, 2),
+                "municipio": parcela.municipio,
+                "provincia": parcela.provincia,
+                "bbox": [round(v, 2) for v in parcela.poligono_utm.bounds],
+            },
+            "lados": lados_a_dict(parcela.lados),
         }
+
+    # ─── Helpers privados de CalcularLayout ────────────────────────────────
+    def _resolver_util_objetivo(self, params: ParametrosRender, prog=None) -> float | None:
+        """Lee el m² útil objetivo por unidad desde la BBDD del Anexo I.
+
+        Vivienda: `anexo_i_vivienda.max_m2_util` para `n_dormitorios`.
+        Apartamentos: `anexo_i_apartamentos.max_m2_util` × 1.15.
+
+        `prog` permite resolver el objetivo de las plantas tipo (`programa_tipo`);
+        por defecto usa `params.programa` (planta baja).
+
+        Si la consulta falla o la fila no existe → None y `calcular_capacidad`
+        cae en el hardcoded `util_maximo(n_dorms)` o `util_objetivo_apartamento`.
+        """
+        from .dominio import CATEGORIA_A_NUM_DORMS
+
+        prog = prog if prog is not None else params.programa
+        if prog.uso == UsoEdificio.VIVIENDA:
+            if self.catalogo_vivienda is None:
+                return None
+            n_dorms = CATEGORIA_A_NUM_DORMS.get(prog.categoria_vivienda, 2)
+            try:
+                return self.catalogo_vivienda.util_objetivo_vivienda(n_dorms)
+            except Exception:
+                return None
+        if prog.uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+            if self.catalogo_apartamentos is None:
+                return None
+            try:
+                return self.catalogo_apartamentos.util_objetivo_apartamento(
+                    prog.categoria_apartamentos.value,
+                    prog.tipologia_apartamento.value,
+                    prog.grupo_apartamentos.value,
+                )
+            except Exception:
+                return None
+        if prog.uso == UsoEdificio.HOTEL_APARTAMENTO:
+            if self.catalogo_hotel_apartamento is None:
+                return None
+            try:
+                return self.catalogo_hotel_apartamento.util_objetivo(
+                    prog.categoria_hotel_apartamento.value,
+                    prog.tipologia_apartamento.value,
+                )
+            except Exception:
+                return None
+        if prog.uso == UsoEdificio.HOTELERO:
+            if self.catalogo_hotelero is None:
+                return None
+            try:
+                return self.catalogo_hotelero.util_objetivo_habitacion(
+                    prog.categoria_hotelero.value,
+                    prog.tipologia_habitacion.value,
+                )
+            except Exception:
+                return None
+        return None
+
+    # ─── Descriptores de tipología (mezcla multi-tipología por uso) ─────────
+    def _construir_descriptores_tipologia(self, params: ParametrosRender, util_objetivo, prog=None):
+        """Lista de `TipologiaUnidadDescriptor` del uso activo (principal + extras).
+
+        La categoría del proyecto es fija; varía la tipología (igual que en
+        vivienda solo varía el nº de dormitorios). `prog` permite construir la lista
+        de las plantas tipo (`programa_tipo`); por defecto usa `params.programa`.
+        Devuelve `None` para vivienda (que sigue la vía int-based del motor) y para
+        usos no soportados.
+        """
+        prog = prog if prog is not None else params.programa
+        uso = prog.uso
+        if uso == UsoEdificio.VIVIENDA:
+            return None
+
+        if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+            from .geometria.programa_apartamentos import descriptor_tipologia_apartamento
+            cat = prog.categoria_apartamentos.value
+            grupo = prog.grupo_apartamentos.value
+            principal = prog.tipologia_apartamento.value
+            constructor = lambda slug: descriptor_tipologia_apartamento(cat, slug, grupo)
+        elif uso == UsoEdificio.HOTEL_APARTAMENTO:
+            from .geometria.programa_hotel_apartamento import descriptor_tipologia_hotel_apartamento
+            cat = prog.categoria_hotel_apartamento.value
+            principal = prog.tipologia_apartamento.value
+            constructor = lambda slug: descriptor_tipologia_hotel_apartamento(cat, slug)
+        elif uso == UsoEdificio.HOTELERO:
+            from .geometria.programa_hotelero import descriptor_tipologia_hotelero
+            cat = prog.categoria_hotelero.value
+            principal = prog.tipologia_habitacion.value
+            constructor = lambda slug: descriptor_tipologia_hotelero(cat, slug)
+        else:
+            return None
+
+        slugs = [principal] + [s for s in prog.tipologias_extra]
+        descriptores = []
+        for idx, slug in enumerate(slugs):
+            d = constructor(slug)
+            # El útil objetivo de la principal proviene de BBDD (si está); las
+            # extras usan la constante del Anexo (mismo valor salvo edición).
+            uo_bbdd = util_objetivo if idx == 0 else self._util_objetivo_bbdd(params, slug, prog)
+            if uo_bbdd is not None and uo_bbdd > 0:
+                d = replace(d, util_objetivo=uo_bbdd, util_maximo=round(uo_bbdd * 1.25, 2))
+            descriptores.append(d)
+        return descriptores or None
+
+    def _util_objetivo_bbdd(self, params: ParametrosRender, slug: str, prog=None):
+        """Útil objetivo de una tipología desde BBDD (None si no hay catálogo/fila)."""
+        prog = prog if prog is not None else params.programa
+        try:
+            if prog.uso == UsoEdificio.APARTAMENTOS_TURISTICOS and self.catalogo_apartamentos:
+                return self.catalogo_apartamentos.util_objetivo_apartamento(
+                    prog.categoria_apartamentos.value, slug, prog.grupo_apartamentos.value
+                )
+            if prog.uso == UsoEdificio.HOTEL_APARTAMENTO and self.catalogo_hotel_apartamento:
+                return self.catalogo_hotel_apartamento.util_objetivo(
+                    prog.categoria_hotel_apartamento.value, slug
+                )
+            if prog.uso == UsoEdificio.HOTELERO and self.catalogo_hotelero:
+                return self.catalogo_hotelero.util_objetivo_habitacion(
+                    prog.categoria_hotelero.value, slug
+                )
+        except Exception:
+            return None
+        return None
+
+    def _construir_programa_uso(
+        self,
+        params: ParametrosRender,
+        envolvente,
+        params_motor,
+        util_objetivo: float | None,
+        descriptores,
+    ):
+        """Construye el descriptor de uso con sus áreas comunes/sociales obligatorias.
+
+        Para vivienda: None (calcular_capacidad no necesita programa_uso). Para
+        apartamentos / hotel-apartamento / hotelero hace una iteración de dos
+        pasos para dimensionar las comunes (que escalan con nº de unidades, o de
+        plazas en albergue).
+        """
+        prog = params.programa
+        uso = prog.uso
+        if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+            from .geometria.programa_apartamentos import programa_uso_apartamento
+            cat = prog.categoria_apartamentos.value
+            tip = prog.tipologia_apartamento.value
+            grupo = prog.grupo_apartamentos.value
+            builder = lambda n, p: programa_uso_apartamento(cat, tip, n_unidades_estimado=n, grupo=grupo)
+        elif uso == UsoEdificio.HOTEL_APARTAMENTO:
+            from .geometria.programa_hotel_apartamento import programa_uso_hotel_apartamento
+            cat = prog.categoria_hotel_apartamento.value
+            tip = prog.tipologia_apartamento.value
+            builder = lambda n, p: programa_uso_hotel_apartamento(cat, tip, n_unidades_estimado=n)
+        elif uso == UsoEdificio.HOTELERO:
+            from .geometria.programa_hotelero import programa_uso_hotelero
+            cat = prog.categoria_hotelero.value
+            tip = prog.tipologia_habitacion.value
+            builder = lambda n, p: programa_uso_hotelero(cat, tip, n_unidades_estimado=n, n_plazas_estimado=p)
+        else:
+            return None
+
+        # Paso 1: provisional para estimar nº de unidades / plazas.
+        provisional = builder(4, 8)
+        util_obj_efectivo = util_objetivo if util_objetivo is not None else provisional.util_objetivo_unidad_m2
+        cap_prov = calcular_capacidad(
+            envolvente, params_motor,
+            util_objetivo_por_unidad=util_obj_efectivo,
+            area_servicios_comunes_m2=provisional.area_servicios_obligatorios_m2,
+            descriptores_tipologia=descriptores,
+        )
+        n_estim = max(2, cap_prov.n_viviendas_objetivo)
+        n_plazas_estim = self._estimar_plazas(params, cap_prov)
+        return builder(n_estim, n_plazas_estim)
+
+    def _estimar_plazas(self, params: ParametrosRender, cap) -> int:
+        """Suma de plazas (camas) de las unidades — relevante en albergue."""
+        if params.programa.uso != UsoEdificio.HOTELERO:
+            return cap.n_viviendas_objetivo
+        from .geometria.programa_hotelero import TIPOLOGIA_HABITACION_A_PLAZAS as PLAZAS
+        total = 0
+        for fila in getattr(cap, "tipologias_unidad_por_planta", []):
+            for slug in fila:
+                total += PLAZAS.get(slug, 2)
+        return max(total, cap.n_viviendas_objetivo)
 
 
 # ─── Caso de uso 3: ValidarCumplimiento ─────────────────────────────────────
@@ -295,52 +575,71 @@ class ValidarCumplimiento:
     ) -> list[Alerta]:
         alertas: list[Alerta] = []
 
-        if normativa is not None:
-            if params.urbanisticos.edificabilidad_m2t_m2s > normativa.edificabilidad_m2t_m2s + 1e-6:
+        if normativa is None:
+            return alertas
+
+        urb_p = params.urbanisticos
+        dis_p = params.diseno
+        prog_p = params.programa
+
+        # ── Límites SUPERIORES (proyecto > normativa → incumplimiento) ──
+        superiores = [
+            ("Coeficiente edificabilidad", urb_p.coeficiente_edificabilidad,
+             normativa.coeficiente_edificabilidad, "m²t/m²s", 2),
+            ("Ocupación máxima", urb_p.ocupacion_maxima_pct,
+             normativa.ocupacion_maxima_pct, "%", 0),
+            ("Plantas máximas", urb_p.n_plantas_max,
+             normativa.n_plantas_max, "", 0),
+            ("Diámetro vestíbulo", dis_p.diametro_min_vestibulo_m,
+             normativa.diametro_max_vestibulo_m, "m", 2),
+            ("Espesor muro medianero", dis_p.espesor_muro_medianero_m,
+             normativa.espesor_muro_medianero_max_m, "m", 2),
+            ("Espesor separación unidades", dis_p.espesor_separacion_unidades_m,
+             normativa.espesor_separacion_unidades_max_m, "m", 2),
+            ("% muros", dis_p.pct_muros,
+             normativa.pct_muros_normativo, "%", 1),
+        ]
+        for nombre, actual, lim, unidad, dec in superiores:
+            if actual > lim + 1e-6:
+                fmt = f"{{:.{dec}f}}"
                 alertas.append(Alerta(
-                    "incumplimiento", "PGOU",
-                    f"Edificabilidad {params.urbanisticos.edificabilidad_m2t_m2s:.2f} > "
-                    f"{normativa.edificabilidad_m2t_m2s:.2f} (PGOU {parcela.municipio}).",
-                ))
-            if params.urbanisticos.n_plantas_max > normativa.n_plantas_max:
-                alertas.append(Alerta(
-                    "incumplimiento", "PGOU",
-                    f"Plantas máximas {params.urbanisticos.n_plantas_max} > "
-                    f"{normativa.n_plantas_max} (PGOU {parcela.municipio}).",
-                ))
-            if params.programa.uso not in normativa.usos_permitidos:
-                alertas.append(Alerta(
-                    "incumplimiento", "PGOU",
-                    f"Uso '{params.programa.uso.value}' no permitido por el PGOU de "
-                    f"{parcela.municipio}.",
+                    "incumplimiento", "Normativa",
+                    f"{nombre} {fmt.format(actual)}{unidad} > {fmt.format(lim)}{unidad}.",
                 ))
 
-        if params.urbanisticos.area_patio_min_m2 < 12.0 - 1e-6:
-            alertas.append(Alerta(
-                "aviso", "Anexo II A2.5",
-                "El patio mínimo del Anexo II es 12 m². Estás permitiendo patios más pequeños.",
-            ))
-        if params.urbanisticos.luz_recta_patio_min_m < 3.0 - 1e-6:
-            alertas.append(Alerta(
-                "aviso", "Anexo II A2.5",
-                "La luz recta mínima del patio en el Anexo II es 3.00 m.",
-            ))
-
-        if params.programa.pct_unidades_adaptadas < 5.0:
-            alertas.append(Alerta(
-                "aviso", "DB SUA",
-                f"DB SUA exige ≥5% de unidades adaptadas; tienes {params.programa.pct_unidades_adaptadas:.0f}%.",
-            ))
-        if params.diseno.ancho_min_pasillo_comun_m < 1.20 - 1e-6:
-            alertas.append(Alerta(
-                "incumplimiento", "DB SUA",
-                f"Pasillo común {params.diseno.ancho_min_pasillo_comun_m:.2f} m < 1.20 m (DB SUA).",
-            ))
-        if params.diseno.diametro_min_vestibulo_m < 1.50 - 1e-6:
-            alertas.append(Alerta(
-                "incumplimiento", "Anexo II A2.1",
-                f"Vestíbulo Ø {params.diseno.diametro_min_vestibulo_m:.2f} m < 1.50 m.",
-            ))
+        # ── Límites INFERIORES (proyecto < normativa → aviso) ──
+        ancho_fachada_total = sum(l.longitud_m for l in parcela.lados if l.tipo == "fachada")
+        inferiores = [
+            ("Retranqueo fachada", urb_p.retranqueo_fachada_m,
+             normativa.retranqueo_fachada_m, "m", 1),
+            ("Retranqueo linderos", urb_p.retranqueo_linderos_m,
+             normativa.retranqueo_linderos_m, "m", 1),
+            ("Retranqueo ático", urb_p.retranqueo_atico_m,
+             normativa.retranqueo_atico_m, "m", 1),
+            ("Luz recta patio", urb_p.luz_recta_patio_min_m,
+             normativa.luz_recta_patio_min_m, "m", 2),
+            ("Área patio mínima", urb_p.area_patio_min_m2,
+             normativa.area_patio_min_m2, "m²", 2),
+            ("Unidades adaptadas", prog_p.pct_unidades_adaptadas,
+             normativa.pct_unidades_adaptadas_min, "%", 0),
+            ("Ancho total fachada", ancho_fachada_total,
+             normativa.ancho_min_fachada_m, "m", 1),
+            ("Espesor tabique", dis_p.espesor_tabique_m,
+             normativa.espesor_tabique_min_m, "m", 2),
+            ("Pasillo común", dis_p.ancho_min_pasillo_comun_m,
+             normativa.ancho_min_pasillo_comun_m, "m", 2),
+            ("Pasillo vivienda", dis_p.ancho_min_pasillo_vivienda_m,
+             normativa.ancho_min_pasillo_vivienda_m, "m", 2),
+            ("Puerta paso libre", dis_p.ancho_min_puerta_m,
+             normativa.ancho_min_puerta_m, "m", 2),
+        ]
+        for nombre, actual, lim, unidad, dec in inferiores:
+            if actual + 1e-6 < lim:
+                fmt = f"{{:.{dec}f}}"
+                alertas.append(Alerta(
+                    "aviso", "Normativa",
+                    f"{nombre} {fmt.format(actual)}{unidad} < {fmt.format(lim)}{unidad}.",
+                ))
 
         return alertas
 
@@ -376,12 +675,17 @@ def parametros_desde_proyecto(proyecto: Proyecto | None) -> ParametrosRender:
         return parametros_desde_dict(datos_render["parametros"])
 
     # Si no se ha guardado nada todavía, intentamos heredar la edificabilidad
-    # introducida en §2.9 viabilidad.
+    # introducida en §2.9 viabilidad. Compat con la clave antigua.
     base = ParametrosRender()
     datos_viab = proyecto.datos_por_modulo.get(ModuloPuccetti.VIABILIDAD.value) or {}
     try:
-        base.urbanisticos.edificabilidad_m2t_m2s = float(
-            datos_viab.get("edificabilidad_m2t_m2s", base.urbanisticos.edificabilidad_m2t_m2s)
+        clave = (
+            "coeficiente_edificabilidad"
+            if "coeficiente_edificabilidad" in datos_viab
+            else "edificabilidad_m2t_m2s"
+        )
+        base.urbanisticos.coeficiente_edificabilidad = float(
+            datos_viab.get(clave, base.urbanisticos.coeficiente_edificabilidad)
         )
     except (TypeError, ValueError):
         pass
@@ -425,7 +729,7 @@ def _indicadores_disenho(
     orientacion_dom = "—"
     if fach:
         ldom = max(fach, key=lambda l: l.longitud_m)
-        orientacion_dom = orientacion_cardinal(ldom.azimut)
+        orientacion_dom = orientacion_cardinal(ldom.normal_azimut)
 
     huella = plantas[0].footprint if plantas else parcela.poligono_utm
     area = huella.area
@@ -454,7 +758,7 @@ def _indicadores_disenho(
         long_total_medianeras_m=long_med,
         n_fachadas=len(fach),
         n_medianeras=len(med),
-        orientaciones_fachadas=[orientacion_cardinal(l.azimut) for l in fach],
+        orientaciones_fachadas=[orientacion_cardinal(l.normal_azimut) for l in fach],
     )
 
 
@@ -463,32 +767,67 @@ def _alertas_envolvente(envolvente, parcela: ParcelaMetrica, params: ParametrosR
     alertas: list[Alerta] = []
     if envolvente.edificabilidad_consumida > envolvente.edificabilidad_max + 1e-3:
         alertas.append(Alerta(
-            "incumplimiento", "PGOU",
-            f"Edificabilidad consumida ({envolvente.edificabilidad_consumida:.0f} m²) "
-            f"supera el techo máximo ({envolvente.edificabilidad_max:.0f} m²).",
+            "incumplimiento", "Normativa",
+            f"Edificabilidad consumida ({envolvente.edificabilidad_consumida:.2f} m²) "
+            f"supera el techo máximo ({envolvente.edificabilidad_max:.2f} m²).",
         ))
     if not [l for l in parcela.lados if l.tipo == "fachada"]:
         alertas.append(Alerta(
-            "incumplimiento", "A2.4",
+            "incumplimiento", "Normativa",
             "La parcela no tiene ningún lado clasificado como fachada. "
-            "Sin fachada no se puede abrir huecos: revisa la clasificación en §2.1.",
+            "Sin fachada no se pueden abrir huecos.",
         ))
     return alertas
 
 
-def _alertas_edificio(edificio, params: ParametrosRender) -> list[Alerta]:
-    """Alertas derivadas del macro_layout (§2.5)."""
+def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Alerta]:
+    """Alertas derivadas del cálculo de capacidad (sin geometría)."""
     alertas: list[Alerta] = []
-    for pl in edificio.plantas:
-        for inc in pl.incidencias:
-            nivel = "incumplimiento" if any(k in inc for k in ("A2.", "sin acceso", "sin fachada", "ciega")) else "aviso"
-            alertas.append(Alerta(nivel, "Anexo II", inc, elemento=None))
 
-    cap = edificio.capacidad
-    if cap and edificio.viv_por_planta_dispuestas < edificio.viv_por_planta_objetivo:
+    if cap.factor_limitante != "ninguno (cumple holgado)":
         alertas.append(Alerta(
-            "aviso", "Distribución",
-            f"Se han dispuesto {edificio.viv_por_planta_dispuestas} viviendas/planta de "
-            f"{edificio.viv_por_planta_objetivo} objetivo. Factor limitante: {cap.factor_limitante}.",
+            "info", "Capacidad",
+            f"Factor limitante: {cap.factor_limitante}.",
         ))
+
+    if cap.util_objetivo_viv_m2 > 0:
+        util_total_habitable = sum(
+            u for u, t in zip(cap.util_por_planta, cap.tipo_planta) if t != "sotano"
+        )
+        sobrante = util_total_habitable - (cap.n_viviendas_objetivo * cap.util_objetivo_viv_m2)
+        if sobrante >= cap.util_objetivo_viv_m2 * 0.5:
+            alertas.append(Alerta(
+                "info", "Capacidad",
+                f"Sobran {sobrante:.2f} m² útiles tras truncar — si reduces el "
+                f"objetivo por unidad (hoy {cap.util_objetivo_viv_m2:.2f} m²) "
+                f"podría caber 1 unidad más.",
+            ))
+
+    if programa_uso is not None and programa_uso.tipo_unidad in (
+        "apartamento", "hotel_apartamento", "habitacion"
+    ):
+        prog = params.programa
+        if programa_uso.tipo_unidad == "apartamento":
+            cat, tip = prog.categoria_apartamentos.value, prog.tipologia_apartamento.value
+            etiqueta_area = "áreas comunes y sociales obligatorias"
+        elif programa_uso.tipo_unidad == "hotel_apartamento":
+            cat, tip = prog.categoria_hotel_apartamento.value, prog.tipologia_apartamento.value
+            etiqueta_area = "áreas sociales obligatorias"
+        else:  # habitacion
+            cat, tip = prog.categoria_hotelero.value, prog.tipologia_habitacion.value
+            etiqueta_area = "áreas sociales del establecimiento"
+
+        if programa_uso.area_servicios_obligatorios_m2 > 0:
+            alertas.append(Alerta(
+                "info", "Capacidad",
+                f"Reservados {programa_uso.area_servicios_obligatorios_m2:.2f} m² para "
+                f"{etiqueta_area}. Categoría {cat}.",
+            ))
+        if cap.util_objetivo_viv_m2 < programa_uso.util_objetivo_unidad_m2 - 1e-3:
+            alertas.append(Alerta(
+                "aviso", "Normativa",
+                f"El objetivo aplicado ({cap.util_objetivo_viv_m2:.2f} m²) es inferior al "
+                f"mínimo para {cat} · {tip} ({programa_uso.util_objetivo_unidad_m2:.2f} m²).",
+            ))
+
     return alertas

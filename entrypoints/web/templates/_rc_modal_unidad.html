@@ -1,0 +1,40 @@
+{# Modal de detalle de unidad — al pulsar una fila de "Por unidad" (iter. 4). #}
+<dialog id="rc-modal-unidad" class="rc-modal" aria-labelledby="rc-modal-unidad-titulo">
+  <article class="rc-modal-card rc-modal-unidad-card">
+    <header class="rc-modal-header">
+      <h2 id="rc-modal-unidad-titulo">Detalle de unidad <span id="rc-mu-id">—</span></h2>
+      <button type="button" class="rc-modal-cerrar" id="rc-modal-unidad-cerrar" aria-label="Cerrar">×</button>
+    </header>
+
+    <div class="rc-modal-cuerpo rc-mu-cuerpo">
+      <section class="rc-mu-meta">
+        <dl class="rc-mu-meta-lista">
+          <div><dt>Planta</dt><dd id="rc-mu-planta">—</dd></div>
+          <div><dt>Tipo</dt><dd id="rc-mu-tipo">—</dd></div>
+          <div><dt>Dormitorios</dt><dd id="rc-mu-dorms">—</dd></div>
+          <div><dt>Adaptada</dt><dd id="rc-mu-adapt">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="rc-mu-reparto">
+        <h3>Reparto de m² por unidad</h3>
+        <table class="rc-mu-tabla">
+          <tbody>
+            <tr><th>Construida</th><td id="rc-mu-construida">—</td></tr>
+            <tr><th>Útil</th><td id="rc-mu-util">—</td></tr>
+            <tr><th>Circulación interior</th><td id="rc-mu-circ">—</td></tr>
+            <tr><th>Muros</th><td id="rc-mu-muros">—</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="rc-mu-estancias">
+        <h3>Estancias (Anexo I)</h3>
+        <ul id="rc-mu-estancias-lista" class="rc-mu-estancias-lista">
+          <li class="rc-vacio">—</li>
+        </ul>
+        <p class="rc-mu-total">Total objetivo: <span id="rc-mu-total-estancias">—</span></p>
+      </section>
+    </div>
+  </article>
+</dialog>

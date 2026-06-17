@@ -10,18 +10,14 @@
 {% if puede_editar %}
 <section class="formulario-bloque">
   <h2>Crear nuevo proyecto</h2>
+  <p class="loc-hint">
+    La referencia catastral y la dirección se completarán automáticamente al
+    guardar una parcela en este proyecto desde el módulo «Buscar parcela».
+  </p>
   <form method="post" action="/proyectos" class="form-vertical">
     <label>
       Nombre
       <input type="text" name="nombre" required placeholder="Ej. Residencial Macarena 12" />
-    </label>
-    <label>
-      Referencia catastral (opcional)
-      <input type="text" name="referencia_catastral" maxlength="14" placeholder="14 caracteres" />
-    </label>
-    <label>
-      Dirección (opcional)
-      <input type="text" name="direccion" placeholder="Calle, número, municipio" />
     </label>
     <button type="submit" class="boton-primario">Crear y abrir</button>
   </form>

@@ -78,10 +78,10 @@ def distribuir_unidad(
         util_disponible=geom.area * 0.92,
         salon_cocina_open=params.programa.salon_cocina_open,
     )
-    principal = [e for e in prog if e.nombre.startswith(('salon', 'dormitorio'))]
+    principal = [e for e in prog if e.nombre.startswith(('salon', 'dormitorio', 'espacio_principal'))]
     servicio = [e for e in prog if e.nombre.startswith(('cocina', 'bano', 'aseo'))]
 
-    pas_w = max(params.diseno.ancho_min_pasillo_vivienda, 0.90)
+    pas_w = max(params.diseno.ancho_min_pasillo_vivienda, 1.00)
     items_world: list[tuple] = []
 
     def _rellenar(y0: float, y1: float, items: list[tuple], a_fachada: bool):

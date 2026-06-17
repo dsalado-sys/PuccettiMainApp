@@ -14,7 +14,14 @@ from .sqlalchemy_base import Base
 
 
 class AnexoIViviendaORM(Base):
-    """Una fila por (n_dormitorios, estancia) con su mínimo y máximo (m²)."""
+    """Una fila por (n_dormitorios, estancia) con su mínimo y máximo (m²).
+
+    `area_target_m2` es opcional: si tiene valor, la estancia recibe ese
+    tamaño FIJO en el programa generado por `programa_vivienda`. Si es NULL,
+    la estancia escala proporcionalmente a su `min_m2` para consumir el útil
+    sobrante (típico de salón y dormitorios). Cocina/baño/aseo se sembran con
+    target fijo porque su tamaño no escala con el útil de la vivienda.
+    """
 
     __tablename__ = "anexo_i_vivienda"
 
@@ -22,7 +29,23 @@ class AnexoIViviendaORM(Base):
     estancia: Mapped[str] = mapped_column(String(40), primary_key=True)
     min_m2: Mapped[float] = mapped_column(Float, nullable=False)
     max_m2_util: Mapped[float] = mapped_column(Float, nullable=False)
+    area_target_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
     editable_por_usuario: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ParametrosMotorViviendaORM(Base):
+    """Parámetros globales de la política de reparto del programa de vivienda.
+
+    Singleton: una sola fila (id=1). Los valores aquí controlan cómo
+    `programa_vivienda` distribuye el útil disponible entre estancias.
+    """
+
+    __tablename__ = "parametros_motor_vivienda"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    pct_circulacion_interior_pct: Mapped[float] = mapped_column(Float, nullable=False, default=15.0)
+    umbral_minimo_estudio_m2: Mapped[float] = mapped_column(Float, nullable=False, default=25.0)
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -45,6 +68,61 @@ class CatalogoSuperficiesSQLAlchemy:
         for f in filas:
             out[f.estancia + "_min"] = f.min_m2
             out[f.estancia + "_max"] = f.max_m2_util
+        return out
+
+    def consolidadas_vivienda(self) -> dict:
+        """Devuelve todos los mínimos + targets consolidados como dicts.
+        Estructura:
+            {
+                "MIN_DORM_INDIVIDUAL": float, "MIN_DORM_DOBLE": float,
+                "MIN_COCINA": float, "MIN_BANO": float, "MIN_ASEO": float,
+                "SALON_MIN": {1: float, ...}, "SALON_MAS_COCINA_MIN": {1: ...},
+                "UTIL_MAX": {0: ..., 1: ..., ...},
+                "AREA_TARGET_VIVIENDA": {n_dorms: {estancia: target_m2 | None}},
+                "PCT_CIRCULACION_INTERIOR_VIVIENDA": float (15.0),
+                "UMBRAL_MINIMO_ESTUDIO_M2": float (25.0),
+            }
+        Si la BBDD aún no tiene filas, devuelve {} (caller usa defaults).
+        """
+        filas = self._session.scalars(select(AnexoIViviendaORM)).all()
+        if not filas:
+            return {}
+        salon_min: dict[int, float] = {}
+        salon_mas_cocina_min: dict[int, float] = {}
+        util_max: dict[int, float] = {}
+        valores: dict[str, float] = {}
+        area_target: dict[int, dict[str, float | None]] = {}
+        for f in filas:
+            n = f.n_dormitorios
+            est = f.estancia
+            if est == "salon":
+                salon_min[n] = f.min_m2
+            elif est == "salon_cocina":
+                salon_mas_cocina_min[n] = f.min_m2
+            elif est == "cocina":
+                valores["MIN_COCINA"] = f.min_m2
+            elif est == "bano":
+                valores["MIN_BANO"] = f.min_m2
+            elif est == "aseo":
+                valores["MIN_ASEO"] = f.min_m2
+            elif est == "dormitorio_1":
+                valores["MIN_DORM_DOBLE"] = f.min_m2
+            elif est.startswith("dormitorio_") and est != "dormitorio_1":
+                valores["MIN_DORM_INDIVIDUAL"] = f.min_m2
+            if n not in util_max or f.max_m2_util > util_max[n]:
+                util_max[n] = f.max_m2_util
+            area_target.setdefault(n, {})[est] = f.area_target_m2
+        out = dict(valores)
+        if salon_min: out["SALON_MIN"] = salon_min
+        if salon_mas_cocina_min: out["SALON_MAS_COCINA_MIN"] = salon_mas_cocina_min
+        if util_max: out["UTIL_MAX"] = util_max
+        if area_target: out["AREA_TARGET_VIVIENDA"] = area_target
+
+        # Parámetros globales del motor (singleton).
+        motor = self._session.get(ParametrosMotorViviendaORM, 1)
+        if motor is not None:
+            out["PCT_CIRCULACION_INTERIOR_VIVIENDA"] = motor.pct_circulacion_interior_pct
+            out["UMBRAL_MINIMO_ESTUDIO_M2"] = motor.umbral_minimo_estudio_m2
         return out
 
     def actualizar(

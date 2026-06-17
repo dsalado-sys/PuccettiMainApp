@@ -67,6 +67,12 @@ class Parcela:
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     subreferencias: list[Subreferencia] = field(default_factory=list)
     agregados: AgregadosMetaparcela | None = None
+    # Datos catastrales del edificio en la parcela (urbano).
+    uso_catastral: str = ""
+    anio_construccion: int | None = None
+    superficie_construida_total_m2: float | None = None
+    plantas_sobre_rasante: int | None = None
+    plantas_bajo_rasante: int | None = None
 
 
 class ParcelaError(Exception):

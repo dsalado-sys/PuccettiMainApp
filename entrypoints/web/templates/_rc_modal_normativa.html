@@ -1,117 +1,49 @@
-{# Modal de consulta/edición de la BBDD de normativa municipal (req. 3, 4, 5, 6). #}
+{# Modal del módulo Render: SOLO permite elegir una normativa archivada
+   para aplicarla al proyecto. La gestión (crear/editar/eliminar) vive en
+   el módulo "Normativa municipal" (/modulos/normativa-municipal). #}
 <dialog id="rc-modal-normativa" class="rc-modal" aria-labelledby="rc-modal-titulo">
   <article class="rc-modal-card">
     <header class="rc-modal-header">
-      <h2 id="rc-modal-titulo">Normativa urbanística municipal</h2>
+      <h2 id="rc-modal-titulo">Aplicar normativa al proyecto</h2>
       <button type="button" class="rc-modal-cerrar" id="rc-modal-cerrar" aria-label="Cerrar">×</button>
     </header>
 
     <div class="rc-modal-cuerpo">
-      <section class="rc-modal-buscador">
-        <label class="rc-campo">
-          <span class="rc-campo-label">Municipio</span>
-          <input type="text" id="rc-norm-municipio" placeholder="Ej. Sevilla" autocomplete="off">
-        </label>
-        <label class="rc-campo">
-          <span class="rc-campo-label">Provincia</span>
-          <input type="text" id="rc-norm-provincia" placeholder="Ej. Sevilla" autocomplete="off">
-        </label>
-        <button type="button" id="rc-norm-cargar" class="boton-secundario">Cargar</button>
+      <p class="rc-modal-ayuda">
+        Elige una normativa archivada para sobrescribir los parámetros urbanísticos
+        del proyecto actual. Para crear, editar o eliminar normativas, ve al módulo
+        <a href="/modulos/normativa-municipal">Normativa municipal</a>.
+      </p>
+
+      <section class="rc-modal-bloque">
+        <header class="rc-modal-bloque-header">
+          <h3>Normativa a aplicar</h3>
+          <label class="rc-buscador-lupa" aria-label="Buscar carpeta">
+            <span class="rc-icono-lupa" aria-hidden="true">⌕</span>
+            <input type="text" id="rc-carpeta-buscar" placeholder="Buscar carpeta…" autocomplete="off">
+          </label>
+        </header>
+        <div id="rc-carpetas-lista" class="rc-carpetas-lista">
+          <p class="rc-vacio">Cargando…</p>
+        </div>
       </section>
 
-      <section class="rc-modal-lista">
-        <h3>Municipios con PGOU guardado</h3>
-        <ul id="rc-norm-lista">
-          {% for m in municipios_disponibles %}
-            <li>
-              <button type="button"
-                      class="rc-norm-item"
-                      data-municipio="{{ m.municipio }}"
-                      data-provincia="{{ m.provincia }}">
-                {{ m.municipio }} <small>({{ m.provincia }}) · edif {{ m.edificabilidad_m2t_m2s }} · {{ m.n_plantas_max }} plantas</small>
-              </button>
-            </li>
-          {% else %}
-            <li class="rc-vacio">Aún no hay normativas guardadas. Crea la primera.</li>
-          {% endfor %}
-        </ul>
-      </section>
-
-      <section class="rc-modal-form" id="rc-norm-form">
-        <h3>Parámetros del PGOU</h3>
-
-        <div class="rc-fila">
-          <label class="rc-campo">
-            <span class="rc-campo-label">Edificabilidad (m²t/m²s)</span>
-            <input type="number" id="rc-norm-edif" min="0.1" max="8" step="0.05">
-          </label>
-          <label class="rc-campo">
-            <span class="rc-campo-label">Ocupación máx. (%)</span>
-            <input type="number" id="rc-norm-ocup" min="30" max="100" step="1">
-          </label>
-          <label class="rc-campo">
-            <span class="rc-campo-label">Plantas máx.</span>
-            <input type="number" id="rc-norm-plantas" min="1" max="20" step="1">
-          </label>
-          <label class="rc-campo">
-            <span class="rc-campo-label">Altura planta (m)</span>
-            <input type="number" id="rc-norm-altura" min="2.5" max="4.5" step="0.05">
-          </label>
-        </div>
-
-        <div class="rc-fila">
-          <label class="rc-campo">
-            <span class="rc-campo-label">Retranq. frontal</span>
-            <input type="number" id="rc-norm-rfront" min="0" max="10" step="0.1">
-          </label>
-          <label class="rc-campo">
-            <span class="rc-campo-label">Lateral</span>
-            <input type="number" id="rc-norm-rlat" min="0" max="10" step="0.1">
-          </label>
-          <label class="rc-campo">
-            <span class="rc-campo-label">Trasero</span>
-            <input type="number" id="rc-norm-rtras" min="0" max="10" step="0.1">
-          </label>
-        </div>
-
-        <div class="rc-fila">
-          <label class="rc-campo">
-            <span class="rc-campo-label">Luz mín. patio (m)</span>
-            <input type="number" id="rc-norm-luz" min="2" max="8" step="0.1">
-          </label>
-          <label class="rc-campo">
-            <span class="rc-campo-label">Área mín. patio (m²)</span>
-            <input type="number" id="rc-norm-areapatio" min="6" max="40" step="0.5">
-          </label>
-        </div>
-
-        <fieldset class="rc-usos">
-          <legend>Usos permitidos</legend>
-          <label class="rc-checkbox">
-            <input type="checkbox" id="rc-norm-uso-viv" value="vivienda">
-            <span>Vivienda</span>
-          </label>
-          <label class="rc-checkbox">
-            <input type="checkbox" id="rc-norm-uso-apt" value="apartamentos_turisticos">
-            <span>Apartamentos turísticos</span>
-          </label>
-          <label class="rc-checkbox">
-            <input type="checkbox" id="rc-norm-uso-hot" value="hotelero">
-            <span>Hotelero</span>
-          </label>
-        </fieldset>
-
-        <label class="rc-campo">
-          <span class="rc-campo-label">Fuente PGOU (URL o referencia)</span>
-          <textarea id="rc-norm-fuente" rows="2" placeholder="Ej. https://www.sevilla.org/urbanismo/pgou · Documento revisión 2021"></textarea>
-        </label>
-
+      <section class="rc-modal-bloque" id="rc-norm-resumen" hidden>
+        <header class="rc-modal-bloque-header">
+          <h3>Resumen de la normativa seleccionada</h3>
+        </header>
+        <dl class="rc-norm-resumen-lista">
+          <div><dt>Nombre</dt><dd id="rc-norm-resumen-nombre">—</dd></div>
+          <div><dt>Dirección</dt><dd id="rc-norm-resumen-direccion">—</dd></div>
+          <div><dt>Coef. edificabilidad</dt><dd id="rc-norm-resumen-coef">—</dd></div>
+          <div><dt>Ocupación máx.</dt><dd id="rc-norm-resumen-ocup">—</dd></div>
+          <div><dt>Plantas máx.</dt><dd id="rc-norm-resumen-plantas">—</dd></div>
+          <div><dt>Retranq. fachada</dt><dd id="rc-norm-resumen-rfach">—</dd></div>
+          <div><dt>Retranq. linderos</dt><dd id="rc-norm-resumen-rlind">—</dd></div>
+        </dl>
         <div class="rc-modal-acciones">
           <button type="button" id="rc-norm-aplicar" class="boton-primario">
-            Aplicar a este proyecto
-          </button>
-          <button type="button" id="rc-norm-guardar" class="boton-secundario">
-            Guardar para el municipio
+            Aplicar al proyecto
           </button>
         </div>
       </section>

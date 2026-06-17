@@ -26,7 +26,8 @@ class LadoParcela:
     p2: tuple[float, float]
     tipo: LadoTipo
     longitud_m: float
-    azimut: float   # grados desde norte, 0..360
+    azimut: float           # grados desde norte del segmento p1→p2 (0..360)
+    normal_azimut: float = 0.0   # azimut de la NORMAL EXTERIOR (hacia dónde mira la fachada)
 
 
 def simplificar(geom: Polygon, tolerancia: float = 0.20) -> Polygon:
@@ -50,6 +51,32 @@ def orientacion_cardinal(az: float) -> str:
     sectores = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO']
     idx = int(((az + 22.5) % 360) // 45)
     return sectores[idx]
+
+
+def azimut_normal_exterior(
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    parcela: Polygon,
+    dist_probe: float = 0.5,
+) -> float:
+    """Azimut (desde norte, 0..360) de la normal EXTERIOR del lado p1→p2.
+
+    Es la dirección hacia donde mira la fachada (vs `_azimut`, que es la
+    dirección del lado). Sondea con `Point.within(parcela)` para decidir el
+    lado exterior — robusto incluso en parcelas no convexas.
+    """
+    mx = (p1[0] + p2[0]) / 2.0
+    my = (p1[1] + p2[1]) / 2.0
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    L = math.hypot(dx, dy) or 1.0
+    # Candidato inicial: rotación 90° horario del vector p1→p2.
+    nxv = dy / L
+    nyv = -dx / L
+    probe = Point(mx + nxv * dist_probe, my + nyv * dist_probe)
+    if probe.within(parcela):
+        nxv, nyv = -nxv, -nyv
+    return math.degrees(math.atan2(nxv, nyv)) % 360
 
 
 def clasificar_lados(
@@ -99,6 +126,7 @@ def clasificar_lados(
         lados.append(LadoParcela(
             p1=p1, p2=p2, tipo=tipo,
             longitud_m=long_m, azimut=_azimut(p1, p2),
+            normal_azimut=azimut_normal_exterior(p1, p2, parcela),
         ))
     return lados
 
@@ -111,5 +139,5 @@ def resumen_lados(lados: list[LadoParcela]) -> dict:
         "n_medianeras": len(med),
         "long_fachada_total": sum(l.longitud_m for l in fach),
         "long_medianera_total": sum(l.longitud_m for l in med),
-        "orientaciones_fachada": [orientacion_cardinal(l.azimut) for l in fach],
+        "orientaciones_fachada": [orientacion_cardinal(l.normal_azimut) for l in fach],
     }

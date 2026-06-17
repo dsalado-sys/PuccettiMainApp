@@ -49,6 +49,13 @@ CATALOGO: tuple[TarjetaModulo, ...] = (
         icono="icono-documento",
     ),
     TarjetaModulo(
+        id=ModuloPuccetti.NORMATIVA_MUNICIPAL.value,
+        titulo="Normativa municipal",
+        descripcion="Carpetas con normativas urbanísticas archivadas (PGOU). Crear, editar y consultar.",
+        ruta="/modulos/normativa-municipal",
+        icono="icono-documento",
+    ),
+    TarjetaModulo(
         id=ModuloPuccetti.PROYECTOS.value,
         titulo="Proyectos",
         descripcion="Crear, abrir, archivar proyectos. Estado compartido entre módulos.",
