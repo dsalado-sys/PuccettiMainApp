@@ -284,7 +284,7 @@ _DIAMETROS_MIN_M: dict[str, float] = {
     "habitacion": 2.70,          # unidad de alojamiento hotelera (Anexo I.1)
     "espacio_principal": 3.00,   # estudio: salón+cocina+zona dormir integrados
     "cocina": 1.60,
-    "bano": 1.20, "bano_1": 1.20, "aseo": 1.20,
+    "bano": 1.20, "bano_1": 1.20, "bano_2": 1.20, "aseo": 1.20, "aseo_2": 1.20,
     "vestibulo": 1.20,
     "pasillo": 1.00,
     "circulacion_interior": 1.00,

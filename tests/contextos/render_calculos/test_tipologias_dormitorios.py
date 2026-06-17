@@ -194,6 +194,31 @@ def test_vivienda_combo_todo_doble_es_mas_grande_que_todo_individual():
     )
 
 
+def test_vivienda_banos_segun_dormitorios_y_holgura():
+    # §2.5 (igual que apartamentos): 1 dorm → 1 baño; 2 dorm → 1 base / 2 si
+    # caben; 3 dorm → 2 obligatorios / 3 si caben.
+    from app.contextos.render_calculos.geometria.combinador_tipologias import (
+        ComboDormitorios,
+    )
+    from app.contextos.render_calculos.geometria.programa import (
+        programa_vivienda_combo,
+        util_minimo_vivienda_combo,
+    )
+
+    def banos(est):
+        return [e.nombre for e in est if e.nombre.startswith(("bano", "aseo"))]
+
+    for comp, reducido, amplio in [
+        ({"doble": 1}, ["bano"], ["bano"]),
+        ({"doble": 2}, ["bano"], ["bano", "aseo"]),
+        ({"doble": 3}, ["bano", "aseo"], ["bano", "aseo", "aseo_2"]),
+    ]:
+        combo = ComboDormitorios(comp)
+        minimo = util_minimo_vivienda_combo(combo)
+        assert banos(programa_vivienda_combo(combo, minimo)) == reducido
+        assert banos(programa_vivienda_combo(combo, minimo * 2.0)) == amplio
+
+
 def test_vivienda_combo_estudio_usa_programa_estudio():
     params = _params_vivienda()
     r = CalcularLayout().ejecutar(_parcela_cuadrada(), params, combo_override="estudio")

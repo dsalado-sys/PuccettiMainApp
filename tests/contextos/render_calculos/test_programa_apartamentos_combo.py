@@ -126,6 +126,34 @@ def test_sin_segundo_bano_en_edificios_aunque_supere_5_plazas():
     assert "aseo" not in [e.nombre for e in estancias]
 
 
+def _banos(estancias):
+    return [e.nombre for e in estancias if e.nombre.startswith(("bano", "aseo"))]
+
+
+def test_banos_segun_dormitorios_y_holgura():
+    # §2.5: 1 dorm → 1 baño siempre; 2 dorm → 1 base / 2 si caben; 3 dorm →
+    # 2 obligatorios / 3 si caben. "Caben" = los m² útiles dan para el extra.
+    cat = "2L"
+    for comp, n_min, n_max in [
+        ({"doble": 1}, ["bano"], ["bano"]),                       # 1 dorm
+        ({"doble": 2}, ["bano"], ["bano", "aseo"]),               # 2 dorm
+        ({"doble": 3}, ["bano", "aseo"], ["bano", "aseo", "aseo_2"]),  # 3 dorm
+    ]:
+        combo = ComboDormitorios(comp)
+        minimo = util_minimo_combo(combo, cat)
+        # Ajustado al mínimo → opción reducida (baños obligatorios).
+        assert _banos(programa_apartamentos_combo(combo, cat, minimo)) == n_min
+        # Con holgura amplia → se añade el baño extra si la política lo permite.
+        assert _banos(programa_apartamentos_combo(combo, cat, minimo * 2.0)) == n_max
+
+
+def test_tres_dormitorios_garantiza_dos_banos_aunque_no_haya_holgura():
+    # 3 dormitorios: 2 baños SÍ O SÍ, incluso ajustando al útil mínimo.
+    combo = ComboDormitorios({"doble": 2, "individual": 1})
+    estancias = programa_apartamentos_combo(combo, "2L", 0.0)
+    assert _banos(estancias) == ["bano", "aseo"]
+
+
 def test_estudio_combo_genera_mismas_estancias_que_estudio_monodormitorio():
     estudio = ComboDormitorios({})
     a = programa_apartamentos_combo(estudio, "3L", 100.0)
