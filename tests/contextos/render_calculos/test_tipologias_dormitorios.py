@@ -194,9 +194,10 @@ def test_vivienda_combo_todo_doble_es_mas_grande_que_todo_individual():
     )
 
 
-def test_vivienda_banos_segun_dormitorios_y_holgura():
-    # §2.5 (igual que apartamentos): 1 dorm → 1 baño; 2 dorm → 1 base / 2 si
-    # caben; 3 dorm → 2 obligatorios / 3 si caben.
+def test_vivienda_banos_por_numero_de_dormitorios():
+    # Anexo I.5: estudio/1/2 dorm → 1 baño; 3 dorm → 2 baños. En vivienda el
+    # criterio es por nº de dormitorios (no por ocupación) y es determinista: el
+    # nº de baños no cambia con la holgura de m² (mínimo vs. doble de útil).
     from app.contextos.render_calculos.geometria.combinador_tipologias import (
         ComboDormitorios,
     )
@@ -206,18 +207,17 @@ def test_vivienda_banos_segun_dormitorios_y_holgura():
     )
 
     def banos(est):
-        return [e.nombre for e in est if e.nombre.startswith(("bano", "aseo"))]
+        return [e.nombre for e in est if e.nombre.startswith("bano")]
 
-    for comp, reducido, amplio in [
-        ({"doble": 1}, ["bano"], ["bano"]),                       # 2 plazas
-        ({"doble": 2}, ["bano"], ["bano", "aseo"]),               # 4 plazas
-        # 3 dobles = 6 plazas ≥ 5 → 2 baños completos (bano_1/bano_2) + aseo extra.
-        ({"doble": 3}, ["bano_1", "bano_2"], ["bano_1", "bano_2", "aseo"]),
+    for comp, esperado in [
+        ({"doble": 1}, ["bano"]),               # 1 dorm
+        ({"doble": 2}, ["bano"]),               # 2 dorms
+        ({"doble": 3}, ["bano_1", "bano_2"]),   # 3 dorms → 2 baños
     ]:
         combo = ComboDormitorios(comp)
         minimo = util_minimo_vivienda_combo(combo)
-        assert banos(programa_vivienda_combo(combo, minimo)) == reducido
-        assert banos(programa_vivienda_combo(combo, minimo * 2.0)) == amplio
+        assert banos(programa_vivienda_combo(combo, minimo)) == esperado
+        assert banos(programa_vivienda_combo(combo, minimo * 2.0)) == esperado
 
 
 def test_vivienda_combo_estudio_usa_programa_estudio():

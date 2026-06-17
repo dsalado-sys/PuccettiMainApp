@@ -17,7 +17,7 @@ del salón-comedor crece con la *superficie adicional por plaza* a partir de la 
 from __future__ import annotations
 
 from .combinador_tipologias import ComboDormitorios
-from .programa import Estancia, banos_min_max, nombres_banos
+from .programa import Estancia, nombres_banos
 from .programa_uso import ProgramaUso, TipologiaUnidadDescriptor
 
 
@@ -45,6 +45,28 @@ SUP_ADICIONAL_PLAZA: dict[str, float] = {"1L": 2.0, "2L": 2.5, "3L": 3.0, "4L": 
 
 # Plazas (ocupación) por tipología.
 PLAZAS: dict[str, int] = {"estudio": 2, "individual": 1, "doble": 2, "triple": 3, "cuadruple": 4}
+
+# Personas que se imputan al salón-comedor a efectos de ocupación de la unidad
+# (sofá-cama "hasta 2 personas"), sumadas a las plazas de los dormitorios.
+PLAZAS_SALON = 2
+
+
+def banos_apartamento(categoria: str, plazas_dormitorios: int) -> int:
+    """Nº de baños de un apartamento turístico (Decreto 194/2010).
+
+    Siempre 1 baño, salvo que la ocupación de la unidad supere el umbral de su
+    categoría (en llaves), en cuyo caso se añade un 2º baño. La ocupación es
+    `personas = plazas de los dormitorios + PLAZAS_SALON` (2 del salón-comedor):
+
+      - 1L / 2L → 2 baños si la unidad alberga MÁS DE 5 personas.
+      - 3L / 4L → 2 baños si la unidad alberga MÁS DE 4 personas.
+
+    Ej.: 2 dormitorios dobles = 4 plazas + 2 del salón = 6 personas → 2 baños en
+    cualquier categoría. Todos los baños son completos (ducha, inodoro, lavabo).
+    """
+    personas = plazas_dormitorios + PLAZAS_SALON
+    umbral = 5 if categoria in ("1L", "2L") else 4
+    return 2 if personas > umbral else 1
 
 
 def _cat_validada(categoria: str, grupo: str) -> str:
@@ -97,14 +119,12 @@ def programa_apartamentos(
     dorm_min = MIN_DORMITORIO[tip][cat]
     cocina_min = MIN_COCINA[cat]
 
-    # Cocina y baño: tamaño práctico fijo en su mínimo (no escalan con la superficie).
+    # Cocina y baño(s): tamaño práctico fijo en su mínimo (no escalan con la superficie).
+    # Nº de baños por ocupación y categoría (Decreto 194/2010): 1, o 2 si la unidad
+    # supera el umbral de personas de su categoría en llaves.
     cocina_t = cocina_min
-    bano_t = bano_min
-    fijas_t = cocina_t + bano_t
-    # Conjuntos (A1.4): 2º baño obligatorio si más de 5 usuarios.
-    segundo_bano = grupo == "conjuntos" and plazas > 5
-    if segundo_bano:
-        fijas_t += bano_min
+    n_banos = banos_apartamento(cat, plazas)
+    fijas_t = cocina_t + n_banos * bano_min
 
     # Salón-comedor y dormitorio absorben el resto del presupuesto computable,
     # proporcional a sus mínimos; nunca por debajo del mínimo del Anexo.
@@ -120,10 +140,9 @@ def programa_apartamentos(
         Estancia("salon_comedor", "publica", salon_min, round(salon_t, 2)),
         Estancia("dormitorio_1", "privada", dorm_min, round(dorm_t, 2)),
         Estancia("cocina", "publica", cocina_min, round(cocina_t, 2)),
-        Estancia("bano", "servicio", bano_min, round(bano_t, 2)),
     ]
-    if segundo_bano:
-        estancias.append(Estancia("aseo", "servicio", bano_min, round(bano_min, 2)))
+    for nombre in nombres_banos(n_banos):
+        estancias.append(Estancia(nombre, "servicio", bano_min, round(bano_min, 2)))
     return estancias
 
 
@@ -157,29 +176,6 @@ def _plazas_combo(combo: ComboDormitorios) -> int:
     return combo.plazas(PLAZAS)
 
 
-def _banos_obligatorios_combo(n_dorms: int, plazas: int) -> int:
-    """Baños obligatorios: por nº de dormitorios (§2.5) y suelo por ocupación
-    (toda unidad de 5 plazas o más exige 2 baños). Subsume el 2º baño del Anexo
-    I.4 para conjuntos de >5 usuarios."""
-    return banos_min_max(n_dorms, plazas)[0]
-
-
-def _n_banos_combo(
-    n_dorms: int, plazas: int,
-    fijo_no_bano_min: float, bano_min: float, util_disponible: float,
-) -> int:
-    """Nº real de baños: obligatorios + 1 más si cabe en el útil computable.
-
-    `fijo_no_bano_min` = mínimos de salón-comedor + dormitorios + cocina. Se añade
-    el baño opcional solo si los mínimos (con ese baño) caben en `util_disponible`.
-    """
-    n_min, n_max = banos_min_max(n_dorms, plazas)
-    n = n_min
-    while n < n_max and fijo_no_bano_min + (n + 1) * bano_min <= util_disponible + 1e-6:
-        n += 1
-    return n
-
-
 def util_minimo_combo(
     combo: ComboDormitorios, categoria: str, grupo: str = "edificios",
 ) -> float:
@@ -192,7 +188,7 @@ def util_minimo_combo(
     dorm_min_total = sum(
         MIN_DORMITORIO[tam][cat] * n for tam, n in combo.composicion.items()
     )
-    n_banos = _banos_obligatorios_combo(combo.n_dorms, plazas)
+    n_banos = banos_apartamento(cat, plazas)
     total = salon_min + dorm_min_total + MIN_COCINA[cat] + n_banos * MIN_BANO[cat]
     return round(total, 2)
 
@@ -257,11 +253,9 @@ def programa_apartamentos_combo(
             dorms.append((tam, MIN_DORMITORIO[tam][cat]))
     dorm_min_total = sum(m for _, m in dorms)
 
-    # Nº de baños: obligatorios por nº de dormitorios + 1 más si cabe (§2.5).
-    n_banos = _n_banos_combo(
-        combo.n_dorms, plazas, salon_min + dorm_min_total + cocina_min,
-        bano_min, util_disponible,
-    )
+    # Nº de baños por ocupación y categoría (Decreto 194/2010): 1, o 2 si la unidad
+    # supera el umbral de personas de su categoría (ver banos_apartamento).
+    n_banos = banos_apartamento(cat, plazas)
 
     # Cocina y baño(s): tamaño práctico fijo en su mínimo.
     fijas_t = cocina_min + n_banos * bano_min
@@ -279,7 +273,7 @@ def programa_apartamentos_combo(
             Estancia(f"dormitorio_{i}", "privada", dmin, round(max(dmin, dmin * factor), 2))
         )
     estancias.append(Estancia("cocina", "publica", cocina_min, round(cocina_min, 2)))
-    for nombre in nombres_banos(combo.n_dorms, plazas, n_banos):
+    for nombre in nombres_banos(n_banos):
         estancias.append(Estancia(nombre, "servicio", bano_min, round(bano_min, 2)))
     return estancias
 
