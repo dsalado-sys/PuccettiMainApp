@@ -11,12 +11,46 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from .combinador_tipologias import ComboDormitorios
 from .programa_uso import (
     TipologiaUnidadDescriptor,
     reparto_multi_tipologia_generico,
 )
 
 Categoria = Literal["publica", "privada", "servicio", "circulacion"]
+
+# Tamaños de dormitorio de una vivienda (Anexo I.5): cada dormitorio es
+# individual (MIN_DORM_INDIVIDUAL) o doble (MIN_DORM_DOBLE). Es el alfabeto del
+# combinador para el paradigma "elegir nº de dormitorios" (§2.5), hermano del de
+# apartamentos turísticos pero con dos tamaños en vez de cuatro.
+TAMANOS_DORMITORIO_VIVIENDA = ("individual", "doble")
+# Plazas (ocupación) por tamaño de dormitorio de vivienda.
+PLAZAS_DORMITORIO_VIVIENDA: dict[str, int] = {"individual": 1, "doble": 2}
+
+def banos_vivienda(n_dorms: int) -> int:
+    """Nº de baños de una vivienda (Anexo I.5), por nº de dormitorios:
+
+    - estudio / 1 dorm / 2 dorm → 1 baño.
+    - 3 dorm o más → 2 baños (uno suele asociarse al dormitorio principal).
+
+    A diferencia de los apartamentos turísticos, en vivienda el criterio es por
+    nº de dormitorios, no por ocupación.
+    """
+    return 2 if n_dorms >= 3 else 1
+
+
+def nombres_banos(n_banos: int) -> list[str]:
+    """Nombres de los `n_banos` baños de una unidad, en orden de incorporación.
+
+    Todos son baños COMPLETOS (ducha, inodoro y lavabo): con 1 baño es `bano`;
+    con 2 o más se numeran `bano_1`, `bano_2`, … para que el detalle por unidad
+    los muestre como "Baño 1", "Baño 2".
+    """
+    if n_banos <= 0:
+        return []
+    if n_banos == 1:
+        return ["bano"]
+    return [f"bano_{i}" for i in range(1, n_banos + 1)]
 
 
 @dataclass(frozen=True)
@@ -107,7 +141,9 @@ _CATEGORIA_ESTANCIA: dict[str, Categoria] = {
     "dormitorio_5": "privada",
     "bano": "servicio",
     "bano_1": "servicio",
+    "bano_2": "servicio",
     "aseo": "servicio",
+    "aseo_2": "servicio",
     "circulacion_interior": "circulacion",
 }
 
@@ -239,11 +275,8 @@ def _nombres_estancias_vivienda(
     nombres.append("dormitorio_1")
     for i in range(2, n_dorms + 1):
         nombres.append(f"dormitorio_{i}")
-    if util_disponible > 70 or n_dorms >= 3:
-        nombres.append("bano_1")
-        nombres.append("aseo")
-    else:
-        nombres.append("bano")
+    # Baños por nº de dormitorios (Anexo I.5): 1 hasta 2 dorms, 2 desde 3 dorms.
+    nombres.extend(nombres_banos(banos_vivienda(n_dorms)))
     return nombres
 
 
@@ -258,10 +291,8 @@ def _area_min_estancia(est: str, n_dorms: int, salon_cocina_open: bool) -> float
         return float(MIN_DORM_DOBLE)
     if est.startswith("dormitorio_"):
         return float(MIN_DORM_INDIVIDUAL)
-    if est in ("bano", "bano_1"):
+    if est == "bano" or est.startswith("bano_"):
         return float(MIN_BANO)
-    if est == "aseo":
-        return float(MIN_ASEO)
     return 0.0
 
 
@@ -278,12 +309,9 @@ def _targets_default_para(n_dorms: int) -> dict[str, float | None]:
     }
     for i in range(2, n_dorms + 1):
         out[f"dormitorio_{i}"] = None
-    util_max = UTIL_MAX.get(n_dorms, UTIL_MAX[4])
-    if util_max > 70 or n_dorms >= 3:
-        out["bano_1"] = MIN_BANO + 2.0
-        out["aseo"] = MIN_ASEO + 1.0
-    else:
-        out["bano"] = MIN_BANO + 2.0
+    # Baños completos (Anexo I.5): 1 hasta 2 dorms, 2 desde 3 dorms.
+    for nombre in nombres_banos(banos_vivienda(n_dorms)):
+        out[nombre] = MIN_BANO + 2.0
     return out
 
 
@@ -320,6 +348,144 @@ def descriptor_tipologia_vivienda(
         n_dorms_label=n_dorms,
         tipo_unidad="vivienda",
         plazas=max(1, n_dorms) + 1,
+    )
+
+
+# ─── Programa por COMBINACIÓN de dormitorios (§2.5 · paradigma nuevo) ─────────
+# Hermano del de apartamentos: la vivienda se define por su nº de dormitorios y
+# cada dormitorio es individual o doble. Una `ComboDormitorios` describe la
+# composición concreta (p. ej. 1 individual + 1 doble). El estudio (N=0) reusa el
+# programa de estudio. El resto compone: salón (+cocina) + N dormitorios + baño(s)
+# + circulación interior (15 %).
+def _dorms_de_combo_vivienda(combo: ComboDormitorios) -> list[tuple[str, float]]:
+    """[(tamaño, min_m2)] de los dormitorios de la combinación, orden canónico."""
+    tam_min = {"individual": MIN_DORM_INDIVIDUAL, "doble": MIN_DORM_DOBLE}
+    dorms: list[tuple[str, float]] = []
+    for tam in sorted(combo.composicion):
+        for _ in range(combo.composicion[tam]):
+            dorms.append((tam, float(tam_min.get(tam, MIN_DORM_INDIVIDUAL))))
+    return dorms
+
+
+def _banos_min_m2_vivienda(n_banos: int) -> float:
+    """m² mínimos de `n_banos` baños completos (MIN_BANO cada uno)."""
+    return float(MIN_BANO) * max(0, n_banos)
+
+
+def programa_vivienda_combo(
+    combo: ComboDormitorios,
+    util_disponible: float,
+    salon_cocina_open: bool = False,
+) -> list[Estancia]:
+    """Estancias de una vivienda de N dormitorios (combinación de tamaños).
+
+    Misma política de reparto que `programa_vivienda` (circulación 15 %, cocina y
+    baños a target fijo, salón + dormitorios escalan), pero con un dormitorio por
+    elemento de la combinación, dimensionado por su tamaño (individual / doble).
+    """
+    if util_disponible <= 0:
+        return []
+    if combo.es_estudio:
+        return _programa_estudio(util_disponible)
+
+    n_dorms = combo.n_dorms
+    dorms = _dorms_de_combo_vivienda(combo)
+    dorm_min_total = sum(m for _, m in dorms)
+
+    circ_target = util_disponible * (PCT_CIRCULACION_INTERIOR_VIVIENDA / 100.0)
+
+    salon_min = float(
+        SALON_MAS_COCINA_MIN.get(n_dorms, 24) if salon_cocina_open
+        else SALON_MIN.get(n_dorms, 20)
+    )
+    # Cocina independiente cuenta para el presupuesto; integrada va dentro del salón.
+    cocina_min_fit = 0.0 if salon_cocina_open else float(MIN_COCINA)
+    # Nº de baños por nº de dormitorios (Anexo I.5): 1 hasta 2 dorms, 2 desde 3.
+    banos_unidad = nombres_banos(banos_vivienda(n_dorms))
+
+    # Escalantes (salón + dormitorios) vs fijas (cocina + baños).
+    escalantes: list[tuple[str, float]] = []
+    fijas: list[tuple[str, float, float]] = []   # (nombre, min, target)
+    if salon_cocina_open:
+        escalantes.append(("salon_cocina", salon_min))
+    else:
+        escalantes.append(("salon", salon_min))
+        fijas.append(("cocina", float(MIN_COCINA), float(MIN_COCINA + 1.0)))
+    for i, (_tam, dmin) in enumerate(dorms, start=1):
+        escalantes.append((f"dormitorio_{i}", dmin))
+    # Todos los baños son completos (MIN_BANO + 2 de target).
+    for nombre in banos_unidad:
+        fijas.append((nombre, float(MIN_BANO), float(MIN_BANO + 2.0)))
+
+    suma_fijas = sum(t for _, _, t in fijas)
+    suma_min_esc = sum(m for _, m in escalantes)
+    util_principal = max(0.0, util_disponible - circ_target - suma_fijas)
+
+    targets: dict[str, float] = {n: t for n, _, t in fijas}
+    if suma_min_esc > 0:
+        for n, m in escalantes:
+            targets[n] = util_principal * m / suma_min_esc
+    else:
+        for n, _ in escalantes:
+            targets[n] = 0.0
+
+    mins: dict[str, float] = {n: m for n, m, _ in fijas}
+    mins.update({n: m for n, m in escalantes})
+
+    # Orden de salida: salón → cocina → dormitorios → baños → circulación.
+    orden: list[str] = ["salon_cocina"] if salon_cocina_open else ["salon", "cocina"]
+    orden += [f"dormitorio_{i}" for i in range(1, n_dorms + 1)]
+    orden += banos_unidad
+
+    estancias = [
+        Estancia(n, _CATEGORIA_ESTANCIA.get(n, "publica"), mins.get(n, 0.0), round(targets.get(n, 0.0), 2))
+        for n in orden
+    ]
+    if circ_target > 1e-6:
+        estancias.append(Estancia("circulacion_interior", "circulacion", 0.0, round(circ_target, 2)))
+    return estancias
+
+
+def util_minimo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool = False) -> float:
+    """Suma de mínimos de las estancias (sin la circulación del 15 %).
+
+    Los baños se cuentan por nº de dormitorios (`banos_vivienda`): 1 hasta 2
+    dormitorios, 2 desde 3.
+    """
+    if combo.es_estudio:
+        return util_minimo_vivienda(0, salon_cocina_open)
+    n_dorms = combo.n_dorms
+    dorm_min_total = sum(m for _, m in _dorms_de_combo_vivienda(combo))
+    salon_min = float(
+        SALON_MAS_COCINA_MIN.get(n_dorms, 24) if salon_cocina_open
+        else SALON_MIN.get(n_dorms, 20)
+    )
+    cocina_min = 0.0 if salon_cocina_open else float(MIN_COCINA)
+    total = salon_min + cocina_min + dorm_min_total + _banos_min_m2_vivienda(banos_vivienda(n_dorms))
+    return round(total, 2)
+
+
+def util_objetivo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool = False) -> float:
+    """Objetivo de m² útil de la combinación: mínimos + 15 % (circulación)."""
+    if combo.es_estudio:
+        return util_minimo_vivienda(0, salon_cocina_open)
+    return round(util_minimo_vivienda_combo(combo, salon_cocina_open) * 1.15, 2)
+
+
+def descriptor_tipologia_vivienda_combo(
+    combo: ComboDormitorios, salon_cocina_open: bool = False,
+) -> TipologiaUnidadDescriptor:
+    """Descriptor para el reparto a partir de una combinación de vivienda."""
+    util_obj = util_objetivo_vivienda_combo(combo, salon_cocina_open)
+    util_min = util_obj if combo.es_estudio else util_minimo_vivienda_combo(combo, salon_cocina_open)
+    return TipologiaUnidadDescriptor(
+        slug=combo.slug,
+        util_objetivo=util_obj,
+        util_minimo=util_min,
+        util_maximo=round(util_obj * 1.25, 2),
+        n_dorms_label=combo.n_dorms,
+        tipo_unidad="vivienda",
+        plazas=combo.plazas(PLAZAS_DORMITORIO_VIVIENDA) or 1,
     )
 
 

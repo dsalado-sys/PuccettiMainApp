@@ -12,7 +12,7 @@
     <button type="button" id="rc-btn-normativa" class="boton-secundario" title="Normativa municipal del PGOU">
       Normativa municipal
     </button>
-    <button type="button" id="rc-btn-distribuir" class="boton-primario" title="Calcular capacidad numérica (envolvente + Anexo I)">
+    <button type="button" id="rc-btn-distribuir" class="boton-primario" title="Calcular capacidad numérica (envolvente + Normativa)">
       Calcular capacidad
     </button>
     <button type="button" id="rc-btn-guardar" class="boton-secundario" title="Guardar parámetros en el proyecto">
@@ -136,6 +136,7 @@
 
 {% include "_rc_modal_normativa.html" %}
 {% include "_rc_modal_unidad.html" %}
+{% include "_rc_modal_tipologias.html" %}
 
 <script src="/static/js/rc_brujula.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_canvas.js?v={{ estaticos_version }}" defer></script>

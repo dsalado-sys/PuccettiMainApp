@@ -299,7 +299,12 @@ class CalcularLayout:
         self,
         parcela: ParcelaMetrica,
         params: ParametrosRender,
+        combo_override: str | None = None,
     ) -> dict[str, Any]:
+        """`combo_override` (§2.5): slug de combinación de dormitorios elegida por
+        el técnico. Si se indica y el uso es apartamentos turísticos, sustituye la
+        tipología por la combinación (toda la unidad, PB y plantas tipo). Selección
+        temporal: el caso de uso no la persiste."""
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
         try:
@@ -317,18 +322,23 @@ class CalcularLayout:
             }
 
         # 1) Resolver tamaño objetivo de la tipología principal (PB y plantas tipo).
-        util_objetivo = self._resolver_util_objetivo(params)
-        util_objetivo_tipo = self._resolver_util_objetivo(params, params.programa_tipo)
+        util_objetivo = self._resolver_util_objetivo(params, combo_override=combo_override)
+        util_objetivo_tipo = self._resolver_util_objetivo(
+            params, params.programa_tipo, combo_override=combo_override
+        )
 
         # 2) Descriptores de tipología (principal + extras → mezcla), PB y tipo.
-        descriptores = self._construir_descriptores_tipologia(params, util_objetivo)
+        descriptores = self._construir_descriptores_tipologia(
+            params, util_objetivo, combo_override=combo_override
+        )
         descriptores_tipo = self._construir_descriptores_tipologia(
-            params, util_objetivo_tipo, params.programa_tipo
+            params, util_objetivo_tipo, params.programa_tipo, combo_override=combo_override
         )
 
         # 3) Construir programa_uso (áreas comunes/sociales obligatorias — de edificio).
         programa_uso = self._construir_programa_uso(
-            params, envolvente, params_motor, util_objetivo, descriptores
+            params, envolvente, params_motor, util_objetivo, descriptores,
+            combo_override=combo_override,
         )
         area_comunes = programa_uso.area_servicios_obligatorios_m2 if programa_uso else 0.0
 
@@ -379,14 +389,15 @@ class CalcularLayout:
         }
 
     # ─── Helpers privados de CalcularLayout ────────────────────────────────
-    def _resolver_util_objetivo(self, params: ParametrosRender, prog=None) -> float | None:
+    def _resolver_util_objetivo(self, params: ParametrosRender, prog=None, combo_override=None) -> float | None:
         """Lee el m² útil objetivo por unidad desde la BBDD del Anexo I.
 
         Vivienda: `anexo_i_vivienda.max_m2_util` para `n_dormitorios`.
         Apartamentos: `anexo_i_apartamentos.max_m2_util` × 1.15.
 
         `prog` permite resolver el objetivo de las plantas tipo (`programa_tipo`);
-        por defecto usa `params.programa` (planta baja).
+        por defecto usa `params.programa` (planta baja). `combo_override` (§2.5)
+        fuerza el objetivo de una combinación de dormitorios (apartamentos).
 
         Si la consulta falla o la fila no existe → None y `calcular_capacidad`
         cae en el hardcoded `util_maximo(n_dorms)` o `util_objetivo_apartamento`.
@@ -394,6 +405,14 @@ class CalcularLayout:
         from .dominio import CATEGORIA_A_NUM_DORMS
 
         prog = prog if prog is not None else params.programa
+        if prog.uso == UsoEdificio.APARTAMENTOS_TURISTICOS and combo_override is not None:
+            return self._util_objetivo_combo(prog, combo_override)
+        if prog.uso == UsoEdificio.VIVIENDA and combo_override is not None:
+            from .geometria.combinador_tipologias import slug_a_combo
+            from .geometria.programa import util_objetivo_vivienda_combo
+            return util_objetivo_vivienda_combo(
+                slug_a_combo(combo_override), bool(prog.salon_cocina_open)
+            )
         if prog.uso == UsoEdificio.VIVIENDA:
             if self.catalogo_vivienda is None:
                 return None
@@ -435,20 +454,62 @@ class CalcularLayout:
                 return None
         return None
 
+    def _util_objetivo_combo(self, prog, combo_override: str) -> float:
+        """Objetivo de una combinación de dormitorios (§2.5).
+
+        Prioriza la BBDD si la combinación está sembrada (p. ej. el estudio, que
+        sí tiene fila); en otro caso compone desde las constantes del Anexo.
+        """
+        from .geometria.combinador_tipologias import slug_a_combo
+        from .geometria.programa_apartamentos import util_objetivo_combo
+
+        combo = slug_a_combo(combo_override)
+        cat = prog.categoria_apartamentos.value
+        grupo = prog.grupo_apartamentos.value
+        if self.catalogo_apartamentos is not None:
+            try:
+                uo = self.catalogo_apartamentos.util_objetivo_apartamento(cat, combo.slug, grupo)
+                if uo is not None and uo > 0:
+                    return uo
+            except Exception:
+                pass
+        return util_objetivo_combo(combo, cat, grupo)
+
     # ─── Descriptores de tipología (mezcla multi-tipología por uso) ─────────
-    def _construir_descriptores_tipologia(self, params: ParametrosRender, util_objetivo, prog=None):
+    def _construir_descriptores_tipologia(self, params: ParametrosRender, util_objetivo, prog=None, combo_override=None):
         """Lista de `TipologiaUnidadDescriptor` del uso activo (principal + extras).
 
         La categoría del proyecto es fija; varía la tipología (igual que en
         vivienda solo varía el nº de dormitorios). `prog` permite construir la lista
         de las plantas tipo (`programa_tipo`); por defecto usa `params.programa`.
-        Devuelve `None` para vivienda (que sigue la vía int-based del motor) y para
-        usos no soportados.
+        `combo_override` (§2.5) sustituye la tipología por una combinación de
+        dormitorios (edificio homogéneo de esa combinación). Devuelve `None` para
+        vivienda (que sigue la vía int-based del motor) y para usos no soportados.
         """
         prog = prog if prog is not None else params.programa
         uso = prog.uso
+        if uso == UsoEdificio.VIVIENDA and combo_override is not None:
+            from .geometria.combinador_tipologias import slug_a_combo
+            from .geometria.programa import descriptor_tipologia_vivienda_combo
+            d = descriptor_tipologia_vivienda_combo(
+                slug_a_combo(combo_override), bool(prog.salon_cocina_open)
+            )
+            if util_objetivo is not None and util_objetivo > 0:
+                d = replace(d, util_objetivo=util_objetivo, util_maximo=round(util_objetivo * 1.25, 2))
+            return [d]
         if uso == UsoEdificio.VIVIENDA:
             return None
+
+        if uso == UsoEdificio.APARTAMENTOS_TURISTICOS and combo_override is not None:
+            from .geometria.combinador_tipologias import slug_a_combo
+            from .geometria.programa_apartamentos import descriptor_tipologia_combo
+            combo = slug_a_combo(combo_override)
+            d = descriptor_tipologia_combo(
+                combo, prog.categoria_apartamentos.value, prog.grupo_apartamentos.value
+            )
+            if util_objetivo is not None and util_objetivo > 0:
+                d = replace(d, util_objetivo=util_objetivo, util_maximo=round(util_objetivo * 1.25, 2))
+            return [d]
 
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             from .geometria.programa_apartamentos import descriptor_tipologia_apartamento
@@ -508,17 +569,25 @@ class CalcularLayout:
         params_motor,
         util_objetivo: float | None,
         descriptores,
+        combo_override=None,
     ):
         """Construye el descriptor de uso con sus áreas comunes/sociales obligatorias.
 
         Para vivienda: None (calcular_capacidad no necesita programa_uso). Para
         apartamentos / hotel-apartamento / hotelero hace una iteración de dos
         pasos para dimensionar las comunes (que escalan con nº de unidades, o de
-        plazas en albergue).
+        plazas en albergue). `combo_override` (§2.5) dimensiona desde la combinación.
         """
         prog = params.programa
         uso = prog.uso
-        if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+        if uso == UsoEdificio.APARTAMENTOS_TURISTICOS and combo_override is not None:
+            from .geometria.combinador_tipologias import slug_a_combo
+            from .geometria.programa_apartamentos import programa_uso_apartamento_combo
+            combo = slug_a_combo(combo_override)
+            cat = prog.categoria_apartamentos.value
+            grupo = prog.grupo_apartamentos.value
+            builder = lambda n, p: programa_uso_apartamento_combo(combo, cat, n_unidades_estimado=n, grupo=grupo)
+        elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             from .geometria.programa_apartamentos import programa_uso_apartamento
             cat = prog.categoria_apartamentos.value
             tip = prog.tipologia_apartamento.value
@@ -562,7 +631,149 @@ class CalcularLayout:
         return max(total, cap.n_viviendas_objetivo)
 
 
-# ─── Caso de uso 3: ValidarCumplimiento ─────────────────────────────────────
+def _etiqueta_combo(composicion: dict[str, int]) -> str:
+    """Etiqueta legible de una combinación: '1 individual + 2 dobles'.
+
+    Sin referencias normativas (memoria feedback_avisos_sin_referencias_pdf).
+    """
+    if not composicion:
+        return "Estudio"
+    plural = {
+        "individual": ("individual", "individuales"),
+        "doble": ("doble", "dobles"),
+        "triple": ("triple", "triples"),
+        "cuadruple": ("cuádruple", "cuádruples"),
+    }
+    partes = []
+    for tam, n in sorted(composicion.items()):
+        sing, plur = plural.get(tam, (tam, tam + "s"))
+        partes.append(f"{n} {sing if n == 1 else plur}")
+    return " + ".join(partes)
+
+
+# ─── Caso de uso 3: CalcularTipologiasDormitorios (§2.5 — paradigma nuevo) ──
+@dataclass
+class CalcularTipologiasDormitorios:
+    """req. §2.5 — Dado un nº de dormitorios, enumera TODAS las combinaciones de
+    tamaños y calcula cuántas unidades caben de cada una.
+
+    Las combinaciones se ordenan por útil objetivo ascendente y se **podan** al
+    primer combo no viable (0 unidades): como el nº de unidades es no-creciente
+    con el útil objetivo, a partir de ahí ninguna cabe. Reutiliza `CalcularLayout`
+    con `combo_override` para que el conteo coincida exactamente con el que se
+    obtiene al elegir esa combinación. Aplica a **vivienda** (dormitorios
+    individual/doble) y **apartamentos turísticos** (individual/doble/triple/
+    cuádruple); hotelero y hotel-apartamento clasifican por ocupación → error.
+    """
+
+    catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
+    catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
+    catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
+    catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
+
+    def ejecutar(
+        self,
+        parcela: ParcelaMetrica,
+        params: ParametrosRender,
+        n_dorms: int,
+    ) -> dict[str, Any]:
+        from .geometria.combinador_tipologias import enumerar_combinaciones
+
+        prog = params.programa
+        uso = prog.uso
+        n_dorms = max(0, int(n_dorms))
+
+        # Despacho por uso: alfabeto de tamaños, objetivo, mínimo y plazas.
+        if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+            from .geometria.programa_apartamentos import (
+                PLAZAS, TAMANOS_DORMITORIO, util_minimo_combo,
+            )
+            cat = prog.categoria_apartamentos.value
+            grupo = prog.grupo_apartamentos.value
+            tamanos = TAMANOS_DORMITORIO
+            plazas_map = PLAZAS
+            objetivo = lambda combo: self._util_objetivo_combo(prog, combo.slug)
+            minimo = lambda combo: util_minimo_combo(combo, cat, grupo)
+            meta = {"categoria": cat, "grupo": grupo}
+        elif uso == UsoEdificio.VIVIENDA:
+            from .geometria.programa import (
+                PLAZAS_DORMITORIO_VIVIENDA, TAMANOS_DORMITORIO_VIVIENDA,
+                util_minimo_vivienda_combo, util_objetivo_vivienda_combo,
+            )
+            salon_open = bool(prog.salon_cocina_open)
+            tamanos = TAMANOS_DORMITORIO_VIVIENDA
+            plazas_map = PLAZAS_DORMITORIO_VIVIENDA
+            objetivo = lambda combo: util_objetivo_vivienda_combo(combo, salon_open)
+            minimo = lambda combo: (
+                util_objetivo_vivienda_combo(combo, salon_open) if combo.es_estudio
+                else util_minimo_vivienda_combo(combo, salon_open)
+            )
+            meta = {"categoria": prog.categoria_vivienda.value}
+        else:
+            return {
+                "error": "El cálculo por nº de dormitorios solo aplica a vivienda y apartamentos turísticos.",
+                "n_dorms": n_dorms, "combinaciones": [],
+            }
+
+        # Orden ascendente por útil objetivo → habilita la poda.
+        combos = sorted(enumerar_combinaciones(n_dorms, tamanos), key=objetivo)
+
+        layout = CalcularLayout(
+            catalogo_vivienda=self.catalogo_vivienda,
+            catalogo_apartamentos=self.catalogo_apartamentos,
+            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
+            catalogo_hotelero=self.catalogo_hotelero,
+        )
+
+        viables: list[dict[str, Any]] = []
+        for combo in combos:
+            res = layout.ejecutar(parcela, params, combo_override=combo.slug)
+            if res.get("error"):
+                # Envolvente inválida: no depende de la combinación → abortar.
+                return {"error": res["error"], "n_dorms": n_dorms, "combinaciones": []}
+            cap = res.get("capacidad") or {}
+            n_unidades = int(cap.get("n_viviendas_objetivo", 0) or 0)
+            if n_unidades <= 0:
+                break  # poda: las combinaciones mayores tampoco caben
+            viables.append({
+                "slug": combo.slug,
+                "composicion": dict(combo.composicion),
+                "etiqueta": _etiqueta_combo(combo.composicion),
+                "n_dorms": combo.n_dorms,
+                "plazas": combo.plazas(plazas_map),
+                "util_objetivo_m2": round(objetivo(combo), 2),
+                "util_minimo_m2": round(minimo(combo), 2),
+                "n_unidades": n_unidades,
+            })
+
+        return {
+            "n_dorms": n_dorms,
+            **meta,
+            "total_combinaciones": len(combos),
+            "viables": len(viables),
+            "podadas": len(combos) - len(viables),
+            "combinaciones": viables,
+        }
+
+    def _util_objetivo_combo(self, prog, slug: str) -> float:
+        """Objetivo de la combinación (BBDD si sembrada, si no constante del Anexo)."""
+        from .geometria.combinador_tipologias import slug_a_combo
+        from .geometria.programa_apartamentos import util_objetivo_combo
+
+        combo = slug_a_combo(slug)
+        cat = prog.categoria_apartamentos.value
+        grupo = prog.grupo_apartamentos.value
+        if self.catalogo_apartamentos is not None:
+            try:
+                uo = self.catalogo_apartamentos.util_objetivo_apartamento(cat, combo.slug, grupo)
+                if uo is not None and uo > 0:
+                    return uo
+            except Exception:
+                pass
+        return util_objetivo_combo(combo, cat, grupo)
+
+
+# ─── Caso de uso 4: ValidarCumplimiento ─────────────────────────────────────
 @dataclass
 class ValidarCumplimiento:
     """req. 7 — alertas Anexo I/II + PGOU + accesibilidad."""
