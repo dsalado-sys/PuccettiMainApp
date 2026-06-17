@@ -133,11 +133,17 @@ def programa_apartamentos(
     bano_min = MIN_BANO[cat]
 
     if tip == "estudio":
+        # Anexo I.3/I.4: el estudio es una estancia única (salón-comedor que hace
+        # también de dormitorio) + cocina + baño, piezas independientes con su
+        # propio mínimo. La estancia absorbe el resto del presupuesto computable.
         est = MIN_ESTUDIO[cat]
+        cocina_min = MIN_COCINA[cat]
+        cocina_t = cocina_min
         bano_t = bano_min
-        salon_t = max(est, util_disponible - bano_t)
+        salon_t = max(est, util_disponible - cocina_t - bano_t)
         return [
             Estancia("salon_comedor", "publica", est, round(salon_t, 2)),
+            Estancia("cocina", "publica", cocina_min, round(cocina_t, 2)),
             Estancia("bano", "servicio", bano_min, round(bano_t, 2)),
         ]
 
@@ -193,8 +199,9 @@ def util_minimo_apartamento(categoria: str, tipologia: str, grupo: str = "edific
 # Un apartamento turístico se clasifica por su nº de dormitorios; cada dormitorio
 # se dimensiona por su ocupación. Una `ComboDormitorios` describe la combinación
 # concreta de ocupaciones (p. ej. 1 individual + 1 doble). El estudio es N=0 y se
-# delega al sizer monodormitorio (`tipologia="estudio"`, misma pieza única del
-# Anexo). El resto compone: salón-comedor + N dormitorios + cocina + baño(s).
+# delega al sizer monodormitorio (`tipologia="estudio"`: estancia única que hace
+# de salón y dormitorio + cocina + baño). El resto compone: salón-comedor + N
+# dormitorios + cocina + baño(s).
 #
 # La ocupación de la unidad = Σ plazas de los dormitorios + 2 del salón
 # (`ocupacion_unidad`): gobierna la superficie adicional del salón (por cada

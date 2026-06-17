@@ -77,8 +77,10 @@ SALON_MIN = {1: 14, 2: 16, 3: 18, 4: 20}
 SALON_MAS_COCINA_MIN = {1: 20, 2: 20, 3: 24, 4: 24}
 
 # Superficie útil máxima de referencia (VPO). La UI solo expone hasta "4d+",
-# así que n_dorms se acota a 4 (con default vía .get).
-UTIL_MAX = {0: 25, 1: 60, 2: 70, 3: 90, 4: 110}
+# así que n_dorms se acota a 4 (con default vía .get). El estudio (0) no tiene
+# máximo VPO; usamos un techo holgado por encima de su objetivo (estancia +
+# cocina + baño + circulación, Anexo I.5) para que pueda crecer con el sobrante.
+UTIL_MAX = {0: 40, 1: 60, 2: 70, 3: 90, 4: 110}
 
 # Política de reparto del programa entre estancias. Cargable desde BBDD.
 # - AREA_TARGET_VIVIENDA: dict[n_dorms] → dict[estancia → m² target | None].
@@ -148,6 +150,63 @@ _CATEGORIA_ESTANCIA: dict[str, Categoria] = {
 }
 
 
+def _salon_min_para(n_dorms: int) -> float:
+    """Salón (estancia E) mínimo del Anexo I.5 por nº de dormitorios.
+
+    Tabla VPO Junta de Andalucía: 1d=14, 2d=16, 3d=18, 4d=20 y "más de 4
+    dormitorios"=24 m². La UI llega hasta 4d+, pero el combinador puede generar
+    N≥5; para esos casos (o cualquier n fuera de tabla) se aplica el tramo
+    ">4 dormitorios".
+    """
+    if n_dorms in SALON_MIN:
+        return float(SALON_MIN[n_dorms])
+    return 24.0 if n_dorms >= 5 else 20.0
+
+
+def _salon_cocina_min_para(n_dorms: int) -> float:
+    """Salón-cocina (E+Comedor+Cocina) mínimo del Anexo I.5 por nº de dormitorios.
+
+    Tabla VPO: 1d=20, 2d=20, 3d=24, 4d=24 y "más de 4 dormitorios"=28 m².
+    """
+    if n_dorms in SALON_MAS_COCINA_MIN:
+        return float(SALON_MAS_COCINA_MIN[n_dorms])
+    return 28.0 if n_dorms >= 5 else 24.0
+
+
+def _repartir_con_suelo(
+    escalantes: list[tuple[str, float]], util_principal: float,
+) -> dict[str, float]:
+    """Reparte `util_principal` entre las estancias que escalan (salón +
+    dormitorios) garantizando su superficie mínima del Anexo I.5.
+
+    - Caso normal (`util_principal ≥ Σ mínimos`): cada estancia recibe su mínimo
+      más una cuota proporcional del sobrante (las de mayor mínimo crecen más).
+      Esto coincide al céntimo con el reparto proporcional puro `mín·util/Σmín`,
+      pero nunca por debajo del mínimo (el salón conserva `SALON_MIN[n_dorms]`).
+    - Caso degradado (unidad infradimensionada, `util_principal < Σ mínimos`): se
+      prioriza el salón —estancia principal del Anexo I.5—, que conserva su
+      mínimo; el resto se reparte entre los dormitorios. Si ni el salón cabe,
+      reparto proporcional puro.
+    """
+    suma_min = sum(m for _, m in escalantes)
+    if not escalantes or suma_min <= 0:
+        return {n: 0.0 for n, _ in escalantes}
+    if util_principal + 1e-9 >= suma_min:
+        sobrante = util_principal - suma_min
+        return {n: m + sobrante * (m / suma_min) for n, m in escalantes}
+    salon = next((n for n, _ in escalantes if n in ("salon", "salon_cocina")), None)
+    if salon is None:
+        return {n: util_principal * (m / suma_min) for n, m in escalantes}
+    salon_min = next(m for n, m in escalantes if n == salon)
+    out = {salon: min(util_principal, salon_min)}
+    resto = max(0.0, util_principal - out[salon])
+    dorms = [(n, m) for n, m in escalantes if n != salon]
+    suma_dorms = sum(m for _, m in dorms)
+    for n, m in dorms:
+        out[n] = resto * (m / suma_dorms) if suma_dorms > 0 else 0.0
+    return out
+
+
 def programa_vivienda(
     n_dorms: int,
     util_disponible: float,
@@ -203,7 +262,6 @@ def programa_vivienda(
             fijas.append((est, min_est, float(tgt)))
 
     suma_fijas = sum(t for _, _, t in fijas)
-    suma_min_escalantes = sum(m for _, m in escalantes)
     util_principal = max(0.0, util_disponible - circ_target - suma_fijas)
 
     estancias: list[Estancia] = []
@@ -211,12 +269,7 @@ def programa_vivienda(
     # 4. Estancias en orden semánticamente útil para el modal:
     #    salón → cocina → dormitorios → baños → circulación.
     targets_por_nombre: dict[str, float] = {est: t for est, _, t in fijas}
-    if suma_min_escalantes > 0:
-        for est, min_est in escalantes:
-            targets_por_nombre[est] = util_principal * min_est / suma_min_escalantes
-    else:
-        for est, _ in escalantes:
-            targets_por_nombre[est] = 0.0
+    targets_por_nombre.update(_repartir_con_suelo(escalantes, util_principal))
 
     for est in nombres:
         min_est = _area_min_estancia(est, n_dorms, salon_cocina_open)
@@ -234,20 +287,30 @@ def programa_vivienda(
 def _programa_estudio(util_disponible: float) -> list[Estancia]:
     """Estancias del estudio (n_dorms=0) escaladas a `util_disponible`.
 
-    El catálogo de BBDD sembra 3 estancias con target sumando UTIL_MAX[0]=25.
-    Si `util_disponible` ≠ 25, las áreas se escalan proporcionalmente.
+    Anexo I.5: el estudio tiene cocina y baño independientes; su estancia única
+    (`espacio_principal`) hace de salón y dormitorio. El catálogo de BBDD sembra
+    estas 4 estancias con target sumando el útil objetivo del estudio; si
+    `util_disponible` ≠ esa suma, las áreas se escalan proporcionalmente (el
+    objetivo del estudio = la suma de targets —ver `util_minimo_vivienda`—, así
+    que en el reparto el factor es ≥ 1 y la cocina nunca baja de su mínimo).
     """
     targets = AREA_TARGET_VIVIENDA.get(0, {})
     if not targets:
         # Fallback si la BBDD aún no se ha cargado.
-        targets = {"espacio_principal": 18.0, "bano": 4.0, "circulacion_interior": 3.0}
+        targets = {
+            "espacio_principal": 18.0,
+            "cocina": MIN_COCINA + 1.0,
+            "bano": 4.0,
+            "circulacion_interior": 3.0,
+        }
 
-    nombres_ordenados = ["espacio_principal", "bano", "circulacion_interior"]
+    nombres_ordenados = ["espacio_principal", "cocina", "bano", "circulacion_interior"]
     suma_baseline = sum(float(targets[e]) for e in nombres_ordenados if e in targets)
     factor = (util_disponible / suma_baseline) if suma_baseline > 0 else 1.0
 
     mins = {
         "espacio_principal": 14.0,
+        "cocina": MIN_COCINA,
         "bano": MIN_BANO,
         "circulacion_interior": 0.0,
     }
@@ -282,9 +345,9 @@ def _nombres_estancias_vivienda(
 
 def _area_min_estancia(est: str, n_dorms: int, salon_cocina_open: bool) -> float:
     if est == "salon":
-        return float(SALON_MIN.get(n_dorms, 20))
+        return _salon_min_para(n_dorms)
     if est == "salon_cocina":
-        return float(SALON_MAS_COCINA_MIN.get(n_dorms, 24))
+        return _salon_cocina_min_para(n_dorms)
     if est == "cocina":
         return float(MIN_COCINA)
     if est == "dormitorio_1":
@@ -322,14 +385,22 @@ def util_maximo(n_dorms: int) -> float:
 def util_minimo_vivienda(n_dorms: int, salon_cocina_open: bool = False) -> float:
     """Mínimo viable de una vivienda.
 
-    - Estudio: ≥ `UMBRAL_MINIMO_ESTUDIO_M2` (25 m² excluyendo servicios
-      comunes, Anexo I.5 VPO).
+    - Estudio: la suma de los targets del programa (estancia única + cocina +
+      baño + circulación interior, Anexo I.5), con piso en
+      `UMBRAL_MINIMO_ESTUDIO_M2` (25 m² excluyendo servicios comunes, VPO). Es
+      también el útil objetivo, de modo que en el reparto el estudio se escala
+      con factor ≥ 1 y la cocina respeta su mínimo independiente (7 m²).
     - 1d+: suma de mínimos × 1.15 (factor 15 % para circulación interior).
     """
     if n_dorms == 0:
-        prog = programa_vivienda(0, util_disponible=util_maximo(0))
-        suma_min = sum(e.area_min_m2 for e in prog)
-        return round(max(UMBRAL_MINIMO_ESTUDIO_M2, suma_min * 1.15), 2)
+        targets = AREA_TARGET_VIVIENDA.get(0) or {
+            "espacio_principal": 18.0,
+            "cocina": MIN_COCINA + 1.0,
+            "bano": 4.0,
+            "circulacion_interior": 3.0,
+        }
+        suma_target = sum(float(t) for t in targets.values() if t is not None)
+        return round(max(UMBRAL_MINIMO_ESTUDIO_M2, suma_target), 2)
     prog = programa_vivienda(n_dorms, util_disponible=util_maximo(n_dorms),
                              salon_cocina_open=salon_cocina_open)
     return round(sum(e.area_min_m2 for e in prog) * 1.15, 2)
@@ -367,11 +438,6 @@ def _dorms_de_combo_vivienda(combo: ComboDormitorios) -> list[tuple[str, float]]
     return dorms
 
 
-def _banos_min_m2_vivienda(n_banos: int) -> float:
-    """m² mínimos de `n_banos` baños completos (MIN_BANO cada uno)."""
-    return float(MIN_BANO) * max(0, n_banos)
-
-
 def programa_vivienda_combo(
     combo: ComboDormitorios,
     util_disponible: float,
@@ -394,12 +460,10 @@ def programa_vivienda_combo(
 
     circ_target = util_disponible * (PCT_CIRCULACION_INTERIOR_VIVIENDA / 100.0)
 
-    salon_min = float(
-        SALON_MAS_COCINA_MIN.get(n_dorms, 24) if salon_cocina_open
-        else SALON_MIN.get(n_dorms, 20)
+    salon_min = (
+        _salon_cocina_min_para(n_dorms) if salon_cocina_open
+        else _salon_min_para(n_dorms)
     )
-    # Cocina independiente cuenta para el presupuesto; integrada va dentro del salón.
-    cocina_min_fit = 0.0 if salon_cocina_open else float(MIN_COCINA)
     # Nº de baños por nº de dormitorios (Anexo I.5): 1 hasta 2 dorms, 2 desde 3.
     banos_unidad = nombres_banos(banos_vivienda(n_dorms))
 
@@ -418,16 +482,10 @@ def programa_vivienda_combo(
         fijas.append((nombre, float(MIN_BANO), float(MIN_BANO + 2.0)))
 
     suma_fijas = sum(t for _, _, t in fijas)
-    suma_min_esc = sum(m for _, m in escalantes)
     util_principal = max(0.0, util_disponible - circ_target - suma_fijas)
 
     targets: dict[str, float] = {n: t for n, _, t in fijas}
-    if suma_min_esc > 0:
-        for n, m in escalantes:
-            targets[n] = util_principal * m / suma_min_esc
-    else:
-        for n, _ in escalantes:
-            targets[n] = 0.0
+    targets.update(_repartir_con_suelo(escalantes, util_principal))
 
     mins: dict[str, float] = {n: m for n, m, _ in fijas}
     mins.update({n: m for n, m in escalantes})
@@ -446,30 +504,61 @@ def programa_vivienda_combo(
     return estancias
 
 
-def util_minimo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool = False) -> float:
-    """Suma de mínimos de las estancias (sin la circulación del 15 %).
+def _presupuesto_base_vivienda_combo(
+    combo: ComboDormitorios, salon_cocina_open: bool,
+) -> tuple[float, float]:
+    """`(Σ mínimos escalantes, Σ target fijas)` de la combinación (Anexo I.5).
 
-    Los baños se cuentan por nº de dormitorios (`banos_vivienda`): 1 hasta 2
-    dormitorios, 2 desde 3.
+    - escalantes = salón (según nº de dormitorios) + dormitorios (individual/doble),
+      cada uno a su mínimo del Anexo I.5.
+    - fijas = cocina (si no va integrada en el salón) + baños, a su target del
+      programa (cocina = mín+1, baño completo = mín+2), que es lo que realmente
+      consume `programa_vivienda_combo`.
+    """
+    n_dorms = combo.n_dorms
+    dorm_min_total = sum(m for _, m in _dorms_de_combo_vivienda(combo))
+    if salon_cocina_open:
+        escalante_min = _salon_cocina_min_para(n_dorms) + dorm_min_total
+        fijas_target = 0.0
+    else:
+        escalante_min = _salon_min_para(n_dorms) + dorm_min_total
+        fijas_target = float(MIN_COCINA + 1.0)
+    fijas_target += float(MIN_BANO + 2.0) * banos_vivienda(n_dorms)
+    return escalante_min, fijas_target
+
+
+def util_minimo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool = False) -> float:
+    """Útil VIABLE mínimo de la combinación (Anexo I.5).
+
+    Es el menor útil en que TODAS las estancias alcanzan su mínimo del Anexo I.5
+    —el salón según su nº de dormitorios incluido— a la vez que caben la cocina y
+    los baños (a su target) y la circulación interior (15 %):
+
+        útil_min = (Σ mínimos salón+dormitorios + target cocina+baños) / (1 − %circ)
+
+    A este útil el reparto da al salón EXACTAMENTE su mínimo A1.5; por encima, el
+    salón crece. (El cálculo anterior sumaba sólo los mínimos sin reservar la
+    circulación ni el target de cocina/baños, por lo que el salón quedaba por
+    debajo de su mínimo.) Acotado al útil máximo VPO por nº de dormitorios.
     """
     if combo.es_estudio:
         return util_minimo_vivienda(0, salon_cocina_open)
-    n_dorms = combo.n_dorms
-    dorm_min_total = sum(m for _, m in _dorms_de_combo_vivienda(combo))
-    salon_min = float(
-        SALON_MAS_COCINA_MIN.get(n_dorms, 24) if salon_cocina_open
-        else SALON_MIN.get(n_dorms, 20)
-    )
-    cocina_min = 0.0 if salon_cocina_open else float(MIN_COCINA)
-    total = salon_min + cocina_min + dorm_min_total + _banos_min_m2_vivienda(banos_vivienda(n_dorms))
-    return round(total, 2)
+    escalante_min, fijas_target = _presupuesto_base_vivienda_combo(combo, salon_cocina_open)
+    pct = PCT_CIRCULACION_INTERIOR_VIVIENDA / 100.0
+    minimo = (escalante_min + fijas_target) / max(1e-6, 1.0 - pct)
+    return round(min(minimo, util_maximo(combo.n_dorms)), 2)
 
 
 def util_objetivo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool = False) -> float:
-    """Objetivo de m² útil de la combinación: mínimos + 15 % (circulación)."""
+    """Objetivo de m² útil de la combinación = útil viable mínimo del Anexo I.5.
+
+    Apunta al menor útil que cumple los mínimos (salón incluido), para que el
+    reparto coloque el máximo nº de viviendas conformes; el salón sale a su mínimo
+    A1.5 y crece con cualquier holgura adicional de la planta.
+    """
     if combo.es_estudio:
         return util_minimo_vivienda(0, salon_cocina_open)
-    return round(util_minimo_vivienda_combo(combo, salon_cocina_open) * 1.15, 2)
+    return util_minimo_vivienda_combo(combo, salon_cocina_open)
 
 
 def descriptor_tipologia_vivienda_combo(
