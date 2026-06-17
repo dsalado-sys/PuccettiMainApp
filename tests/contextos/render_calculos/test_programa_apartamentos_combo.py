@@ -42,11 +42,12 @@ def test_util_minimo_combo_suma_piezas_del_anexo():
 
 
 def test_util_minimo_combo_aplica_adicional_salon_desde_quinta_plaza():
-    # 2 triples = 6 plazas → 2 plazas por encima de 4 → 2 × adicional.
+    # 2 triples = 6 plazas → 2 plazas por encima de 4 → 2 × adicional de salón.
+    # Además, 6 plazas ≥ 5 → 2 baños obligatorios en el mínimo viable.
     combo = ComboDormitorios({"triple": 2})
     cat = "4L"
     salon = MIN_SALON_COMEDOR[cat] + SUP_ADICIONAL_PLAZA[cat] * 2
-    esperado = salon + 2 * MIN_DORMITORIO["triple"][cat] + MIN_COCINA[cat] + MIN_BANO[cat]
+    esperado = salon + 2 * MIN_DORMITORIO["triple"][cat] + MIN_COCINA[cat] + 2 * MIN_BANO[cat]
     assert util_minimo_combo(combo, cat) == round(esperado, 2)
 
 
@@ -110,18 +111,19 @@ def test_programa_combo_escala_salon_y_dormitorios_no_cocina_ni_bano():
     assert por_nombre["dormitorio_1"].area_target_m2 > por_nombre["dormitorio_1"].area_min_m2
 
 
-def test_segundo_bano_en_conjuntos_si_mas_de_5_plazas():
-    # 2 triples = 6 plazas > 5 → 2º baño obligatorio en conjuntos (A1.4).
-    combo = ComboDormitorios({"triple": 2})
-    estancias = programa_apartamentos_combo(combo, "2L", 0.0, grupo="conjuntos")
-    nombres = [e.nombre for e in estancias]
-    assert nombres.count("bano") == 1
-    assert "aseo" in nombres
+def test_dos_banos_obligatorios_desde_cinco_plazas():
+    # Suelo por ocupación: toda unidad de 5 plazas o más → 2 baños COMPLETOS, en
+    # cualquier grupo y aunque solo tenga 2 dormitorios (ajustando al útil mínimo).
+    # Se nombran bano_1/bano_2 (no "baño + aseo") para el detalle por unidad.
+    # 1 triple + 1 doble = 5 plazas (N=2).
+    combo = ComboDormitorios({"triple": 1, "doble": 1})
+    for grupo in ("edificios", "conjuntos"):
+        assert _banos(programa_apartamentos_combo(combo, "4L", 0.0, grupo=grupo)) == ["bano_1", "bano_2"]
 
 
-def test_sin_segundo_bano_en_edificios_aunque_supere_5_plazas():
-    # En "edificios" (A1.3) no hay 2º baño por nº de usuarios.
-    combo = ComboDormitorios({"triple": 2})
+def test_un_solo_bano_con_menos_de_cinco_plazas():
+    # 2 dobles = 4 plazas (N=2) < 5 → 1 baño en la opción reducida.
+    combo = ComboDormitorios({"doble": 2})
     estancias = programa_apartamentos_combo(combo, "4L", 0.0, grupo="edificios")
     assert "aseo" not in [e.nombre for e in estancias]
 
@@ -135,9 +137,10 @@ def test_banos_segun_dormitorios_y_holgura():
     # 2 obligatorios / 3 si caben. "Caben" = los m² útiles dan para el extra.
     cat = "2L"
     for comp, n_min, n_max in [
-        ({"doble": 1}, ["bano"], ["bano"]),                       # 1 dorm
-        ({"doble": 2}, ["bano"], ["bano", "aseo"]),               # 2 dorm
-        ({"doble": 3}, ["bano", "aseo"], ["bano", "aseo", "aseo_2"]),  # 3 dorm
+        ({"doble": 1}, ["bano"], ["bano"]),                       # 1 dorm · 2 plazas
+        ({"doble": 2}, ["bano"], ["bano", "aseo"]),               # 2 dorm · 4 plazas
+        # 3 dobles = 6 plazas ≥ 5 → 2 baños completos (bano_1/bano_2) + aseo extra.
+        ({"doble": 3}, ["bano_1", "bano_2"], ["bano_1", "bano_2", "aseo"]),
     ]:
         combo = ComboDormitorios(comp)
         minimo = util_minimo_combo(combo, cat)
@@ -148,10 +151,11 @@ def test_banos_segun_dormitorios_y_holgura():
 
 
 def test_tres_dormitorios_garantiza_dos_banos_aunque_no_haya_holgura():
-    # 3 dormitorios: 2 baños SÍ O SÍ, incluso ajustando al útil mínimo.
+    # 3 dormitorios: 2 baños SÍ O SÍ, incluso ajustando al útil mínimo. Aquí
+    # 2 dobles + 1 individual = 5 plazas ≥ 5 → 2 baños completos (bano_1/bano_2).
     combo = ComboDormitorios({"doble": 2, "individual": 1})
     estancias = programa_apartamentos_combo(combo, "2L", 0.0)
-    assert _banos(estancias) == ["bano", "aseo"]
+    assert _banos(estancias) == ["bano_1", "bano_2"]
 
 
 def test_estudio_combo_genera_mismas_estancias_que_estudio_monodormitorio():

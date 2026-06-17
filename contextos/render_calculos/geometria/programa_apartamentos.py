@@ -17,7 +17,7 @@ del salón-comedor crece con la *superficie adicional por plaza* a partir de la 
 from __future__ import annotations
 
 from .combinador_tipologias import ComboDormitorios
-from .programa import NOMBRES_BANOS, Estancia, banos_objetivo
+from .programa import Estancia, banos_min_max, nombres_banos
 from .programa_uso import ProgramaUso, TipologiaUnidadDescriptor
 
 
@@ -157,17 +157,15 @@ def _plazas_combo(combo: ComboDormitorios) -> int:
     return combo.plazas(PLAZAS)
 
 
-def _banos_obligatorios_combo(n_dorms: int, grupo: str, plazas: int) -> int:
-    """Baños obligatorios: por nº de dormitorios (§2.5) y, en conjuntos, el 2º
-    baño del Anexo I.4 si la unidad supera 5 usuarios."""
-    n_min, _ = banos_objetivo(n_dorms)
-    if grupo == "conjuntos" and plazas > 5:
-        n_min = max(n_min, 2)
-    return n_min
+def _banos_obligatorios_combo(n_dorms: int, plazas: int) -> int:
+    """Baños obligatorios: por nº de dormitorios (§2.5) y suelo por ocupación
+    (toda unidad de 5 plazas o más exige 2 baños). Subsume el 2º baño del Anexo
+    I.4 para conjuntos de >5 usuarios."""
+    return banos_min_max(n_dorms, plazas)[0]
 
 
 def _n_banos_combo(
-    n_dorms: int, grupo: str, plazas: int,
+    n_dorms: int, plazas: int,
     fijo_no_bano_min: float, bano_min: float, util_disponible: float,
 ) -> int:
     """Nº real de baños: obligatorios + 1 más si cabe en el útil computable.
@@ -175,10 +173,7 @@ def _n_banos_combo(
     `fijo_no_bano_min` = mínimos de salón-comedor + dormitorios + cocina. Se añade
     el baño opcional solo si los mínimos (con ese baño) caben en `util_disponible`.
     """
-    n_min, n_max = banos_objetivo(n_dorms)
-    if grupo == "conjuntos" and plazas > 5:   # A1.4: 2º baño obligatorio si >5 usuarios
-        n_min = max(n_min, 2)
-        n_max = max(n_max, 2)
+    n_min, n_max = banos_min_max(n_dorms, plazas)
     n = n_min
     while n < n_max and fijo_no_bano_min + (n + 1) * bano_min <= util_disponible + 1e-6:
         n += 1
@@ -197,7 +192,7 @@ def util_minimo_combo(
     dorm_min_total = sum(
         MIN_DORMITORIO[tam][cat] * n for tam, n in combo.composicion.items()
     )
-    n_banos = _banos_obligatorios_combo(combo.n_dorms, grupo, plazas)
+    n_banos = _banos_obligatorios_combo(combo.n_dorms, plazas)
     total = salon_min + dorm_min_total + MIN_COCINA[cat] + n_banos * MIN_BANO[cat]
     return round(total, 2)
 
@@ -264,7 +259,7 @@ def programa_apartamentos_combo(
 
     # Nº de baños: obligatorios por nº de dormitorios + 1 más si cabe (§2.5).
     n_banos = _n_banos_combo(
-        combo.n_dorms, grupo, plazas, salon_min + dorm_min_total + cocina_min,
+        combo.n_dorms, plazas, salon_min + dorm_min_total + cocina_min,
         bano_min, util_disponible,
     )
 
@@ -284,7 +279,7 @@ def programa_apartamentos_combo(
             Estancia(f"dormitorio_{i}", "privada", dmin, round(max(dmin, dmin * factor), 2))
         )
     estancias.append(Estancia("cocina", "publica", cocina_min, round(cocina_min, 2)))
-    for nombre in NOMBRES_BANOS[:n_banos]:
+    for nombre in nombres_banos(combo.n_dorms, plazas, n_banos):
         estancias.append(Estancia(nombre, "servicio", bano_min, round(bano_min, 2)))
     return estancias
 

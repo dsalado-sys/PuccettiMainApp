@@ -353,7 +353,7 @@
           const compCelda = computa
             ? `${fmt.m2.format(util)} m²`
             : '<span class="rc-mu-nocomp">no computa</span>';
-          tr.innerHTML = `<td class="rc-mu-est-nombre">${warn}${e.nombre}</td>
+          tr.innerHTML = `<td class="rc-mu-est-nombre">${warn}${e.etiqueta || e.nombre}</td>
             <td class="rc-mu-est-cat">${e.categoria || ""}</td>
             <td class="rc-num rc-mu-col-comp">${compCelda}</td>`;
           tbody.appendChild(tr);

@@ -209,9 +209,10 @@ def test_vivienda_banos_segun_dormitorios_y_holgura():
         return [e.nombre for e in est if e.nombre.startswith(("bano", "aseo"))]
 
     for comp, reducido, amplio in [
-        ({"doble": 1}, ["bano"], ["bano"]),
-        ({"doble": 2}, ["bano"], ["bano", "aseo"]),
-        ({"doble": 3}, ["bano", "aseo"], ["bano", "aseo", "aseo_2"]),
+        ({"doble": 1}, ["bano"], ["bano"]),                       # 2 plazas
+        ({"doble": 2}, ["bano"], ["bano", "aseo"]),               # 4 plazas
+        # 3 dobles = 6 plazas ≥ 5 → 2 baños completos (bano_1/bano_2) + aseo extra.
+        ({"doble": 3}, ["bano_1", "bano_2"], ["bano_1", "bano_2", "aseo"]),
     ]:
         combo = ComboDormitorios(comp)
         minimo = util_minimo_vivienda_combo(combo)

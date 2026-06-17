@@ -318,6 +318,42 @@ def _nivel_diametro(nombre: str, area_target_m2: float) -> tuple[str, float]:
     return "ok", diam
 
 
+# Etiquetas legibles para el detalle por unidad (la clave es el nombre máquina
+# que emiten los programas del Anexo I). Los dormitorios se numeran aparte.
+_ETIQUETAS_ESTANCIA: dict[str, str] = {
+    "salon": "Salón",
+    "salon_cocina": "Salón-cocina",
+    "salon_comedor": "Salón-comedor",
+    "cocina": "Cocina",
+    "espacio_principal": "Espacio principal",
+    "habitacion": "Habitación",
+    "estudio": "Estudio",
+    "dormitorio": "Dormitorio",
+    "bano": "Baño",
+    "bano_1": "Baño 1",
+    "bano_2": "Baño 2",
+    "aseo": "Aseo",
+    "aseo_2": "Aseo 2",
+    "vestibulo": "Vestíbulo",
+    "circulacion_interior": "Circulación interior",
+}
+
+
+def _etiqueta_estancia(nombre: str) -> str:
+    """Etiqueta legible de una estancia para el detalle por unidad.
+
+    Con ≥5 plazas los dos baños obligatorios llegan como `bano_1`/`bano_2` y se
+    muestran "Baño 1"/"Baño 2". Los dormitorios se numeran (`dormitorio_2` →
+    "Dormitorio 2"); el resto sale del diccionario o, por defecto, capitaliza
+    sustituyendo guiones bajos por espacios.
+    """
+    if nombre in _ETIQUETAS_ESTANCIA:
+        return _ETIQUETAS_ESTANCIA[nombre]
+    if nombre.startswith("dormitorio_"):
+        return "Dormitorio " + nombre.split("_", 1)[1]
+    return nombre.replace("_", " ").capitalize()
+
+
 def _slug_principal(params, tipo_unidad: str) -> str:
     """Slug de la tipología principal del proyecto, según el uso."""
     prog = params.programa
@@ -401,6 +437,7 @@ def _estancias_por_unidad_dorms(
         nivel, diam = _nivel_diametro(e.nombre, e.area_target_m2)
         salida.append({
             "nombre": e.nombre,
+            "etiqueta": _etiqueta_estancia(e.nombre),
             "categoria": e.categoria,
             "area_target_m2": round(e.area_target_m2, 2),
             "area_min_m2": round(e.area_min_m2, 2),
@@ -422,6 +459,7 @@ def _estancias_por_unidad_dorms(
             nivel, diam = _nivel_diametro("circulacion_interior", circ)
             salida.append({
                 "nombre": "circulacion_interior",
+                "etiqueta": _etiqueta_estancia("circulacion_interior"),
                 "categoria": "circulacion",
                 "area_target_m2": circ,
                 "area_min_m2": 0.0,

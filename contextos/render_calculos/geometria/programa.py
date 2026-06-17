@@ -51,6 +51,41 @@ def banos_objetivo(n_dorms: int) -> tuple[int, int]:
     return (2, 3)
 
 
+# Ocupación a partir de la cual una unidad necesita 2 baños obligatoriamente,
+# con independencia del nº de dormitorios o del uso.
+PLAZAS_DOS_BANOS = 5
+
+
+def banos_min_max(n_dorms: int, plazas: int) -> tuple[int, int]:
+    """(obligatorios, deseables) baños combinando dormitorios y ocupación.
+
+    Sobre la política por nº de dormitorios (`banos_objetivo`) se aplica el suelo
+    por plazas: toda unidad de `PLAZAS_DOS_BANOS` (5) plazas o más exige 2 baños.
+    """
+    n_min, n_max = banos_objetivo(n_dorms)
+    if plazas >= PLAZAS_DOS_BANOS:
+        n_min = max(n_min, 2)
+        n_max = max(n_max, n_min)
+    return n_min, n_max
+
+
+def nombres_banos(n_dorms: int, plazas: int, n_banos: int) -> list[str]:
+    """Nombres de los `n_banos` baños de la unidad, en orden de incorporación.
+
+    Toda unidad de `PLAZAS_DOS_BANOS` (5) plazas o más exige 2 baños COMPLETOS
+    (no "baño + aseo"): se nombran `bano_1` y `bano_2` para que el detalle por
+    unidad los muestre como "Baño 1" y "Baño 2" (un eventual 3er servicio es un
+    aseo). Por debajo de ese suelo se mantiene el criterio general (`NOMBRES_BANOS`):
+    1er baño completo (`bano`) y los secundarios como aseos (el del dormitorio
+    principal).
+    """
+    if n_banos <= 0:
+        return []
+    if plazas >= PLAZAS_DOS_BANOS:
+        return (["bano_1", "bano_2", "aseo", "aseo_2"])[:n_banos]
+    return list(NOMBRES_BANOS[:n_banos])
+
+
 @dataclass(frozen=True)
 class Estancia:
     nombre: str
@@ -373,15 +408,18 @@ def _dorms_de_combo_vivienda(combo: ComboDormitorios) -> list[tuple[str, float]]
     return dorms
 
 
-def _banos_min_m2_vivienda(n_banos: int) -> float:
-    """m² mínimos de `n_banos` baños: el 1º completo (MIN_BANO), el resto aseos."""
+def _banos_min_m2_vivienda(n_banos: int, plazas: int) -> float:
+    """m² mínimos de `n_banos` baños. Con ≥5 plazas los 2 primeros son baños
+    completos (MIN_BANO); en el caso general solo el 1º. El resto son aseos
+    (MIN_ASEO). Coherente con los nombres de `nombres_banos`."""
     if n_banos <= 0:
         return 0.0
-    return float(MIN_BANO) + float(MIN_ASEO) * (n_banos - 1)
+    completos = min(n_banos, 2 if plazas >= PLAZAS_DOS_BANOS else 1)
+    return float(MIN_BANO) * completos + float(MIN_ASEO) * (n_banos - completos)
 
 
 def _n_banos_vivienda(
-    n_dorms: int, fijo_no_bano_min: float, room_budget: float,
+    n_dorms: int, plazas: int, fijo_no_bano_min: float, room_budget: float,
 ) -> int:
     """Nº de baños de la vivienda: obligatorios + 1 más si cabe en los m² útiles.
 
@@ -389,9 +427,9 @@ def _n_banos_vivienda(
     útil disponible menos la circulación interior. Se añade el baño opcional solo
     si el conjunto de mínimos (con ese baño) sigue cabiendo en el presupuesto.
     """
-    n_min, n_max = banos_objetivo(n_dorms)
+    n_min, n_max = banos_min_max(n_dorms, plazas)
     n = n_min
-    while n < n_max and fijo_no_bano_min + _banos_min_m2_vivienda(n + 1) <= room_budget + 1e-6:
+    while n < n_max and fijo_no_bano_min + _banos_min_m2_vivienda(n + 1, plazas) <= room_budget + 1e-6:
         n += 1
     return n
 
@@ -425,11 +463,12 @@ def programa_vivienda_combo(
     )
     # Cocina independiente cuenta para el presupuesto; integrada va dentro del salón.
     cocina_min_fit = 0.0 if salon_cocina_open else float(MIN_COCINA)
-    # Nº de baños: obligatorios por nº de dormitorios + 1 más si cabe (§2.5).
+    # Nº de baños: obligatorios por nº de dormitorios / plazas + 1 más si cabe (§2.5).
+    plazas = combo.plazas(PLAZAS_DORMITORIO_VIVIENDA)
     n_banos = _n_banos_vivienda(
-        n_dorms, salon_min + cocina_min_fit + dorm_min_total, room_budget,
+        n_dorms, plazas, salon_min + cocina_min_fit + dorm_min_total, room_budget,
     )
-    nombres_banos = list(NOMBRES_BANOS[:n_banos])
+    banos_unidad = nombres_banos(n_dorms, plazas, n_banos)
 
     # Escalantes (salón + dormitorios) vs fijas (cocina + baños).
     escalantes: list[tuple[str, float]] = []
@@ -441,12 +480,13 @@ def programa_vivienda_combo(
         fijas.append(("cocina", float(MIN_COCINA), float(MIN_COCINA + 1.0)))
     for i, (_tam, dmin) in enumerate(dorms, start=1):
         escalantes.append((f"dormitorio_{i}", dmin))
-    # 1er baño completo (MIN_BANO + 2); baños adicionales como aseos (MIN_ASEO + 1).
-    for k, nombre in enumerate(nombres_banos):
-        if k == 0:
-            fijas.append((nombre, float(MIN_BANO), float(MIN_BANO + 2.0)))
-        else:
+    # Baños completos (MIN_BANO + 2) vs aseos secundarios (MIN_ASEO + 1), según el
+    # nombre: con ≥5 plazas hay 2 baños completos (`bano_1`/`bano_2`), ver nombres_banos.
+    for nombre in banos_unidad:
+        if nombre.startswith("aseo"):
             fijas.append((nombre, float(MIN_ASEO), float(MIN_ASEO + 1.0)))
+        else:
+            fijas.append((nombre, float(MIN_BANO), float(MIN_BANO + 2.0)))
 
     suma_fijas = sum(t for _, _, t in fijas)
     suma_min_esc = sum(m for _, m in escalantes)
@@ -466,7 +506,7 @@ def programa_vivienda_combo(
     # Orden de salida: salón → cocina → dormitorios → baños → circulación.
     orden: list[str] = ["salon_cocina"] if salon_cocina_open else ["salon", "cocina"]
     orden += [f"dormitorio_{i}" for i in range(1, n_dorms + 1)]
-    orden += nombres_banos
+    orden += banos_unidad
 
     estancias = [
         Estancia(n, _CATEGORIA_ESTANCIA.get(n, "publica"), mins.get(n, 0.0), round(targets.get(n, 0.0), 2))
@@ -492,8 +532,9 @@ def util_minimo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool 
         else SALON_MIN.get(n_dorms, 20)
     )
     cocina_min = 0.0 if salon_cocina_open else float(MIN_COCINA)
-    n_banos_min, _ = banos_objetivo(n_dorms)
-    total = salon_min + cocina_min + dorm_min_total + _banos_min_m2_vivienda(n_banos_min)
+    plazas = combo.plazas(PLAZAS_DORMITORIO_VIVIENDA)
+    n_banos_min, _ = banos_min_max(n_dorms, plazas)
+    total = salon_min + cocina_min + dorm_min_total + _banos_min_m2_vivienda(n_banos_min, plazas)
     return round(total, 2)
 
 
