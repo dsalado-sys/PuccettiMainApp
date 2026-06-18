@@ -6,7 +6,11 @@
 
 <section class="hero rc-hero">
   <div class="rc-hero-titulo">
-    <h1>{{ tarjeta.titulo }}</h1>
+    <h1>{% if modo %}{{ modo.titulo }}{% else %}{{ tarjeta.titulo }}{% endif %}</h1>
+    <p style="margin:.15rem 0 0;font-size:.85rem;opacity:.8;">
+      {{ tarjeta.titulo }} · <a href="/modulos/render-calculos">cambiar modo</a>
+    </p>
+    {% if modo and modo.nota %}<p style="margin:.3rem 0 0;font-size:.8rem;opacity:.7;">{{ modo.nota }}</p>{% endif %}
   </div>
   <div class="rc-hero-acciones">
     <button type="button" id="rc-btn-normativa" class="boton-secundario" title="Normativa municipal del PGOU">
@@ -38,6 +42,7 @@
       class="rc-layout"
       data-puede-editar="{{ 'true' if puede_editar else 'false' }}"
       data-estado="{{ estado }}"
+      data-modo="{{ modo.slug if modo else '' }}"
       autocomplete="off">
 
   {% include "_rc_panel_params.html" %}

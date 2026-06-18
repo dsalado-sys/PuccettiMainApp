@@ -205,7 +205,9 @@ def calcular_capacidad(
     - descriptores con 1 entrada → tantas unidades como quepan al `util_objetivo`.
     - sin descriptores → vía int-based histórica (preview de vivienda).
     """
-    parcela_area = envolvente.parcela.area
+    # Superficie de suelo para los límites legales (edificabilidad / ocupación):
+    # la catastral real si la envolvente la conoce; si no, el área geométrica.
+    parcela_area = getattr(envolvente, "superficie_referencia_m2", 0.0) or envolvente.parcela.area
     urb = params.urbanismo
 
     # Diseño por categoría de planta. Si no llega `disenos`, se deriva de `params`

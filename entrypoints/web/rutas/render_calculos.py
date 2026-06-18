@@ -45,6 +45,7 @@ from app.plataforma.persistencia.normativa_municipal_sqlalchemy import (
 )
 
 from ..catalogo_modulos import CATALOGO, TarjetaModulo
+from ..render_modos import MODOS, modo_o_none
 from ..dependencias import (
     catalogo_apartamentos_adapter,
     catalogo_hotel_apartamento_adapter,
@@ -112,18 +113,66 @@ def _estado_pantalla(proyecto: Proyecto | None) -> str:
     return "ok"
 
 
+def _preview_parcela(proyecto: Proyecto | None) -> dict[str, Any] | None:
+    """Resumen de los datos de la parcela del proyecto para la pantalla de
+    selección. Devuelve None si el proyecto aún no tiene parcela localizada.
+
+    La superficie es la **catastral real** guardada por §2.1 (`superficie_m2`),
+    la misma que alimenta ahora el cálculo de edificabilidad."""
+    if proyecto is None:
+        return None
+    loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    if not loc:
+        return None
+    return {
+        "referencia_catastral": loc.get("referencia_catastral"),
+        "direccion": loc.get("direccion"),
+        "municipio": loc.get("municipio"),
+        "provincia": loc.get("provincia"),
+        "superficie_m2": loc.get("superficie_m2"),
+        "uso_catastral": loc.get("uso_catastral"),
+        "anio_construccion": loc.get("anio_construccion"),
+        "superficie_construida_total_m2": loc.get("superficie_construida_total_m2"),
+        "plantas_sobre_rasante": loc.get("plantas_sobre_rasante"),
+        "plantas_bajo_rasante": loc.get("plantas_bajo_rasante"),
+    }
+
+
 # ─── Pantalla principal ─────────────────────────────────────────────────────
 @router.get("", response_class=HTMLResponse)
 def pantalla(
     request: Request,
+    modo: Annotated[str, Query()] = "",
     rol: Rol = Depends(rol_activo),
     proyecto: Proyecto | None = Depends(proyecto_activo),
     repo_norm: NormativaMunicipalRepositorio = Depends(_normativa_repo),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
     tarjeta = _tarjeta()
-    params = parametros_desde_proyecto(proyecto)
     estado = _estado_pantalla(proyecto)
+
+    # Sin modo válido en la URL → pantalla de selección (preview de la parcela +
+    # botones Obra nueva / Rehabilitación). El modo elegido reabre esta misma
+    # ruta con ?modo=… y entonces se dibuja el módulo.
+    modo_cfg = modo_o_none(modo)
+    if modo_cfg is None:
+        return plantillas.TemplateResponse(
+            request,
+            "render_calculos_landing.html",
+            {
+                "tarjeta": tarjeta,
+                "rol_activo": rol,
+                "proyecto_activo": proyecto,
+                "estado": estado,
+                "modos": list(MODOS.values()),
+                "preview": _preview_parcela(proyecto),
+                "puede_editar": puede_acceder(
+                    rol, ModuloPuccetti.RENDER_CALCULOS.value, PermisoModulo.EDITAR
+                ),
+            },
+        )
+
+    params = parametros_desde_proyecto(proyecto)
 
     municipios = repo_norm.listar()
     # Si la parcela tiene municipio conocido, intentamos cargar su PGOU como
@@ -141,11 +190,22 @@ def pantalla(
                 if not datos_render.get("parametros"):
                     params.urbanisticos = normativa
 
+    usos_catalogo = [
+        {"value": "vivienda", "label": "Vivienda", "habilitado": True},
+        {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": True},
+        {"value": "hotel_apartamento", "label": "Hotel-apartamento", "habilitado": True},
+        {"value": "hotelero", "label": "Hotelero", "habilitado": True},
+    ]
+    # Hook de configuración por modo: si el modo restringe usos, se filtran.
+    if modo_cfg.usos_permitidos:
+        usos_catalogo = [u for u in usos_catalogo if u["value"] in modo_cfg.usos_permitidos]
+
     return plantillas.TemplateResponse(
         request,
         "render_calculos.html",
         {
             "tarjeta": tarjeta,
+            "modo": modo_cfg,
             "rol_activo": rol,
             "proyecto_activo": proyecto,
             "puede_editar": puede_acceder(
@@ -155,12 +215,7 @@ def pantalla(
             "parametros": parametros_a_dict(params),
             "municipios_disponibles": municipios,
             "pgou_municipio_activo": pgou_municipio,
-            "usos_edificio": [
-                {"value": "vivienda", "label": "Vivienda", "habilitado": True},
-                {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": True},
-                {"value": "hotel_apartamento", "label": "Hotel-apartamento", "habilitado": True},
-                {"value": "hotelero", "label": "Hotelero", "habilitado": True},
-            ],
+            "usos_edificio": usos_catalogo,
         },
     )
 

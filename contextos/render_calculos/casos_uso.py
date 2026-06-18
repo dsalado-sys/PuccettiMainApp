@@ -98,6 +98,19 @@ class ParcelaMetrica:
     provincia: str | None
     centroide_lonlat: tuple[float, float] | None
     referencia_catastral: str | None
+    # Superficie catastral REAL de la parcela (m² de suelo), tal y como la guardó
+    # §2.1. Es la fuente de verdad para edificabilidad/ocupación; el área del
+    # polígono reproyectado solo se usa si esta falta.
+    superficie_catastral_m2: float | None = None
+
+
+def superficie_referencia_parcela(parcela: ParcelaMetrica) -> float:
+    """Superficie de suelo de referencia: catastral real si se conoce, si no la
+    geométrica del polígono reproyectado."""
+    s = parcela.superficie_catastral_m2
+    if s and s > 0:
+        return float(s)
+    return parcela.poligono_utm.area
 
 
 def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
@@ -159,6 +172,11 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
     if centroide_raw and len(centroide_raw) >= 2:
         centroide = (float(centroide_raw[0]), float(centroide_raw[1]))
 
+    try:
+        superficie_cat = float(datos.get("superficie_m2") or 0.0)
+    except (TypeError, ValueError):
+        superficie_cat = 0.0
+
     return ParcelaMetrica(
         poligono_utm=poly,
         lados=lados,
@@ -166,6 +184,7 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
         provincia=datos.get("provincia"),
         centroide_lonlat=centroide,
         referencia_catastral=datos.get("referencia_catastral"),
+        superficie_catastral_m2=superficie_cat if superficie_cat > 0 else None,
     )
 
 
@@ -181,8 +200,12 @@ class CalcularEnvolvente:
     ) -> dict[str, Any]:
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
+        sup_ref = superficie_referencia_parcela(parcela)
         try:
-            envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
+            envolvente = construir_envolvente(
+                parcela.poligono_utm, params_motor, parcela.lados,
+                superficie_referencia=sup_ref,
+            )
         except ValueError as exc:
             return {
                 "error": str(exc),
@@ -229,7 +252,9 @@ class CalcularEnvolvente:
             },
             "parcela": {
                 "poligono": ring(parcela.poligono_utm),
-                "area_m2": round(parcela.poligono_utm.area, 2),
+                "area_m2": round(sup_ref, 2),
+                "area_geometrica_m2": round(parcela.poligono_utm.area, 2),
+                "superficie_catastral_m2": parcela.superficie_catastral_m2,
                 "municipio": parcela.municipio,
                 "provincia": parcela.provincia,
                 "bbox": [round(v, 2) for v in parcela.poligono_utm.bounds],
@@ -327,8 +352,12 @@ class CalcularLayout:
 
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
+        sup_ref = superficie_referencia_parcela(parcela)
         try:
-            envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
+            envolvente = construir_envolvente(
+                parcela.poligono_utm, params_motor, parcela.lados,
+                superficie_referencia=sup_ref,
+            )
         except ValueError as exc:
             return {
                 "error": str(exc),
@@ -400,7 +429,9 @@ class CalcularLayout:
             },
             "parcela": {
                 "poligono": ring(parcela.poligono_utm),
-                "area_m2": round(parcela.poligono_utm.area, 2),
+                "area_m2": round(sup_ref, 2),
+                "area_geometrica_m2": round(parcela.poligono_utm.area, 2),
+                "superficie_catastral_m2": parcela.superficie_catastral_m2,
                 "municipio": parcela.municipio,
                 "provincia": parcela.provincia,
                 "bbox": [round(v, 2) for v in parcela.poligono_utm.bounds],
