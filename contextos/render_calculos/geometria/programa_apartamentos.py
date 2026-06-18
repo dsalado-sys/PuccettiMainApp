@@ -220,14 +220,31 @@ def programa_apartamentos(
     return estancias
 
 
+# % de circulación interior de la unidad (pasillos + vestíbulo). Editable desde
+# el panel de diseño y COMPARTIDO con los demás usos; antes era un 1.15 fijo.
+# `casos_uso` lo sincroniza con `set_pct_circulacion_interior` en cada cálculo.
+PCT_CIRCULACION_INTERIOR = 15.0
+
+
+def set_pct_circulacion_interior(pct: float) -> None:
+    """Fija el % de circulación interior (panel de diseño → motor)."""
+    global PCT_CIRCULACION_INTERIOR
+    PCT_CIRCULACION_INTERIOR = max(0.0, float(pct))
+
+
+def _factor_circulacion() -> float:
+    """Factor multiplicativo `1 + %circ/100` sobre los mínimos del Anexo."""
+    return 1.0 + PCT_CIRCULACION_INTERIOR / 100.0
+
+
 def _base_util(categoria: str, tipologia: str, grupo: str) -> float:
     """Suma de mínimos de las estancias = útil mínimo neto de la unidad."""
     return sum(e.area_min_m2 for e in programa_apartamentos(tipologia, categoria, 0.0, grupo))
 
 
 def util_objetivo_apartamento(categoria: str, tipologia: str, grupo: str = "edificios") -> float:
-    """Objetivo de m² útil por unidad: mínimos + 15% (circulación interna)."""
-    return round(_base_util(categoria, tipologia, grupo) * 1.15, 2)
+    """Objetivo de m² útil por unidad: mínimos + % circulación interior."""
+    return round(_base_util(categoria, tipologia, grupo) * _factor_circulacion(), 2)
 
 
 def util_minimo_apartamento(categoria: str, tipologia: str, grupo: str = "edificios") -> float:
@@ -272,8 +289,8 @@ def util_minimo_combo(
 def util_objetivo_combo(
     combo: ComboDormitorios, categoria: str, grupo: str = "edificios",
 ) -> float:
-    """Objetivo de m² útil de la combinación: mínimos + 15% (circulación interna)."""
-    return round(util_minimo_combo(combo, categoria, grupo) * 1.15, 2)
+    """Objetivo de m² útil de la combinación: mínimos + % circulación interior."""
+    return round(util_minimo_combo(combo, categoria, grupo) * _factor_circulacion(), 2)
 
 
 def descriptor_tipologia_combo(
@@ -286,11 +303,12 @@ def descriptor_tipologia_combo(
     """
     cat = _cat_validada(categoria, grupo)
     util_obj = util_objetivo_combo(combo, cat, grupo)
-    util_min = util_minimo_combo(combo, cat, grupo)
     return TipologiaUnidadDescriptor(
         slug=combo.slug,
         util_objetivo=util_obj,
-        util_minimo=util_min,
+        # El mínimo viable reserva ya la circulación interior (Σmín + %circ), para
+        # que ninguna unidad de relleno quede sin hueco de acceso (R4).
+        util_minimo=util_obj,
         util_maximo=round(util_obj * 1.25, 2),
         n_dorms_label=combo.n_dorms,
         tipo_unidad="apartamento",
@@ -399,11 +417,11 @@ def descriptor_tipologia_apartamento(
     """Descriptor para el reparto multi-tipología (mezcla por planta)."""
     tip = _tip_validada(tipologia)
     util_obj = util_objetivo_apartamento(categoria, tip, grupo)
-    util_min = util_minimo_apartamento(categoria, tip, grupo)
     return TipologiaUnidadDescriptor(
         slug=tip,
         util_objetivo=util_obj,
-        util_minimo=util_min,
+        # Mínimo viable con circulación interior reservada (R4).
+        util_minimo=util_obj,
         util_maximo=round(util_obj * 1.25, 2),
         n_dorms_label=PLAZAS.get(tip, 2),
         tipo_unidad="apartamento",

@@ -345,7 +345,10 @@ def listar_superficies_vivienda(
 ):
     """Mínimos de superficie por estancia y tipología de vivienda (incl. estudio)."""
     _exige_permiso(rol, PermisoModulo.VER)
-    return JSONResponse({"filas": catalogo_viv.filas_vivienda()})
+    return JSONResponse({
+        "filas": catalogo_viv.filas_vivienda(),
+        "util_maximo": {str(n): v for n, v in catalogo_viv.util_maximo_por_tipologia().items()},
+    })
 
 
 @router.post("/superficies-vivienda")

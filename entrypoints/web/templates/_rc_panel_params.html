@@ -359,6 +359,10 @@
       {{ dnum("% circulación (ático)", "pct_circulacion_tipo", "diseno_atico", d_a.pct_circulacion_tipo, "0", "40", "1", "atico") }}
       {{ dnum("% circulación (sótano)", "pct_circulacion_tipo", "diseno_sotano", d_s.pct_circulacion_tipo, "0", "40", "1", "sotano") }}
 
+      {# % circulación INTERIOR de la unidad — único, compartido por todos los usos
+         (vivienda/AT/hotel/hotel-apt). Solo se edita en PB; reemplaza el 15% fijo. #}
+      {{ dnum("% circulación interior unidad", "pct_circulacion_interior", "diseno", d.pct_circulacion_interior, "0", "40", "1", "pb") }}
+
       {# % núcleo — PB / tipo (ático y sótano lo heredan) #}
       {{ dnum("% núcleo (PB)", "pct_nucleo", "diseno", d.pct_nucleo, "0", "30", "1", "pb") }}
       {{ dnum("% núcleo (tipo)", "pct_nucleo", "diseno_tipo", d_t.pct_nucleo, "0", "30", "1", "tipo") }}

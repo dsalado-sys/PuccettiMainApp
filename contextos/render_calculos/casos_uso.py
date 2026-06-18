@@ -309,6 +309,22 @@ class CalcularLayout:
         # del motor, para que las ediciones del editor de superficies mínimas se
         # respeten en cada cálculo (Anexo I.1–I.5).
         self._sincronizar_minimos(params)
+
+        # R3: error bloqueante si la suma de mínimos de una tipología de vivienda
+        # supera su útil máximo editable (antes se infradimensionaba en silencio).
+        err_util_max = self._validar_util_maximo_vivienda(params, combo_override=combo_override)
+        if err_util_max:
+            return {
+                "error": err_util_max,
+                "edificio": None,
+                "capacidad": None,
+                "alertas": [_alerta_dict(Alerta("incumplimiento", "Normativa", err_util_max))],
+                "tabla_planta": [],
+                "tabla_unidad": [],
+                "indicadores": None,
+                "envolvente": None,
+            }
+
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
         try:
@@ -402,22 +418,83 @@ class CalcularLayout:
         Anexo). Ante cualquier fallo, el motor mantiene sus constantes por defecto.
         """
         uso = params.programa.uso
+        # % circulación interior de la unidad (panel de diseño, bloque PB). Único
+        # y compartido por todos los usos; sustituye el 1.15 antes hardcodeado (R4).
+        # Se aplica DESPUÉS de `cargar_desde_repo` para que el valor del panel gane
+        # sobre el persistido por defecto (15%).
+        pct_circ = float(params.diseno.pct_circulacion_interior)
         try:
-            if uso == UsoEdificio.VIVIENDA and self.catalogo_vivienda is not None:
+            if uso == UsoEdificio.VIVIENDA:
                 from .geometria import programa
-                programa.cargar_desde_repo(self.catalogo_vivienda)
-            elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS and self.catalogo_apartamentos is not None:
+                if self.catalogo_vivienda is not None:
+                    programa.cargar_desde_repo(self.catalogo_vivienda)
+                programa.set_pct_circulacion_interior(pct_circ)
+            elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
                 from .geometria import programa_apartamentos
-                grupo = params.programa.grupo_apartamentos.value
-                programa_apartamentos.cargar_desde_repo(self.catalogo_apartamentos, grupo)
-            elif uso == UsoEdificio.HOTEL_APARTAMENTO and self.catalogo_hotel_apartamento is not None:
+                if self.catalogo_apartamentos is not None:
+                    grupo = params.programa.grupo_apartamentos.value
+                    programa_apartamentos.cargar_desde_repo(self.catalogo_apartamentos, grupo)
+                programa_apartamentos.set_pct_circulacion_interior(pct_circ)
+            elif uso == UsoEdificio.HOTEL_APARTAMENTO:
                 from .geometria import programa_hotel_apartamento
-                programa_hotel_apartamento.cargar_desde_repo(self.catalogo_hotel_apartamento)
-            elif uso == UsoEdificio.HOTELERO and self.catalogo_hotelero is not None:
+                if self.catalogo_hotel_apartamento is not None:
+                    programa_hotel_apartamento.cargar_desde_repo(self.catalogo_hotel_apartamento)
+                programa_hotel_apartamento.set_pct_circulacion_interior(pct_circ)
+            elif uso == UsoEdificio.HOTELERO:
                 from .geometria import programa_hotelero
-                programa_hotelero.cargar_desde_repo(self.catalogo_hotelero)
+                if self.catalogo_hotelero is not None:
+                    programa_hotelero.cargar_desde_repo(self.catalogo_hotelero)
+                programa_hotelero.set_pct_circulacion_interior(pct_circ)
         except Exception:
             pass
+
+    def _validar_util_maximo_vivienda(self, params: ParametrosRender, combo_override=None) -> str | None:
+        """R3: mensaje de error si Σ mínimos de una tipología supera su útil máximo.
+
+        Solo vivienda (único uso con útil máximo editable por tipología). Devuelve
+        None si todo cumple. Se evalúa tras `_sincronizar_minimos`, así que usa los
+        mínimos y el útil máximo YA editados en BBDD. Sin referencias al PDF.
+        """
+        prog = params.programa
+        if prog.uso != UsoEdificio.VIVIENDA:
+            return None
+        from .dominio import CATEGORIA_A_NUM_DORMS
+        from .geometria.programa import (
+            util_maximo,
+            util_minimo_vivienda,
+            util_minimo_vivienda_combo,
+        )
+        sco = bool(prog.salon_cocina_open)
+
+        def _mensaje(n: int, umin: float, umax: float) -> str:
+            etiqueta = (
+                "estudio" if n == 0
+                else f"{n} dormitorios" if n < 5
+                else "más de 4 dormitorios"
+            )
+            return (
+                f"Tipología «{etiqueta}»: la suma de mínimos de estancias "
+                f"({umin:.2f} m²) supera el útil máximo de la vivienda "
+                f"({umax:.2f} m²). Sube el útil máximo de esa tipología o reduce "
+                f"sus superficies mínimas."
+            )
+
+        if combo_override is not None:
+            from .geometria.combinador_tipologias import slug_a_combo
+            combo = slug_a_combo(combo_override)
+            umin = util_minimo_vivienda_combo(combo, sco)
+            umax = util_maximo(combo.n_dorms)
+            return _mensaje(combo.n_dorms, umin, umax) if umin > umax + 1e-6 else None
+
+        slug_a_n = {"estudio": 0, "1d": 1, "2d": 2, "3d": 3, "4d+": 4}
+        ns = [CATEGORIA_A_NUM_DORMS.get(prog.categoria_vivienda, 2)]
+        ns += [slug_a_n[s] for s in prog.tipologias_extra if s in slug_a_n]
+        for n in ns:
+            umin = util_minimo_vivienda(n, sco)
+            umax = util_maximo(n)
+            if umin > umax + 1e-6:
+                return _mensaje(n, umin, umax)
+        return None
 
     def _resolver_util_objetivo(self, params: ParametrosRender, prog=None, combo_override=None) -> float | None:
         """Lee el m² útil objetivo por unidad desde la BBDD del Anexo I.

@@ -17,6 +17,11 @@ from .sqlalchemy_base import Base
 # útil, no una superficie mínima de estancia): se excluyen del editor de la UI.
 _ESTANCIAS_NO_EDITABLES = {"circulacion_interior"}
 
+# Clave sintética para editar el ÚTIL MÁXIMO de una tipología (no es una
+# estancia; es el techo de la unidad, columna `max_m2_util`). El editor la envía
+# como una fila aparte por tipología (R3).
+_UTIL_MAXIMO_ESTANCIA = "_util_maximo"
+
 
 def _clave_global_estancia(estancia: str) -> str | None:
     """Clave de agrupación de las estancias cuyo mínimo es GLOBAL (no varía por
@@ -172,6 +177,19 @@ class CatalogoSuperficiesSQLAlchemy:
         out.sort(key=lambda r: (r["n_dormitorios"], _orden_estancia(r["estancia"])))
         return out
 
+    def util_maximo_por_tipologia(self) -> dict[int, float]:
+        """Útil máximo editable por nº de dormitorios (techo de la unidad, R3).
+
+        Es el máximo de `max_m2_util` entre las estancias de cada tipología — el
+        mismo valor que `consolidadas_vivienda` consolida como `UTIL_MAX[n]`.
+        """
+        out: dict[int, float] = {}
+        for f in self._session.scalars(select(AnexoIViviendaORM)).all():
+            n = f.n_dormitorios
+            if n not in out or f.max_m2_util > out[n]:
+                out[n] = f.max_m2_util
+        return out
+
     def consolidadas_vivienda(self) -> dict:
         """Devuelve todos los mínimos + targets consolidados como dicts.
         Estructura:
@@ -207,6 +225,8 @@ class CatalogoSuperficiesSQLAlchemy:
                 valores["MIN_BANO"] = f.min_m2
             elif est == "aseo":
                 valores["MIN_ASEO"] = f.min_m2
+            elif est == "espacio_principal":
+                valores["MIN_ESPACIO_PRINCIPAL"] = f.min_m2
             elif est == "dormitorio_1":
                 valores["MIN_DORM_DOBLE"] = f.min_m2
             elif est.startswith("dormitorio_") and est != "dormitorio_1":
@@ -260,6 +280,20 @@ class CatalogoSuperficiesSQLAlchemy:
             n_dorms = int(categoria)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Categoría inválida para vivienda: {categoria!r}") from exc
+
+        # Útil máximo de la tipología (R3): no es una estancia, es el techo de la
+        # unidad. Se escribe en `max_m2_util` de TODAS las estancias de la
+        # tipología (consolidadas_vivienda toma el máximo → UTIL_MAX[n]).
+        if estancia == _UTIL_MAXIMO_ESTANCIA:
+            ahora = datetime.now(timezone.utc)
+            for orm in self._session.scalars(
+                select(AnexoIViviendaORM).where(AnexoIViviendaORM.n_dormitorios == n_dorms)
+            ).all():
+                orm.max_m2_util = valor
+                orm.editable_por_usuario = 1
+                orm.actualizado_en = ahora
+            self._session.commit()
+            return
 
         orm = self._session.get(AnexoIViviendaORM, (n_dorms, estancia))
         if orm is None:

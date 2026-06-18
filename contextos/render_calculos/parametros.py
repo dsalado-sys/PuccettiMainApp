@@ -99,6 +99,10 @@ class ParametrosDiseno:
     pct_circulacion_pb: float = 8.0     # % circulación en planta baja
     pct_circulacion_tipo: float = 8.0   # % circulación en plantas tipo / ático
     pct_nucleo: float = 5.0
+    # % circulación INTERIOR de la unidad (pasillos+vestíbulo dentro de cada
+    # vivienda/apartamento/habitación). Único, compartido por todos los usos;
+    # solo se lee del bloque de PB (`diseno`). Sustituye el 1.15 antes fijo.
+    pct_circulacion_interior: float = 15.0
 
 
 @dataclass
@@ -265,6 +269,7 @@ def _diseno_a_dict(d: ParametrosDiseno) -> dict[str, Any]:
         "pct_circulacion_pb": d.pct_circulacion_pb,
         "pct_circulacion_tipo": d.pct_circulacion_tipo,
         "pct_nucleo": d.pct_nucleo,
+        "pct_circulacion_interior": d.pct_circulacion_interior,
     }
 
 
@@ -384,6 +389,7 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             pct_circulacion_pb=_circ("pct_circulacion_pb", base_d.pct_circulacion_pb),
             pct_circulacion_tipo=_circ("pct_circulacion_tipo", base_d.pct_circulacion_tipo),
             pct_nucleo=max(0.0, min(30.0, _f(node, "pct_nucleo", base_d.pct_nucleo))),
+            pct_circulacion_interior=max(0.0, min(40.0, _f(node, "pct_circulacion_interior", base_d.pct_circulacion_interior))),
         )
 
     def _parse_programa(node: dict[str, Any] | None, base_prog: ParametrosPrograma) -> ParametrosPrograma:

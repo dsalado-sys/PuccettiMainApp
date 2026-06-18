@@ -121,12 +121,28 @@ def programa_hotel_apartamento(
     ]
 
 
+# % de circulación interior de la unidad, editable y compartido con los demás
+# usos (antes 1.15 fijo). `casos_uso` lo fija con `set_pct_circulacion_interior`.
+PCT_CIRCULACION_INTERIOR = 15.0
+
+
+def set_pct_circulacion_interior(pct: float) -> None:
+    """Fija el % de circulación interior (panel de diseño → motor)."""
+    global PCT_CIRCULACION_INTERIOR
+    PCT_CIRCULACION_INTERIOR = max(0.0, float(pct))
+
+
+def _factor_circulacion() -> float:
+    return 1.0 + PCT_CIRCULACION_INTERIOR / 100.0
+
+
 def _base_util(categoria: str, tipologia: str) -> float:
     return sum(e.area_min_m2 for e in programa_hotel_apartamento(tipologia, categoria, 0.0))
 
 
 def util_objetivo_hotel_apartamento(categoria: str, tipologia: str) -> float:
-    return round(_base_util(categoria, tipologia) * 1.15, 2)
+    """Objetivo de m² útil por unidad: mínimos + % circulación interior."""
+    return round(_base_util(categoria, tipologia) * _factor_circulacion(), 2)
 
 
 def util_minimo_hotel_apartamento(categoria: str, tipologia: str) -> float:
@@ -152,11 +168,11 @@ def descriptor_tipologia_hotel_apartamento(
 ) -> TipologiaUnidadDescriptor:
     tip = _tip_validada(tipologia)
     util_obj = util_objetivo_hotel_apartamento(categoria, tip)
-    util_min = util_minimo_hotel_apartamento(categoria, tip)
     return TipologiaUnidadDescriptor(
         slug=tip,
         util_objetivo=util_obj,
-        util_minimo=util_min,
+        # Mínimo viable con circulación interior reservada (R4).
+        util_minimo=util_obj,
         util_maximo=round(util_obj * 1.25, 2),
         n_dorms_label=PLAZAS.get(tip, 2),
         tipo_unidad="hotel_apartamento",

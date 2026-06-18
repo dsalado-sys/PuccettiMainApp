@@ -77,6 +77,7 @@ MIN_DORM_DOBLE = 12.0       # dormitorio principal
 MIN_COCINA = 7.0            # cocina independiente
 MIN_BANO = 3.0
 MIN_ASEO = 1.5
+MIN_ESPACIO_PRINCIPAL = 14.0  # estancia única del estudio (salón-dormitorio), editable BBDD
 # Mínimos POR TIPOLOGÍA del programa estar/comedor (sí varían con nº dorms).
 # Estancia (E) y Estancia+comedor+cocina (E+C+K). La clave 5 representa el
 # tramo "más de 4 dormitorios" del Anexo I.5 (E=24, E+C+K=28).
@@ -102,6 +103,16 @@ PCT_CIRCULACION_INTERIOR_VIVIENDA: float = 15.0
 UMBRAL_MINIMO_ESTUDIO_M2: float = 25.0
 
 
+def set_pct_circulacion_interior(pct: float) -> None:
+    """Fija el % de circulación interior de la unidad (panel de diseño → motor).
+
+    Compartido conceptualmente con los demás usos (apartamentos/hotel/hotel-apt),
+    que tienen su propia constante homónima. Sustituye al 1.15 antes hardcodeado.
+    """
+    global PCT_CIRCULACION_INTERIOR_VIVIENDA
+    PCT_CIRCULACION_INTERIOR_VIVIENDA = max(0.0, float(pct))
+
+
 def cargar_desde_repo(catalogo) -> bool:
     """Vuelca los valores del catálogo de BBDD a las constantes module-level.
 
@@ -117,7 +128,8 @@ def cargar_desde_repo(catalogo) -> bool:
     if not datos:
         return False
     g = globals()
-    for clave in ("MIN_DORM_INDIVIDUAL", "MIN_DORM_DOBLE", "MIN_COCINA", "MIN_BANO", "MIN_ASEO"):
+    for clave in ("MIN_DORM_INDIVIDUAL", "MIN_DORM_DOBLE", "MIN_COCINA", "MIN_BANO",
+                  "MIN_ASEO", "MIN_ESPACIO_PRINCIPAL"):
         if clave in datos:
             g[clave] = float(datos[clave])
     for clave in ("SALON_MIN", "SALON_MAS_COCINA_MIN", "UTIL_MAX"):
@@ -311,7 +323,7 @@ def _programa_estudio(util_disponible: float) -> list[Estancia]:
     if not targets:
         # Fallback si la BBDD aún no se ha cargado.
         targets = {
-            "espacio_principal": 18.0,
+            "espacio_principal": MIN_ESPACIO_PRINCIPAL + 4.0,
             "cocina": MIN_COCINA + 1.0,
             "bano": 4.0,
             "circulacion_interior": 3.0,
@@ -322,7 +334,7 @@ def _programa_estudio(util_disponible: float) -> list[Estancia]:
     factor = (util_disponible / suma_baseline) if suma_baseline > 0 else 1.0
 
     mins = {
-        "espacio_principal": 14.0,
+        "espacio_principal": MIN_ESPACIO_PRINCIPAL,
         "cocina": MIN_COCINA,
         "bano": MIN_BANO,
         "circulacion_interior": 0.0,
@@ -407,11 +419,12 @@ def util_minimo_vivienda(n_dorms: int, salon_cocina_open: bool = False) -> float
       `UMBRAL_MINIMO_ESTUDIO_M2` (25 m² excluyendo servicios comunes, VPO). Es
       también el útil objetivo, de modo que en el reparto el estudio se escala
       con factor ≥ 1 y la cocina respeta su mínimo independiente (7 m²).
-    - 1d+: suma de mínimos × 1.15 (factor 15 % para circulación interior).
+    - 1d+: suma de mínimos × (1 + %circulación/100) — el % es editable (panel
+      de diseño) y compartido con los demás usos; antes era un 1.15 fijo.
     """
     if n_dorms == 0:
         targets = AREA_TARGET_VIVIENDA.get(0) or {
-            "espacio_principal": 18.0,
+            "espacio_principal": MIN_ESPACIO_PRINCIPAL + 4.0,
             "cocina": MIN_COCINA + 1.0,
             "bano": 4.0,
             "circulacion_interior": 3.0,
@@ -420,7 +433,8 @@ def util_minimo_vivienda(n_dorms: int, salon_cocina_open: bool = False) -> float
         return round(max(UMBRAL_MINIMO_ESTUDIO_M2, suma_target), 2)
     prog = programa_vivienda(n_dorms, util_disponible=util_maximo(n_dorms),
                              salon_cocina_open=salon_cocina_open)
-    return round(sum(e.area_min_m2 for e in prog) * 1.15, 2)
+    factor = 1.0 + PCT_CIRCULACION_INTERIOR_VIVIENDA / 100.0
+    return round(sum(e.area_min_m2 for e in prog) * factor, 2)
 
 
 def descriptor_tipologia_vivienda(
@@ -558,14 +572,19 @@ def util_minimo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool 
     A este útil el reparto da al salón EXACTAMENTE su mínimo A1.5; por encima, el
     salón crece. (El cálculo anterior sumaba sólo los mínimos sin reservar la
     circulación ni el target de cocina/baños, por lo que el salón quedaba por
-    debajo de su mínimo.) Acotado al útil máximo VPO por nº de dormitorios.
+    debajo de su mínimo.)
+
+    NO se capa al útil máximo VPO: si la suma de mínimos supera el techo editable
+    de la tipología, el reparto infradimensionaría la unidad en silencio. En su
+    lugar, `CalcularLayout` valida `util_mínimo ≤ útil máximo` antes de calcular y
+    bloquea con error si se incumple (R3).
     """
     if combo.es_estudio:
         return util_minimo_vivienda(0, salon_cocina_open)
     escalante_min, fijas_target = _presupuesto_base_vivienda_combo(combo, salon_cocina_open)
     pct = PCT_CIRCULACION_INTERIOR_VIVIENDA / 100.0
     minimo = (escalante_min + fijas_target) / max(1e-6, 1.0 - pct)
-    return round(min(minimo, util_maximo(combo.n_dorms)), 2)
+    return round(minimo, 2)
 
 
 def util_objetivo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool = False) -> float:

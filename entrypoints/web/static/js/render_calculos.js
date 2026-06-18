@@ -521,6 +521,13 @@
         return;
       }
       const data = await resp.json();
+      // Error bloqueante (p. ej. R3: Σ mínimos > útil máximo). Muestra la alerta
+      // y NO pinta capacidad vacía.
+      if (data.error) {
+        repintarAlertas(data.alertas);
+        mostrarToast(data.error, true);
+        return;
+      }
       ESTADO.fullPayload = data;
       // Iter. 3: edificio = null. Usamos envolvente.plantas para los tabs.
       const n_plantas = (data.envolvente?.plantas?.length) || (data.edificio?.plantas?.length) || 1;
@@ -893,7 +900,7 @@
       const resp = await fetch(API_SUP);
       if (!resp.ok) { cont.innerHTML = '<p class="rc-vacio">No se pudieron cargar las superficies.</p>'; return; }
       const data = await resp.json();
-      pintarSeccionesSuperficies(data.filas || []);
+      pintarSeccionesSuperficies(data.filas || [], data.util_maximo || {});
     } catch (e) {
       cont.innerHTML = '<p class="rc-vacio">Error de red.</p>';
     }
@@ -921,8 +928,33 @@
     return tr;
   }
 
-  // Construye una sección (título + tabla) a partir de una lista de filas.
-  function seccionSuperficies(titulo, filas) {
+  // Fila del ÚTIL MÁXIMO de una tipología (R3). No es una estancia: su mínimo
+  // es el techo de la unidad. Se envía con estancia "_util_maximo".
+  function filaUtilMaximo(nDorms, valor) {
+    const tr = document.createElement("tr");
+    tr.className = "rc-sup-fila-maximo";
+    const td1 = document.createElement("td");
+    td1.textContent = "Útil máximo de la unidad";
+    const td2 = document.createElement("td");
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.min = "0";
+    inp.step = "1";
+    inp.value = valor;
+    inp.className = "rc-sup-input";
+    inp.dataset.ndorms = nDorms;
+    inp.dataset.estancia = "_util_maximo";
+    inp.dataset.original = valor;
+    if (!puedeEditar) inp.disabled = true;
+    td2.appendChild(inp);
+    tr.appendChild(td1);
+    tr.appendChild(td2);
+    return tr;
+  }
+
+  // Construye una sección (título + tabla). `utilMaximo` (n_dorms→m²) añade,
+  // solo en las secciones por tipología, la fila editable del útil máximo.
+  function seccionSuperficies(titulo, filas, nDorms, utilMaximo) {
     const sec = document.createElement("section");
     sec.className = "rc-sup-seccion";
     const h = document.createElement("h3");
@@ -933,12 +965,15 @@
     tabla.innerHTML = "<thead><tr><th>Estancia</th><th>Mínimo (m²)</th></tr></thead>";
     const tbody = document.createElement("tbody");
     filas.forEach(f => tbody.appendChild(filaSuperficie(f)));
+    if (nDorms != null && utilMaximo != null && utilMaximo[nDorms] != null) {
+      tbody.appendChild(filaUtilMaximo(nDorms, utilMaximo[nDorms]));
+    }
     tabla.appendChild(tbody);
     sec.appendChild(tabla);
     return sec;
   }
 
-  function pintarSeccionesSuperficies(filas) {
+  function pintarSeccionesSuperficies(filas, utilMaximo) {
     const cont = document.getElementById("rc-sup-secciones");
     cont.innerHTML = "";
     if (!filas.length) {
@@ -969,7 +1004,7 @@
     });
     Array.from(grupos.keys()).sort((a, b) => a - b).forEach(n => {
       const titulo = LBL_TIPOLOGIA_VIV[n] || (n + " dormitorios");
-      cont.appendChild(seccionSuperficies(titulo, grupos.get(n)));
+      cont.appendChild(seccionSuperficies(titulo, grupos.get(n), n, utilMaximo));
     });
   }
 
