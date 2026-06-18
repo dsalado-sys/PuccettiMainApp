@@ -108,7 +108,7 @@
     {% for m in modos %}
       <a class="tarjeta" href="/modulos/render-calculos?modo={{ m.slug }}">
         <header>
-          <h2>{{ m.titulo }}{% if m.badge %} <span class="rcl-badge">{{ m.badge }}</span>{% endif %}</h2>
+          <h2>{{ m.titulo }}{% if m.badge %} {% endif %}</h2>
         </header>
         <p>{{ m.descripcion }}</p>
         <footer>
