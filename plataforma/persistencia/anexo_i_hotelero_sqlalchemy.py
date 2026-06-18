@@ -49,20 +49,48 @@ class CatalogoHoteleroSQLAlchemy:
         return out
 
     def util_objetivo_habitacion(self, categoria: str, tipologia: str) -> float | None:
-        """m² útiles objetivo por unidad (mínimo del Anexo I.1 × 1.15).
+        """m² útiles objetivo por unidad (Σ mínimos de las estancias × 1.15).
 
-        Las filas del mismo `(categoria, tipologia)` comparten `max_m2_util`
-        (= útil mínimo de esa combinación). Si no hay filas → None (fallback motor).
+        Suma el `min_m2` editable de la habitación (+ baño si lo lleva), de modo que
+        un mínimo editado se refleja en el objetivo (antes leía `max_m2_util` de una
+        fila al azar, que no se actualizaba al editar). None si no hay filas.
         """
-        fila = self._session.scalar(
+        filas = self._session.scalars(
             select(AnexoIHoteleroORM)
             .where(AnexoIHoteleroORM.categoria == categoria)
             .where(AnexoIHoteleroORM.tipologia == tipologia)
-            .limit(1)
-        )
-        if fila is None:
+        ).all()
+        if not filas:
             return None
-        return round(float(fila.max_m2_util) * 1.15, 2)
+        base = sum(float(f.min_m2) for f in filas)
+        return round(base * 1.15, 2)
+
+    def consolidadas_hotelero(self) -> dict:
+        """Mínimos editables de BBDD en la forma de las constantes del motor (A1.1).
+
+        `programa_hotelero.cargar_desde_repo` lo vuelca a sus constantes. Mapeo
+        (excluye `comunes_*`): `habitacion` → `MIN_HABITACION[(cat, tip)]`;
+        `bano` → `MIN_BANO_HOTELERO[cat]`.
+        """
+        filas = self._session.scalars(select(AnexoIHoteleroORM)).all()
+        if not filas:
+            return {}
+        habitacion: dict[tuple[str, str], float] = {}
+        bano: dict[str, float] = {}
+        for f in filas:
+            if str(f.categoria).startswith("comunes"):
+                continue
+            cat, tip, est = f.categoria, f.tipologia, f.estancia
+            if est == "habitacion":
+                habitacion[(cat, tip)] = float(f.min_m2)
+            elif est == "bano":
+                bano[cat] = float(f.min_m2)
+        out: dict = {}
+        if habitacion:
+            out["MIN_HABITACION"] = habitacion
+        if bano:
+            out["MIN_BANO_HOTELERO"] = bano
+        return out
 
     def areas_sociales(self, categoria: str) -> dict[str, float]:
         """Áreas sociales del establecimiento para la categoría dada."""
@@ -71,6 +99,19 @@ class CatalogoHoteleroSQLAlchemy:
             .where(AnexoIHoteleroORM.categoria == "comunes_" + categoria)
         ).all()
         return {f.estancia: f.min_m2 for f in filas}
+
+    def filas_min(self, categoria: str) -> list[dict]:
+        """Filas del editor de mínimos para una categoría (habitaciones + áreas sociales)."""
+        from .etiquetas_anexo import construir_filas_min
+        unidad = self._session.scalars(
+            select(AnexoIHoteleroORM)
+            .where(AnexoIHoteleroORM.categoria == categoria)
+        ).all()
+        comunes = self._session.scalars(
+            select(AnexoIHoteleroORM)
+            .where(AnexoIHoteleroORM.categoria == "comunes_" + categoria)
+        ).all()
+        return construir_filas_min(unidad, comunes)
 
     def actualizar(
         self,

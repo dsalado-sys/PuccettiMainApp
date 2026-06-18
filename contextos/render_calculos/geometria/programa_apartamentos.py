@@ -51,6 +51,46 @@ PLAZAS: dict[str, int] = {"estudio": 2, "individual": 1, "doble": 2, "triple": 3
 PLAZAS_SALON = 2
 
 
+def _fusionar_minimos(destino: dict, origen: dict) -> None:
+    """Actualiza `destino` in-place con `origen` (hasta 1 nivel de anidamiento).
+
+    Mutar in-place (en vez de rebind) preserva las referencias que otros módulos
+    importaron del diccionario (p. ej. los tests del Anexo I)."""
+    for clave, valor in origen.items():
+        if isinstance(valor, dict):
+            sub = destino.get(clave)
+            if isinstance(sub, dict):
+                sub.update({str(k): float(v) for k, v in valor.items()})
+            else:
+                destino[clave] = {str(k): float(v) for k, v in valor.items()}
+        else:
+            destino[clave] = float(valor)
+
+
+def cargar_desde_repo(catalogo, grupo: str = "edificios") -> bool:
+    """Vuelca los mínimos editables de BBDD a las constantes del módulo.
+
+    Hermano de `programa.cargar_desde_repo` (vivienda): permite que las ediciones
+    del editor de mínimos (Anexo I.3/I.4) lleguen al dimensionado de estancias sin
+    pasar el repo por toda la cadena de llamadas. Devuelve True si aplicó algún
+    override; False si la BBDD está vacía o el catálogo no expone el método.
+
+    Nota: las constantes no distinguen grupo (1L/2L coinciden en edificios y
+    conjuntos); se cargan los valores del `grupo` del cálculo en curso.
+    """
+    obtener = getattr(catalogo, "consolidadas_apartamentos", None)
+    if obtener is None:
+        return False
+    datos = obtener(grupo) or {}
+    if not datos:
+        return False
+    g = globals()
+    for clave in ("MIN_DORMITORIO", "MIN_ESTUDIO", "MIN_SALON_COMEDOR", "MIN_COCINA", "MIN_BANO"):
+        if clave in datos and isinstance(datos[clave], dict):
+            _fusionar_minimos(g[clave], datos[clave])
+    return True
+
+
 def ocupacion_unidad(plazas_dormitorios: int) -> int:
     """Ocupación total de la unidad = plazas de los dormitorios + PLAZAS_SALON.
 

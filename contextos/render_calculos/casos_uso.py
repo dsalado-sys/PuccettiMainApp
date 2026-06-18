@@ -305,6 +305,10 @@ class CalcularLayout:
         el técnico. Si se indica y el uso es apartamentos turísticos, sustituye la
         tipología por la combinación (toda la unidad, PB y plantas tipo). Selección
         temporal: el caso de uso no la persiste."""
+        # Antes de calcular, vuelca los mínimos editables de BBDD a las constantes
+        # del motor, para que las ediciones del editor de superficies mínimas se
+        # respeten en cada cálculo (Anexo I.1–I.5).
+        self._sincronizar_minimos(params)
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
         try:
@@ -389,6 +393,32 @@ class CalcularLayout:
         }
 
     # ─── Helpers privados de CalcularLayout ────────────────────────────────
+    def _sincronizar_minimos(self, params: ParametrosRender) -> None:
+        """BBDD → constantes del motor antes de calcular (Anexo I.1–I.5).
+
+        Hace que las superficies mínimas editadas desde el editor lleguen al
+        dimensionado de estancias en CADA cálculo (no solo vivienda). Es no-op si
+        no hay catálogo inyectado (p. ej. en los tests, que usan las constantes del
+        Anexo). Ante cualquier fallo, el motor mantiene sus constantes por defecto.
+        """
+        uso = params.programa.uso
+        try:
+            if uso == UsoEdificio.VIVIENDA and self.catalogo_vivienda is not None:
+                from .geometria import programa
+                programa.cargar_desde_repo(self.catalogo_vivienda)
+            elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS and self.catalogo_apartamentos is not None:
+                from .geometria import programa_apartamentos
+                grupo = params.programa.grupo_apartamentos.value
+                programa_apartamentos.cargar_desde_repo(self.catalogo_apartamentos, grupo)
+            elif uso == UsoEdificio.HOTEL_APARTAMENTO and self.catalogo_hotel_apartamento is not None:
+                from .geometria import programa_hotel_apartamento
+                programa_hotel_apartamento.cargar_desde_repo(self.catalogo_hotel_apartamento)
+            elif uso == UsoEdificio.HOTELERO and self.catalogo_hotelero is not None:
+                from .geometria import programa_hotelero
+                programa_hotelero.cargar_desde_repo(self.catalogo_hotelero)
+        except Exception:
+            pass
+
     def _resolver_util_objetivo(self, params: ParametrosRender, prog=None, combo_override=None) -> float | None:
         """Lee el m² útil objetivo por unidad desde la BBDD del Anexo I.
 
@@ -530,37 +560,14 @@ class CalcularLayout:
         else:
             return None
 
+        # Tras `_sincronizar_minimos`, el descriptor que produce `constructor(slug)`
+        # ya refleja los mínimos editados en BBDD (su util_objetivo = Σ mínimos del
+        # Anexo × 1.15). No se sobreescribe con el adapter, que antes leía un
+        # `max_m2_util` que no se actualizaba al editar y dejaba la unidad —y por
+        # tanto sus estancias— por debajo de los mínimos reales.
         slugs = [principal] + [s for s in prog.tipologias_extra]
-        descriptores = []
-        for idx, slug in enumerate(slugs):
-            d = constructor(slug)
-            # El útil objetivo de la principal proviene de BBDD (si está); las
-            # extras usan la constante del Anexo (mismo valor salvo edición).
-            uo_bbdd = util_objetivo if idx == 0 else self._util_objetivo_bbdd(params, slug, prog)
-            if uo_bbdd is not None and uo_bbdd > 0:
-                d = replace(d, util_objetivo=uo_bbdd, util_maximo=round(uo_bbdd * 1.25, 2))
-            descriptores.append(d)
+        descriptores = [constructor(slug) for slug in slugs]
         return descriptores or None
-
-    def _util_objetivo_bbdd(self, params: ParametrosRender, slug: str, prog=None):
-        """Útil objetivo de una tipología desde BBDD (None si no hay catálogo/fila)."""
-        prog = prog if prog is not None else params.programa
-        try:
-            if prog.uso == UsoEdificio.APARTAMENTOS_TURISTICOS and self.catalogo_apartamentos:
-                return self.catalogo_apartamentos.util_objetivo_apartamento(
-                    prog.categoria_apartamentos.value, slug, prog.grupo_apartamentos.value
-                )
-            if prog.uso == UsoEdificio.HOTEL_APARTAMENTO and self.catalogo_hotel_apartamento:
-                return self.catalogo_hotel_apartamento.util_objetivo(
-                    prog.categoria_hotel_apartamento.value, slug
-                )
-            if prog.uso == UsoEdificio.HOTELERO and self.catalogo_hotelero:
-                return self.catalogo_hotelero.util_objetivo_habitacion(
-                    prog.categoria_hotelero.value, slug
-                )
-        except Exception:
-            return None
-        return None
 
     def _construir_programa_uso(
         self,
@@ -683,6 +690,16 @@ class CalcularTipologiasDormitorios:
         uso = prog.uso
         n_dorms = max(0, int(n_dorms))
 
+        # Reutiliza el motor de layout (y vuelca los mínimos editables de BBDD a las
+        # constantes ANTES de que las lambdas `objetivo`/`minimo` los lean al ordenar).
+        layout = CalcularLayout(
+            catalogo_vivienda=self.catalogo_vivienda,
+            catalogo_apartamentos=self.catalogo_apartamentos,
+            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
+            catalogo_hotelero=self.catalogo_hotelero,
+        )
+        layout._sincronizar_minimos(params)
+
         # Despacho por uso: alfabeto de tamaños, objetivo, mínimo y plazas.
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             from .geometria.programa_apartamentos import (
@@ -717,13 +734,6 @@ class CalcularTipologiasDormitorios:
 
         # Orden ascendente por útil objetivo → habilita la poda.
         combos = sorted(enumerar_combinaciones(n_dorms, tamanos), key=objetivo)
-
-        layout = CalcularLayout(
-            catalogo_vivienda=self.catalogo_vivienda,
-            catalogo_apartamentos=self.catalogo_apartamentos,
-            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
-            catalogo_hotelero=self.catalogo_hotelero,
-        )
 
         viables: list[dict[str, Any]] = []
         for combo in combos:

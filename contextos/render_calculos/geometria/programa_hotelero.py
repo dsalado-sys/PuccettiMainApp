@@ -69,6 +69,30 @@ TIPOLOGIA_HABITACION_A_PLAZAS = {
 }
 
 
+def cargar_desde_repo(catalogo) -> bool:
+    """Vuelca los mínimos editables de BBDD (Anexo I.1) a las constantes del módulo.
+
+    Hermano de `programa.cargar_desde_repo` (vivienda): hace que las ediciones del
+    editor de mínimos lleguen al dimensionado de habitación/baño. Devuelve True si
+    aplicó algún override; False si la BBDD está vacía o falta el método.
+    """
+    obtener = getattr(catalogo, "consolidadas_hotelero", None)
+    if obtener is None:
+        return False
+    datos = obtener() or {}
+    if not datos:
+        return False
+    g = globals()
+    hab = datos.get("MIN_HABITACION")
+    if isinstance(hab, dict):
+        # Claves tupla (categoria, tipologia); update in-place conserva la referencia.
+        g["MIN_HABITACION"].update({tuple(k): float(v) for k, v in hab.items()})
+    banos = datos.get("MIN_BANO_HOTELERO")
+    if isinstance(banos, dict):
+        g["MIN_BANO_HOTELERO"].update({str(k): float(v) for k, v in banos.items()})
+    return True
+
+
 def _cat_validada(categoria: str) -> str:
     return categoria if categoria in SALON_SOCIAL_MIN else "hotel_3"
 

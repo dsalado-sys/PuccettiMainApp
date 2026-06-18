@@ -22,12 +22,28 @@ RAIZ_WEB = Path(__file__).parent
 
 
 def _volcar_superficies_a_runtime() -> None:
-    """Tras seed: BBDD → constantes de `geometria.programa`.
+    """Tras seed: BBDD → constantes de los motores del Anexo I (I.1–I.5).
 
-    Permite que las ediciones del Anexo I.5 persistidas se respeten sin
-    pasar el repo por toda la cadena de llamadas.
+    Permite que las ediciones de superficies mínimas persistidas en BBDD se
+    respeten desde el arranque sin pasar el repo por toda la cadena de llamadas.
+    En cada cálculo se vuelven a sincronizar (`CalcularLayout._sincronizar_minimos`);
+    esto sólo asegura el estado inicial tras un reinicio.
     """
-    from app.contextos.render_calculos.geometria import programa
+    from app.contextos.render_calculos.geometria import (
+        programa,
+        programa_apartamentos,
+        programa_hotel_apartamento,
+        programa_hotelero,
+    )
+    from app.plataforma.persistencia.anexo_i_apartamentos_sqlalchemy import (
+        CatalogoApartamentosSQLAlchemy,
+    )
+    from app.plataforma.persistencia.anexo_i_hotel_apartamento_sqlalchemy import (
+        CatalogoHotelApartamentoSQLAlchemy,
+    )
+    from app.plataforma.persistencia.anexo_i_hotelero_sqlalchemy import (
+        CatalogoHoteleroSQLAlchemy,
+    )
     from app.plataforma.persistencia.catalogo_superficies_sqlalchemy import (
         CatalogoSuperficiesSQLAlchemy,
     )
@@ -35,6 +51,9 @@ def _volcar_superficies_a_runtime() -> None:
 
     with SessionLocal() as session:
         programa.cargar_desde_repo(CatalogoSuperficiesSQLAlchemy(session))
+        programa_apartamentos.cargar_desde_repo(CatalogoApartamentosSQLAlchemy(session))
+        programa_hotel_apartamento.cargar_desde_repo(CatalogoHotelApartamentoSQLAlchemy(session))
+        programa_hotelero.cargar_desde_repo(CatalogoHoteleroSQLAlchemy(session))
 
 
 def crear_app() -> FastAPI:

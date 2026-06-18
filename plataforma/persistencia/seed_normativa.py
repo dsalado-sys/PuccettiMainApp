@@ -99,6 +99,8 @@ def _filas_anexo_i_vivienda() -> list[tuple[int, str, float, float, float | None
     - 1d+: cocina=8, baño(s)=5 fijos; salón + dormitorios escalan al restante
       tras descontar la circulación interior (15% del útil). Nº de baños por nº
       de dormitorios (Anexo I.5): 1 hasta 2 dorms, 2 desde 3 dorms.
+    - >4d (clave 5): tramo "más de 4 dormitorios" del Anexo I.5, con la
+      Estancia (E)=24 y Estancia+comedor+cocina (E+C+K)=28.
     """
     filas: list[tuple[int, str, float, float, float | None]] = []
     # Estudio: estancia única + cocina + baño + circulación, target absoluto.
@@ -108,11 +110,11 @@ def _filas_anexo_i_vivienda() -> list[tuple[int, str, float, float, float | None
     filas.append((0, "bano", MIN_BANO, util_max_estudio, 4.0))
     filas.append((0, "circulacion_interior", 0.0, util_max_estudio, 3.0))
 
-    # 1d..4d
-    for n in range(1, 5):
+    # 1d..4d y el tramo ">4d" (clave 5, con 5 dormitorios de referencia).
+    for n in range(1, 6):
         util_max = UTIL_MAX.get(n, UTIL_MAX[4])
-        filas.append((n, "salon", SALON_MIN.get(n, 20.0), util_max, None))
-        filas.append((n, "salon_cocina", SALON_MAS_COCINA_MIN.get(n, 24.0), util_max, None))
+        filas.append((n, "salon", SALON_MIN.get(n, 24.0), util_max, None))
+        filas.append((n, "salon_cocina", SALON_MAS_COCINA_MIN.get(n, 28.0), util_max, None))
         filas.append((n, "cocina", MIN_COCINA, util_max, MIN_COCINA + 1.0))
         filas.append((n, "dormitorio_1", MIN_DORM_DOBLE, util_max, None))
         for i in range(2, n + 1):

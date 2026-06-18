@@ -68,19 +68,26 @@ class Estancia:
 # Estos valores son DEFAULTS sembrados en BBDD (ver seed_normativa.py); al arranque
 # de la app, `cargar_desde_repo()` los reescribe con los de BBDD para reflejar
 # cualquier edición persistida por el usuario.
-MIN_DORM_INDIVIDUAL = 8.0
-MIN_DORM_DOBLE = 12.0
-MIN_COCINA = 7.0
+# Mínimos GLOBALES de habitación (Anexo I.5 VPO): no varían por nº de
+# dormitorios. El editor los presenta una sola vez ("comunes a todas las
+# tipologías") y al editarlos se propagan a todas las tipologías (resuelve el
+# colapso last-row-wins de `consolidadas_vivienda`).
+MIN_DORM_INDIVIDUAL = 8.0   # dormitorio mínimo
+MIN_DORM_DOBLE = 12.0       # dormitorio principal
+MIN_COCINA = 7.0            # cocina independiente
 MIN_BANO = 3.0
 MIN_ASEO = 1.5
-SALON_MIN = {1: 14, 2: 16, 3: 18, 4: 20}
-SALON_MAS_COCINA_MIN = {1: 20, 2: 20, 3: 24, 4: 24}
+# Mínimos POR TIPOLOGÍA del programa estar/comedor (sí varían con nº dorms).
+# Estancia (E) y Estancia+comedor+cocina (E+C+K). La clave 5 representa el
+# tramo "más de 4 dormitorios" del Anexo I.5 (E=24, E+C+K=28).
+SALON_MIN = {1: 14, 2: 16, 3: 18, 4: 20, 5: 24}
+SALON_MAS_COCINA_MIN = {1: 20, 2: 20, 3: 24, 4: 24, 5: 28}
 
-# Superficie útil máxima de referencia (VPO). La UI solo expone hasta "4d+",
-# así que n_dorms se acota a 4 (con default vía .get). El estudio (0) no tiene
-# máximo VPO; usamos un techo holgado por encima de su objetivo (estancia +
-# cocina + baño + circulación, Anexo I.5) para que pueda crecer con el sobrante.
-UTIL_MAX = {0: 40, 1: 60, 2: 70, 3: 90, 4: 110}
+# Superficie útil máxima de referencia (VPO). La UI expone hasta "4d" y un
+# tramo ">4d" (clave 5). El estudio (0) no tiene máximo VPO; usamos un techo
+# holgado por encima de su objetivo (estancia + cocina + baño + circulación,
+# Anexo I.5) para que pueda crecer con el sobrante.
+UTIL_MAX = {0: 40, 1: 60, 2: 70, 3: 90, 4: 110, 5: 130}
 
 # Política de reparto del programa entre estancias. Cargable desde BBDD.
 # - AREA_TARGET_VIVIENDA: dict[n_dorms] → dict[estancia → m² target | None].
@@ -259,7 +266,11 @@ def programa_vivienda(
         if tgt is None:
             escalantes.append((est, min_est))
         else:
-            fijas.append((est, min_est, float(tgt)))
+            # El target fijo (cocina/baño/aseo) se sembró desacoplado del mínimo y
+            # `actualizar()` no lo recalcula al editar el mínimo: si el usuario sube
+            # el mínimo por encima del target sembrado, la estancia saldría más
+            # pequeña que su mínimo real. Se ancla el target al mínimo vigente.
+            fijas.append((est, min_est, max(float(tgt), min_est)))
 
     suma_fijas = sum(t for _, _, t in fijas)
     util_principal = max(0.0, util_disponible - circ_target - suma_fijas)
@@ -273,7 +284,9 @@ def programa_vivienda(
 
     for est in nombres:
         min_est = _area_min_estancia(est, n_dorms, salon_cocina_open)
-        target = targets_por_nombre[est]
+        # Suelo duro: ninguna estancia se emite por debajo de su mínimo del Anexo
+        # (protege también el reparto degradado de unidades infradimensionadas).
+        target = max(targets_por_nombre[est], min_est)
         estancias.append(Estancia(est, _CATEGORIA_ESTANCIA.get(est, "publica"), min_est, round(target, 2)))
 
     if circ_target > 1e-6:
@@ -318,10 +331,14 @@ def _programa_estudio(util_disponible: float) -> list[Estancia]:
     for est in nombres_ordenados:
         if est not in targets:
             continue
-        target_escalado = round(float(targets[est]) * factor, 2)
+        min_est = mins.get(est, 0.0)
+        # Suelo duro: cocina y baño (mínimos independientes) y el espacio principal
+        # nunca por debajo de su mínimo, aunque el factor de escala sea < 1 o el
+        # mínimo editado supere el target sembrado.
+        target_escalado = max(round(float(targets[est]) * factor, 2), min_est)
         estancias.append(Estancia(
             est, _CATEGORIA_ESTANCIA.get(est, "publica"),
-            mins.get(est, 0.0), target_escalado,
+            min_est, target_escalado,
         ))
     return estancias
 
@@ -495,8 +512,10 @@ def programa_vivienda_combo(
     orden += [f"dormitorio_{i}" for i in range(1, n_dorms + 1)]
     orden += banos_unidad
 
+    # Suelo duro: ninguna estancia por debajo de su mínimo (incl. reparto degradado).
     estancias = [
-        Estancia(n, _CATEGORIA_ESTANCIA.get(n, "publica"), mins.get(n, 0.0), round(targets.get(n, 0.0), 2))
+        Estancia(n, _CATEGORIA_ESTANCIA.get(n, "publica"), mins.get(n, 0.0),
+                 round(max(targets.get(n, 0.0), mins.get(n, 0.0)), 2))
         for n in orden
     ]
     if circ_target > 1e-6:

@@ -18,14 +18,48 @@ from .sqlalchemy_base import Base
 _ESTANCIAS_NO_EDITABLES = {"circulacion_interior"}
 
 
+def _clave_global_estancia(estancia: str) -> str | None:
+    """Clave de agrupación de las estancias cuyo mínimo es GLOBAL (no varía por
+    nº de dormitorios): dormitorio principal/mínimo, cocina, baño, aseo. Las
+    estancias por tipología (Estancia y Estancia+comedor+cocina, y el espacio
+    único del estudio) devuelven None.
+
+    Resuelve el colapso last-row-wins de `consolidadas_vivienda`: el editor las
+    muestra una sola vez y al editar una se propaga a todas las tipologías
+    (ver `CatalogoSuperficiesSQLAlchemy.actualizar`).
+    """
+    if estancia == "cocina":
+        return "cocina"
+    if estancia == "bano" or estancia.startswith("bano_"):
+        return "bano"
+    if estancia == "aseo" or estancia.startswith("aseo_"):
+        return "aseo"
+    if estancia == "dormitorio_1":
+        return "dormitorio_principal"
+    if estancia.startswith("dormitorio_"):
+        return "dormitorio_minimo"
+    return None
+
+
+def _etiqueta_global(clave: str) -> str:
+    """Etiqueta legible de un mínimo global, independiente de la tipología."""
+    return {
+        "cocina": "Cocina independiente",
+        "bano": "Baño",
+        "aseo": "Aseo",
+        "dormitorio_principal": "Dormitorio principal",
+        "dormitorio_minimo": "Dormitorio mínimo",
+    }.get(clave, clave)
+
+
 def _etiqueta_estancia(estancia: str) -> str:
-    """Nombre legible de una estancia para el editor de superficies mínimas."""
+    """Nombre legible de una estancia por tipología para el editor."""
     base = {
-        "salon": "Salón",
-        "salon_cocina": "Salón-cocina integrado",
+        "salon": "Estancia (E)",
+        "salon_cocina": "Estancia + comedor + cocina",
         "espacio_principal": "Estancia principal (salón-dormitorio)",
-        "cocina": "Cocina",
-        "dormitorio_1": "Dormitorio principal (doble)",
+        "cocina": "Cocina independiente",
+        "dormitorio_1": "Dormitorio principal",
         "bano": "Baño",
         "aseo": "Aseo",
     }
@@ -122,12 +156,18 @@ class CatalogoSuperficiesSQLAlchemy:
         for f in filas:
             if f.estancia in _ESTANCIAS_NO_EDITABLES:
                 continue
+            clave = _clave_global_estancia(f.estancia)
+            es_global = clave is not None
             out.append({
                 "n_dormitorios": f.n_dormitorios,
                 "estancia": f.estancia,
-                "etiqueta": _etiqueta_estancia(f.estancia),
+                "etiqueta": _etiqueta_global(clave) if es_global else _etiqueta_estancia(f.estancia),
                 "min_m2": f.min_m2,
                 "editable_por_usuario": bool(f.editable_por_usuario),
+                # "global" → mínimo común a todas las tipologías (el editor lo
+                # muestra una vez); "tipologia" → varía por nº de dormitorios.
+                "ambito": "global" if es_global else "tipologia",
+                "clave_global": clave or "",
             })
         out.sort(key=lambda r: (r["n_dormitorios"], _orden_estancia(r["estancia"])))
         return out
@@ -200,6 +240,22 @@ class CatalogoSuperficiesSQLAlchemy:
             raise NotImplementedError(
                 "Anexo I solo soporta vivienda en este MVP; hotel/apt llegarán en iteración posterior."
             )
+
+        # Mínimo GLOBAL (dormitorio principal/mínimo, cocina, baño, aseo): se
+        # propaga a TODAS las tipologías con la misma clave. Así el valor que
+        # `consolidadas_vivienda` consolida (last-row-wins) es siempre coherente
+        # y editar la cocina de una tipología no se pierde (resuelve R1).
+        clave = _clave_global_estancia(estancia)
+        if clave is not None:
+            ahora = datetime.now(timezone.utc)
+            for orm in self._session.scalars(select(AnexoIViviendaORM)).all():
+                if _clave_global_estancia(orm.estancia) == clave:
+                    orm.min_m2 = valor
+                    orm.editable_por_usuario = 1
+                    orm.actualizado_en = ahora
+            self._session.commit()
+            return
+
         try:
             n_dorms = int(categoria)
         except (TypeError, ValueError) as exc:

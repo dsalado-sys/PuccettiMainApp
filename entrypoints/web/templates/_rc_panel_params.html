@@ -213,6 +213,12 @@
         </select>
         <small class="rc-hint">"Conjuntos" acota a 1L/2L con mínimos menores.</small>
       </label>
+      <div class="rc-campo" data-cuando-uso="apartamentos_turisticos" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Superficies mínimas de estancias</span>
+        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-minimos"
+                data-uso="apartamentos_turisticos">Ver / editar mínimos</button>
+        <small class="rc-hint">Mínimo por estancia y tipología de la categoría/grupo elegidos, según Normativa.</small>
+      </div>
       {# §2.5 — Vivienda y apartamento turístico se definen por su Nº DE
          DORMITORIOS. El sistema enumera todas las combinaciones de tamaños por
          dormitorio (vivienda: individual/doble; apartamento: +triple/cuádruple),
@@ -249,6 +255,12 @@
       </label>
       {{ tip_bloque("hotel_apartamento", "apartamento", lbl_apt, "tipologia_apartamento", prog, "programa", "pb", "rc-tip-hotel-apartamento") }}
       {{ tip_bloque("hotel_apartamento", "apartamento", lbl_apt, "tipologia_apartamento", prog_t, "programa_tipo", "tipo", "rc-tip-hotel-apartamento-tipo") }}
+      <div class="rc-campo" data-cuando-uso="hotel_apartamento" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Superficies mínimas de estancias</span>
+        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-minimos"
+                data-uso="hotel_apartamento">Ver / editar mínimos</button>
+        <small class="rc-hint">Mínimo por estancia y tipología de la categoría elegida, según Normativa.</small>
+      </div>
 
       {# ── HOTELERO: hotel / hostal / pensión / albergue (Anexo I.1) — categoría global (PB) ── #}
       <label class="rc-campo" data-cuando-uso="hotelero" data-visible-en-planta="pb">
@@ -261,6 +273,12 @@
       </label>
       {{ tip_bloque("hotelero", "hotelero", lbl_hab, "tipologia_habitacion", prog, "programa", "pb", "rc-tip-hotelero") }}
       {{ tip_bloque("hotelero", "hotelero", lbl_hab, "tipologia_habitacion", prog_t, "programa_tipo", "tipo", "rc-tip-hotelero-tipo") }}
+      <div class="rc-campo" data-cuando-uso="hotelero" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Superficies mínimas de estancias</span>
+        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-minimos"
+                data-uso="hotelero">Ver / editar mínimos</button>
+        <small class="rc-hint">Mínimo por estancia y tipología de la categoría elegida, según Normativa.</small>
+      </div>
 
       <label class="rc-campo" data-visible-en-planta="pb">
         <span class="rc-campo-label">% unidades adaptadas (Normativa)</span>
