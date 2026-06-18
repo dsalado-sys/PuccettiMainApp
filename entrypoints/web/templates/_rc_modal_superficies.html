@@ -1,0 +1,22 @@
+{# Modal del módulo Render: muestra y edita las superficies mínimas de las
+   estancias de vivienda (incluido estudio) por nº de dormitorios. Persiste en
+   la BBDD de Normativa; el motor las recarga sin reiniciar la app. #}
+<dialog id="rc-modal-superficies" class="rc-modal" aria-labelledby="rc-sup-titulo">
+  <article class="rc-modal-card">
+    <header class="rc-modal-header">
+      <h2 id="rc-sup-titulo">Superficies mínimas de estancias</h2>
+      <button type="button" class="rc-modal-cerrar" id="rc-sup-cerrar" aria-label="Cerrar">×</button>
+    </header>
+
+    <div class="rc-modal-cuerpo">
+      <div id="rc-sup-secciones" class="rc-sup-secciones">
+        <p class="rc-vacio">Cargando…</p>
+      </div>
+
+      <div class="rc-modal-acciones rc-sup-acciones">
+        <button type="button" id="rc-sup-reset" class="boton-secundario">Restablecer valores</button>
+        <button type="button" id="rc-sup-guardar" class="boton-primario">Guardar cambios</button>
+      </div>
+    </div>
+  </article>
+</dialog>

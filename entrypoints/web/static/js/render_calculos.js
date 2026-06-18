@@ -188,10 +188,10 @@
     if (!tablaPlantaBody) return;
     tablaPlantaBody.innerHTML = "";
     if (!filas || !filas.length) {
-      tablaPlantaBody.innerHTML = '<tr><td colspan="10" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
+      tablaPlantaBody.innerHTML = '<tr><td colspan="12" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
       return;
     }
-    const tot = { c: 0, u: 0, mur: 0, murEst: 0, circ: 0, nuc: 0, pat: 0, loc: 0, viv: 0 };
+    const tot = { c: 0, u: 0, mur: 0, murEst: 0, circ: 0, nuc: 0, pat: 0, loc: 0, otr: 0, com: 0, viv: 0 };
     filas.forEach(r => {
       tot.c += r.construida_m2 || 0;
       tot.u += r.util_viviendas_m2 || 0;
@@ -201,6 +201,8 @@
       tot.nuc += r.nucleo_m2 || 0;
       tot.pat += r.patios_m2 || 0;
       tot.loc += r.local_m2 || 0;
+      tot.otr += r.otros_m2 || 0;
+      tot.com += r.usos_comunes_m2 || 0;
       tot.viv += r.viviendas || 0;
       const tr = document.createElement("tr");
       const tipo = r.tipo || "regular";
@@ -218,7 +220,9 @@
         <td>${fmt.m2.format(r.circulacion_m2 || 0)}</td>
         <td>${fmt.m2.format(r.nucleo_m2 || 0)}</td>
         <td>${fmt.m2.format(r.patios_m2 || 0)}</td>
-        <td>${fmt.m2.format(r.local_m2 || 0)}</td>`;
+        <td class="rc-col-local">${fmt.m2.format(r.local_m2 || 0)}</td>
+        <td>${fmt.m2.format(r.otros_m2 || 0)}</td>
+        <td class="rc-col-comunes">${fmt.m2.format(r.usos_comunes_m2 || 0)}</td>`;
       tablaPlantaBody.appendChild(tr);
     });
     const trTot = document.createElement("tr");
@@ -234,8 +238,11 @@
       <td>${fmt.m2.format(tot.circ)}</td>
       <td>${fmt.m2.format(tot.nuc)}</td>
       <td>${fmt.m2.format(tot.pat)}</td>
-      <td>${fmt.m2.format(tot.loc)}</td>`;
+      <td class="rc-col-local">${fmt.m2.format(tot.loc)}</td>
+      <td>${fmt.m2.format(tot.otr)}</td>
+      <td class="rc-col-comunes">${fmt.m2.format(tot.com)}</td>`;
     tablaPlantaBody.appendChild(trTot);
+    _gatearColumnasUso();
   }
 
   // Etiqueta legible de una tipología (busca en todos los conjuntos de opciones).
@@ -256,8 +263,8 @@
     }
     filas.forEach(r => {
       const tr = document.createElement("tr");
-      const esLocal = r.tipo === "local";
-      tr.className = esLocal ? "rc-fila-unidad-local" : "rc-fila-unidad-clicable";
+      const esReserva = r.tipo === "local" || r.tipo === "otros" || r.tipo === "usos_comunes";
+      tr.className = esReserva ? "rc-fila-unidad-local" : "rc-fila-unidad-clicable";
       tr.dataset.id = r.vivienda;
       tr.dataset.planta = r.planta;
       tr.dataset.tipo = r.tipo || "vivienda";
@@ -269,7 +276,7 @@
       tr.dataset.circ = r.circulacion_interior_por_unidad_m2 ?? 0;
       tr.dataset.muros = r.muros_por_unidad_m2 ?? 0;
       tr.dataset.estancias = JSON.stringify(r.estancias || []);
-      const utilCelda = esLocal
+      const utilCelda = esReserva
         ? `${fmt.m2.format(r.util_por_unidad_m2 ?? 0)} <small>(${fmt.pct.format(r.pct_util_destinado ?? 0)}% útil)</small>`
         : fmt.m2.format(r.util_por_unidad_m2 ?? 0);
       // En vivienda la columna muestra nº de dormitorios; en el resto, la tipología.
@@ -284,7 +291,7 @@
         <td>${fmt.m2.format(r.construida_por_unidad_m2 ?? 0)}</td>
         <td>${utilCelda}</td>
         <td>${r.adaptada ? "✓" : "—"}</td>`;
-      if (!esLocal) tr.addEventListener("click", () => abrirModalUnidad(tr));
+      if (!esReserva) tr.addEventListener("click", () => abrirModalUnidad(tr));
       tablaUnidadBody.appendChild(tr);
     });
   }
@@ -514,6 +521,13 @@
         return;
       }
       const data = await resp.json();
+      // Error bloqueante (p. ej. R3: Σ mínimos > útil máximo). Muestra la alerta
+      // y NO pinta capacidad vacía.
+      if (data.error) {
+        repintarAlertas(data.alertas);
+        mostrarToast(data.error, true);
+        return;
+      }
       ESTADO.fullPayload = data;
       // Iter. 3: edificio = null. Usamos envolvente.plantas para los tabs.
       const n_plantas = (data.envolvente?.plantas?.length) || (data.edificio?.plantas?.length) || 1;
@@ -867,6 +881,332 @@
   });
   refrescarChipCombo();
 
+  // ─── Modal "Superficies mínimas de estancias" (vivienda · Normativa) ──
+  const API_SUP = "/modulos/render-calculos/superficies-vivienda";
+  const modalSup = document.getElementById("rc-modal-superficies");
+  const btnSuperficies = document.getElementById("rc-btn-superficies");
+  const LBL_TIPOLOGIA_VIV = {
+    0: "Estudio", 1: "1 dormitorio", 2: "2 dormitorios",
+    3: "3 dormitorios", 4: "4 dormitorios", 5: "Más de 4 dormitorios",
+  };
+
+  async function abrirModalSuperficies() {
+    if (!modalSup) return;
+    const cont = document.getElementById("rc-sup-secciones");
+    cont.innerHTML = '<p class="rc-vacio">Cargando…</p>';
+    if (typeof modalSup.showModal === "function") modalSup.showModal();
+    else modalSup.setAttribute("open", "");
+    try {
+      const resp = await fetch(API_SUP);
+      if (!resp.ok) { cont.innerHTML = '<p class="rc-vacio">No se pudieron cargar las superficies.</p>'; return; }
+      const data = await resp.json();
+      pintarSeccionesSuperficies(data.filas || [], data.util_maximo || {});
+    } catch (e) {
+      cont.innerHTML = '<p class="rc-vacio">Error de red.</p>';
+    }
+  }
+
+  // Construye una fila <tr> de estancia editable. `f` es la fila del backend.
+  function filaSuperficie(f) {
+    const tr = document.createElement("tr");
+    const td1 = document.createElement("td");
+    td1.textContent = f.etiqueta;
+    const td2 = document.createElement("td");
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.min = "0";
+    inp.step = "0.5";
+    inp.value = f.min_m2;
+    inp.className = "rc-sup-input";
+    inp.dataset.ndorms = f.n_dormitorios;
+    inp.dataset.estancia = f.estancia;
+    inp.dataset.original = f.min_m2;
+    if (!puedeEditar) inp.disabled = true;
+    td2.appendChild(inp);
+    tr.appendChild(td1);
+    tr.appendChild(td2);
+    return tr;
+  }
+
+  // Fila del ÚTIL MÁXIMO de una tipología (R3). No es una estancia: su mínimo
+  // es el techo de la unidad. Se envía con estancia "_util_maximo".
+  function filaUtilMaximo(nDorms, valor) {
+    const tr = document.createElement("tr");
+    tr.className = "rc-sup-fila-maximo";
+    const td1 = document.createElement("td");
+    td1.textContent = "Útil máximo de la unidad";
+    const td2 = document.createElement("td");
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.min = "0";
+    inp.step = "1";
+    inp.value = valor;
+    inp.className = "rc-sup-input";
+    inp.dataset.ndorms = nDorms;
+    inp.dataset.estancia = "_util_maximo";
+    inp.dataset.original = valor;
+    if (!puedeEditar) inp.disabled = true;
+    td2.appendChild(inp);
+    tr.appendChild(td1);
+    tr.appendChild(td2);
+    return tr;
+  }
+
+  // Construye una sección (título + tabla). `utilMaximo` (n_dorms→m²) añade,
+  // solo en las secciones por tipología, la fila editable del útil máximo.
+  function seccionSuperficies(titulo, filas, nDorms, utilMaximo) {
+    const sec = document.createElement("section");
+    sec.className = "rc-sup-seccion";
+    const h = document.createElement("h3");
+    h.textContent = titulo;
+    sec.appendChild(h);
+    const tabla = document.createElement("table");
+    tabla.className = "rc-sup-tabla";
+    tabla.innerHTML = "<thead><tr><th>Estancia</th><th>Mínimo (m²)</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    filas.forEach(f => tbody.appendChild(filaSuperficie(f)));
+    if (nDorms != null && utilMaximo != null && utilMaximo[nDorms] != null) {
+      tbody.appendChild(filaUtilMaximo(nDorms, utilMaximo[nDorms]));
+    }
+    tabla.appendChild(tbody);
+    sec.appendChild(tabla);
+    return sec;
+  }
+
+  function pintarSeccionesSuperficies(filas, utilMaximo) {
+    const cont = document.getElementById("rc-sup-secciones");
+    cont.innerHTML = "";
+    if (!filas.length) {
+      cont.innerHTML = '<p class="rc-vacio">No hay superficies registradas.</p>';
+      return;
+    }
+    // 1) Mínimos GLOBALES (comunes a todas las tipologías): se muestran una sola
+    //    vez. Editarlos propaga a todas las tipologías en el backend (resuelve R1).
+    const globales = [];
+    const vistos = new Set();
+    filas.forEach(f => {
+      if (f.ambito !== "global") return;
+      if (vistos.has(f.clave_global)) return;
+      vistos.add(f.clave_global);
+      globales.push(f);
+    });
+    if (globales.length) {
+      cont.appendChild(seccionSuperficies("Comunes a todas las tipologías", globales));
+    }
+
+    // 2) Mínimos POR TIPOLOGÍA (Estancia y Estancia+comedor+cocina), agrupados
+    //    por nº de dormitorios (el backend ya envía las filas ordenadas).
+    const grupos = new Map();
+    filas.forEach(f => {
+      if (f.ambito === "global") return;
+      if (!grupos.has(f.n_dormitorios)) grupos.set(f.n_dormitorios, []);
+      grupos.get(f.n_dormitorios).push(f);
+    });
+    Array.from(grupos.keys()).sort((a, b) => a - b).forEach(n => {
+      const titulo = LBL_TIPOLOGIA_VIV[n] || (n + " dormitorios");
+      cont.appendChild(seccionSuperficies(titulo, grupos.get(n), n, utilMaximo));
+    });
+  }
+
+  async function guardarSuperficies() {
+    if (!puedeEditar) { mostrarToast("Sin permiso para editar", true); return; }
+    const inputs = document.querySelectorAll("#rc-sup-secciones .rc-sup-input");
+    const cambios = [];
+    inputs.forEach(inp => {
+      if (inp.value === "") return;
+      const v = Number(inp.value);
+      if (Number.isNaN(v)) return;
+      if (Number(inp.dataset.original) === v) return;   // sin cambio
+      cambios.push({ n_dormitorios: Number(inp.dataset.ndorms), estancia: inp.dataset.estancia, valor: v });
+    });
+    if (!cambios.length) { mostrarToast("No hay cambios que guardar"); return; }
+    try {
+      const resp = await fetch(API_SUP, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cambios }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        mostrarToast(err.detail || "Error al guardar", true);
+        return;
+      }
+      const data = await resp.json();
+      inputs.forEach(inp => { inp.dataset.original = inp.value; });   // nuevos originales
+      mostrarToast(`Superficies guardadas (${data.aplicados})`);
+      if (estado === "ok") pedirPreview();
+    } catch (e) { mostrarToast("Error de red", true); }
+  }
+
+  async function resetSuperficies() {
+    if (!puedeEditar) { mostrarToast("Sin permiso para editar", true); return; }
+    try {
+      const resp = await fetch(`${API_SUP}/reset`, { method: "POST" });
+      if (!resp.ok) { mostrarToast("No se pudo restablecer", true); return; }
+      mostrarToast("Valores restablecidos");
+      abrirModalSuperficies();   // recarga la tabla con los defaults
+    } catch (e) { mostrarToast("Error de red", true); }
+  }
+
+  if (btnSuperficies) btnSuperficies.addEventListener("click", abrirModalSuperficies);
+  const btnSupCerrar = document.getElementById("rc-sup-cerrar");
+  if (btnSupCerrar && modalSup) btnSupCerrar.addEventListener("click", () => modalSup.close());
+  const btnSupGuardar = document.getElementById("rc-sup-guardar");
+  if (btnSupGuardar) btnSupGuardar.addEventListener("click", guardarSuperficies);
+  const btnSupReset = document.getElementById("rc-sup-reset");
+  if (btnSupReset) btnSupReset.addEventListener("click", resetSuperficies);
+
+  // ─── Modal "Superficies mínimas" para usos turístico/hoteleros ────────
+  // Réplica del editor de vivienda, acotado a la categoría seleccionada en el
+  // panel (apartamentos turísticos · hotel-apartamento · hotelero).
+  const API_MIN = "/modulos/render-calculos/minimos";
+  const modalMin = document.getElementById("rc-modal-minimos");
+  const LBL_TIP_MIN = {
+    estudio: "Estudio", "1d": "1 dormitorio", "2d": "2 dormitorios",
+    "3d": "3 dormitorios", "4d": "4 o más dormitorios",
+    individual: "Individual", doble: "Doble", triple: "Triple",
+    cuadruple: "Cuádruple", multiple: "Múltiple (albergue)", comunes: "Áreas comunes",
+  };
+  const SELECT_CATEGORIA_MIN = {
+    apartamentos_turisticos: "categoria_apartamentos",
+    hotel_apartamento: "categoria_hotel_apartamento",
+    hotelero: "categoria_hotelero",
+  };
+  let MIN_CTX = { uso: null, categoria: "", grupo: "edificios" };
+
+  function _categoriaDeUso(uso) {
+    const sel = form.querySelector(`select[name="${SELECT_CATEGORIA_MIN[uso]}"]`);
+    return sel ? sel.value : "";
+  }
+
+  async function abrirModalMinimos(uso) {
+    if (!modalMin) return;
+    const categoria = _categoriaDeUso(uso);
+    const grupoSel = form.querySelector('select[name="grupo_apartamentos"]');
+    const grupo = uso === "apartamentos_turisticos" && grupoSel ? grupoSel.value : "edificios";
+    MIN_CTX = { uso, categoria, grupo };
+    const cont = document.getElementById("rc-min-secciones");
+    const subt = document.getElementById("rc-min-subtitulo");
+    cont.innerHTML = '<p class="rc-vacio">Cargando…</p>';
+    if (subt) {
+      const grupoTxt = grupo === "conjuntos" ? "Conjuntos" : "Edificios";
+      subt.textContent = `Categoría: ${categoria}` +
+        (uso === "apartamentos_turisticos" ? ` · ${grupoTxt}` : "");
+    }
+    if (typeof modalMin.showModal === "function") modalMin.showModal();
+    else modalMin.setAttribute("open", "");
+    try {
+      const q = new URLSearchParams({ categoria, grupo });
+      const resp = await fetch(`${API_MIN}/${uso}?${q.toString()}`);
+      if (!resp.ok) { cont.innerHTML = '<p class="rc-vacio">No se pudieron cargar las superficies.</p>'; return; }
+      const data = await resp.json();
+      pintarSeccionesMinimos(data.filas || []);
+    } catch (e) {
+      cont.innerHTML = '<p class="rc-vacio">Error de red.</p>';
+    }
+  }
+
+  function pintarSeccionesMinimos(filas) {
+    const cont = document.getElementById("rc-min-secciones");
+    cont.innerHTML = "";
+    if (!filas.length) {
+      cont.innerHTML = '<p class="rc-vacio">No hay superficies registradas para esta categoría.</p>';
+      return;
+    }
+    // Agrupar por tipología (el backend ya envía las filas ordenadas).
+    const grupos = new Map();
+    filas.forEach(f => {
+      if (!grupos.has(f.tipologia)) grupos.set(f.tipologia, []);
+      grupos.get(f.tipologia).push(f);
+    });
+    grupos.forEach((rows, tip) => {
+      const sec = document.createElement("section");
+      sec.className = "rc-sup-seccion";
+      const h = document.createElement("h3");
+      h.textContent = LBL_TIP_MIN[tip] || tip;
+      sec.appendChild(h);
+      const tabla = document.createElement("table");
+      tabla.className = "rc-sup-tabla";
+      tabla.innerHTML = "<thead><tr><th>Estancia</th><th>Mínimo (m²)</th></tr></thead>";
+      const tbody = document.createElement("tbody");
+      rows.forEach(f => {
+        const tr = document.createElement("tr");
+        const td1 = document.createElement("td");
+        td1.textContent = f.etiqueta;
+        const td2 = document.createElement("td");
+        const inp = document.createElement("input");
+        inp.type = "number";
+        inp.min = "0";
+        inp.step = "0.5";
+        inp.value = f.min_m2;
+        inp.className = "rc-min-input";
+        inp.dataset.tipologia = f.tipologia;
+        inp.dataset.estancia = f.estancia;
+        inp.dataset.original = f.min_m2;
+        if (!puedeEditar) inp.disabled = true;
+        td2.appendChild(inp);
+        tr.appendChild(td1);
+        tr.appendChild(td2);
+        tbody.appendChild(tr);
+      });
+      tabla.appendChild(tbody);
+      sec.appendChild(tabla);
+      cont.appendChild(sec);
+    });
+  }
+
+  async function guardarMinimos() {
+    if (!puedeEditar) { mostrarToast("Sin permiso para editar", true); return; }
+    if (!MIN_CTX.uso) return;
+    const inputs = document.querySelectorAll("#rc-min-secciones .rc-min-input");
+    const cambios = [];
+    inputs.forEach(inp => {
+      if (inp.value === "") return;
+      const v = Number(inp.value);
+      if (Number.isNaN(v)) return;
+      if (Number(inp.dataset.original) === v) return;   // sin cambio
+      cambios.push({ tipologia: inp.dataset.tipologia, estancia: inp.dataset.estancia, valor: v });
+    });
+    if (!cambios.length) { mostrarToast("No hay cambios que guardar"); return; }
+    try {
+      const resp = await fetch(`${API_MIN}/${MIN_CTX.uso}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categoria: MIN_CTX.categoria, grupo: MIN_CTX.grupo, cambios }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        mostrarToast(err.detail || "Error al guardar", true);
+        return;
+      }
+      const data = await resp.json();
+      inputs.forEach(inp => { inp.dataset.original = inp.value; });   // nuevos originales
+      mostrarToast(`Superficies guardadas (${data.aplicados})`);
+      if (estado === "ok") pedirPreview();
+    } catch (e) { mostrarToast("Error de red", true); }
+  }
+
+  async function resetMinimos() {
+    if (!puedeEditar) { mostrarToast("Sin permiso para editar", true); return; }
+    if (!MIN_CTX.uso) return;
+    try {
+      const resp = await fetch(`${API_MIN}/${MIN_CTX.uso}/reset`, { method: "POST" });
+      if (!resp.ok) { mostrarToast("No se pudo restablecer", true); return; }
+      mostrarToast("Valores restablecidos");
+      abrirModalMinimos(MIN_CTX.uso);   // recarga la tabla con los defaults
+    } catch (e) { mostrarToast("Error de red", true); }
+  }
+
+  document.querySelectorAll(".rc-btn-minimos").forEach(btn => {
+    btn.addEventListener("click", () => abrirModalMinimos(btn.dataset.uso));
+  });
+  const btnMinCerrar = document.getElementById("rc-min-cerrar");
+  if (btnMinCerrar && modalMin) btnMinCerrar.addEventListener("click", () => modalMin.close());
+  const btnMinGuardar = document.getElementById("rc-min-guardar");
+  if (btnMinGuardar) btnMinGuardar.addEventListener("click", guardarMinimos);
+  const btnMinReset = document.getElementById("rc-min-reset");
+  if (btnMinReset) btnMinReset.addEventListener("click", resetMinimos);
+
   // ─── Visibilidad combinada: uso × categoría de planta ─────────────────
   // Un campo se ve solo si su `data-cuando-uso` (si lo tiene) incluye el uso activo
   // Y su `data-visible-en-planta` (si lo tiene) incluye la categoría de planta activa.
@@ -880,6 +1220,19 @@
         || el.dataset.visibleEnPlanta.split(/\s+/).includes(cat);
       el.hidden = !(usoOk && plantaOk);
     });
+    _gatearColumnasUso();
+  }
+
+  // Columnas de la tabla "por planta" condicionadas por uso: "Local" en vivienda
+  // y AT; "Usos com." en AT / hoteles (no vivienda). "Otros" se ve siempre.
+  function _gatearColumnasUso() {
+    const tabla = document.getElementById("rc-tabla-planta");
+    if (!tabla) return;
+    const uso = usoActivoForm();
+    const localAplica = uso === "vivienda" || uso === "apartamentos_turisticos";
+    const comunesAplica = uso !== "vivienda";
+    tabla.querySelectorAll(".rc-col-local").forEach(el => el.classList.toggle("rc-col-oculta", !localAplica));
+    tabla.querySelectorAll(".rc-col-comunes").forEach(el => el.classList.toggle("rc-col-oculta", !comunesAplica));
   }
 
   // ─── Opciones condicionales dentro del panel ──────────────────────────

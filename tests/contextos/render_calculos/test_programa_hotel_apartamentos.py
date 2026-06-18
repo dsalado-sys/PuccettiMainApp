@@ -80,9 +80,10 @@ def test_conjuntos_cocina_y_bano_separados_y_clamp_categoria():
     estancias = pa.programa_apartamentos("doble", "2L", 40.0, grupo="conjuntos")
     nombres = [e.nombre for e in estancias]
     assert nombres == ["salon_comedor", "dormitorio_1", "cocina", "bano"]
-    # 3L no existe en conjuntos → se acota a 2L sin reventar.
+    # 3L no existe en conjuntos → se acota a 2L sin reventar. El estudio lleva
+    # estancia única + cocina + baño independientes (Anexo I.4).
     estancias_clamp = pa.programa_apartamentos("estudio", "3L", 25.0, grupo="conjuntos")
-    assert [e.nombre for e in estancias_clamp] == ["salon_comedor", "bano"]
+    assert [e.nombre for e in estancias_clamp] == ["salon_comedor", "cocina", "bano"]
 
 
 def test_conjuntos_sin_areas_sociales_vestibulo_solo_si_mas_de_15():

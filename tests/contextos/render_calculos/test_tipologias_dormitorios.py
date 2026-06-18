@@ -226,5 +226,8 @@ def test_vivienda_combo_estudio_usa_programa_estudio():
     assert not r.get("error")
     fila = next(f for f in r["tabla_unidad"] if f["tipo"] == "vivienda")
     nombres = [e["nombre"] for e in fila["estancias"]]
+    # Anexo I.5: estancia única (salón+dormitorio) + cocina + baño independientes.
     assert "espacio_principal" in nombres
+    assert "cocina" in nombres
+    assert "bano" in nombres
     assert "dormitorio_1" not in nombres

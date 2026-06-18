@@ -48,5 +48,7 @@ TEXTOS_AYUDA: dict[str, dict[str, AyudaParametro]] = {
         "salon_cocina_open": {"label": "Salón-cocina integrado"},
         "tipologias_extra": {"label": "Tipologías adicionales"},
         "pct_local_pb": {"label": "% local en planta baja"},
+        "pct_otros_pb": {"label": "% otros en planta baja"},
+        "pct_usos_comunes_pb": {"label": "% usos comunes en planta baja"},
     },
 }

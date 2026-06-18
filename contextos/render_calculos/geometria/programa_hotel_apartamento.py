@@ -36,6 +36,39 @@ AREA_SOCIAL_POR_UA_HAP: dict[str, float] = {"5E": 4.0, "4E": 3.2, "3E": 3.0, "2E
 PLAZAS: dict[str, int] = {"estudio": 2, "individual": 1, "doble": 2, "triple": 3, "cuadruple": 4}
 
 
+def _fusionar_minimos(destino: dict, origen: dict) -> None:
+    """Actualiza `destino` in-place con `origen` (hasta 1 nivel de anidamiento)."""
+    for clave, valor in origen.items():
+        if isinstance(valor, dict):
+            sub = destino.get(clave)
+            if isinstance(sub, dict):
+                sub.update({str(k): float(v) for k, v in valor.items()})
+            else:
+                destino[clave] = {str(k): float(v) for k, v in valor.items()}
+        else:
+            destino[clave] = float(valor)
+
+
+def cargar_desde_repo(catalogo) -> bool:
+    """Vuelca los mínimos editables de BBDD (Anexo I.2) a las constantes del módulo.
+
+    Hermano de `programa.cargar_desde_repo` (vivienda): hace que las ediciones del
+    editor de mínimos lleguen al dimensionado de estancias. Devuelve True si aplicó
+    algún override; False si la BBDD está vacía o el catálogo no expone el método.
+    """
+    obtener = getattr(catalogo, "consolidadas_hotel_apartamento", None)
+    if obtener is None:
+        return False
+    datos = obtener() or {}
+    if not datos:
+        return False
+    g = globals()
+    for clave in ("MIN_DORMITORIO_HAP", "MIN_ESTUDIO_HAP", "MIN_SALON_COMEDOR_HAP", "MIN_BANO_HAP"):
+        if clave in datos and isinstance(datos[clave], dict):
+            _fusionar_minimos(g[clave], datos[clave])
+    return True
+
+
 def _cat_validada(categoria: str) -> str:
     return categoria if categoria in MIN_SALON_COMEDOR_HAP else "3E"
 
@@ -88,12 +121,28 @@ def programa_hotel_apartamento(
     ]
 
 
+# % de circulación interior de la unidad, editable y compartido con los demás
+# usos (antes 1.15 fijo). `casos_uso` lo fija con `set_pct_circulacion_interior`.
+PCT_CIRCULACION_INTERIOR = 15.0
+
+
+def set_pct_circulacion_interior(pct: float) -> None:
+    """Fija el % de circulación interior (panel de diseño → motor)."""
+    global PCT_CIRCULACION_INTERIOR
+    PCT_CIRCULACION_INTERIOR = max(0.0, float(pct))
+
+
+def _factor_circulacion() -> float:
+    return 1.0 + PCT_CIRCULACION_INTERIOR / 100.0
+
+
 def _base_util(categoria: str, tipologia: str) -> float:
     return sum(e.area_min_m2 for e in programa_hotel_apartamento(tipologia, categoria, 0.0))
 
 
 def util_objetivo_hotel_apartamento(categoria: str, tipologia: str) -> float:
-    return round(_base_util(categoria, tipologia) * 1.15, 2)
+    """Objetivo de m² útil por unidad: mínimos + % circulación interior."""
+    return round(_base_util(categoria, tipologia) * _factor_circulacion(), 2)
 
 
 def util_minimo_hotel_apartamento(categoria: str, tipologia: str) -> float:
@@ -119,11 +168,11 @@ def descriptor_tipologia_hotel_apartamento(
 ) -> TipologiaUnidadDescriptor:
     tip = _tip_validada(tipologia)
     util_obj = util_objetivo_hotel_apartamento(categoria, tip)
-    util_min = util_minimo_hotel_apartamento(categoria, tip)
     return TipologiaUnidadDescriptor(
         slug=tip,
         util_objetivo=util_obj,
-        util_minimo=util_min,
+        # Mínimo viable con circulación interior reservada (R4).
+        util_minimo=util_obj,
         util_maximo=round(util_obj * 1.25, 2),
         n_dorms_label=PLAZAS.get(tip, 2),
         tipo_unidad="hotel_apartamento",

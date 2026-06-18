@@ -167,6 +167,17 @@
         </select>
       </label>
 
+      {# Editor de superficies mínimas de estancias (vivienda · Anexo I.5).
+         Recoge los mínimos por estancia y tipología (incluido estudio), los
+         muestra y permite editarlos desde el modal. #}
+      <div class="rc-campo" data-cuando-uso="vivienda" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Superficies mínimas de estancias</span>
+        <button type="button" class="boton-secundario rc-btn-pequeno" id="rc-btn-superficies">
+          Ver / editar mínimos
+        </button>
+        <small class="rc-hint">Mínimo de cada estancia por tipología (incluido estudio), según Normativa.</small>
+      </div>
+
       {# El ático/sótano no editan tipología: heredan la de las plantas tipo. #}
       <p class="rc-hint" data-visible-en-planta="atico">
         El ático usa el tipo de unidad y el diseño de las plantas tipo. Aquí solo se
@@ -202,6 +213,12 @@
         </select>
         <small class="rc-hint">"Conjuntos" acota a 1L/2L con mínimos menores.</small>
       </label>
+      <div class="rc-campo" data-cuando-uso="apartamentos_turisticos" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Superficies mínimas de estancias</span>
+        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-minimos"
+                data-uso="apartamentos_turisticos">Ver / editar mínimos</button>
+        <small class="rc-hint">Mínimo por estancia y tipología de la categoría/grupo elegidos, según Normativa.</small>
+      </div>
       {# §2.5 — Vivienda y apartamento turístico se definen por su Nº DE
          DORMITORIOS. El sistema enumera todas las combinaciones de tamaños por
          dormitorio (vivienda: individual/doble; apartamento: +triple/cuádruple),
@@ -238,6 +255,12 @@
       </label>
       {{ tip_bloque("hotel_apartamento", "apartamento", lbl_apt, "tipologia_apartamento", prog, "programa", "pb", "rc-tip-hotel-apartamento") }}
       {{ tip_bloque("hotel_apartamento", "apartamento", lbl_apt, "tipologia_apartamento", prog_t, "programa_tipo", "tipo", "rc-tip-hotel-apartamento-tipo") }}
+      <div class="rc-campo" data-cuando-uso="hotel_apartamento" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Superficies mínimas de estancias</span>
+        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-minimos"
+                data-uso="hotel_apartamento">Ver / editar mínimos</button>
+        <small class="rc-hint">Mínimo por estancia y tipología de la categoría elegida, según Normativa.</small>
+      </div>
 
       {# ── HOTELERO: hotel / hostal / pensión / albergue (Anexo I.1) — categoría global (PB) ── #}
       <label class="rc-campo" data-cuando-uso="hotelero" data-visible-en-planta="pb">
@@ -250,22 +273,43 @@
       </label>
       {{ tip_bloque("hotelero", "hotelero", lbl_hab, "tipologia_habitacion", prog, "programa", "pb", "rc-tip-hotelero") }}
       {{ tip_bloque("hotelero", "hotelero", lbl_hab, "tipologia_habitacion", prog_t, "programa_tipo", "tipo", "rc-tip-hotelero-tipo") }}
+      <div class="rc-campo" data-cuando-uso="hotelero" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Superficies mínimas de estancias</span>
+        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-minimos"
+                data-uso="hotelero">Ver / editar mínimos</button>
+        <small class="rc-hint">Mínimo por estancia y tipología de la categoría elegida, según Normativa.</small>
+      </div>
 
       <label class="rc-campo" data-visible-en-planta="pb">
         <span class="rc-campo-label">% unidades adaptadas (Normativa)</span>
         <input type="number" name="pct_unidades_adaptadas" min="0" max="100" step="1"
                value="{{ prog.pct_unidades_adaptadas }}" data-bloque="programa">
       </label>
-      <label class="rc-checkbox" data-visible-en-planta="pb">
+      {# Salón-cocina integrado: solo aplica a vivienda (Anexo I.5). El uso
+         turístico/hotelero lo ignora; al cambiar de uso este campo se oculta y
+         no entra al payload, así que no "arrastra" un valor activado. #}
+      <label class="rc-checkbox" data-cuando-uso="vivienda" data-visible-en-planta="pb">
         <input type="checkbox" name="salon_cocina_open"
                {% if prog.salon_cocina_open %}checked{% endif %} data-bloque="programa">
         <span>Salón-cocina integrado</span>
       </label>
-      <label class="rc-campo" data-visible-en-planta="pb">
+      <label class="rc-campo" data-cuando-uso="vivienda apartamentos_turisticos" data-visible-en-planta="pb">
         <span class="rc-campo-label">% local en planta baja</span>
         <input type="number" name="pct_local_pb" min="0" max="100" step="1"
                value="{{ prog.pct_local_pb }}" data-bloque="programa">
-        <small class="rc-hint">Reduce útiles de PB para uso no residencial.</small>
+        <small class="rc-hint">Reduce útiles de PB para local comercial.</small>
+      </label>
+      <label class="rc-campo" data-visible-en-planta="pb">
+        <span class="rc-campo-label">% otros en planta baja</span>
+        <input type="number" name="pct_otros_pb" min="0" max="100" step="1"
+               value="{{ prog.pct_otros_pb }}" data-bloque="programa">
+        <small class="rc-hint">Reduce útiles de PB para otros usos.</small>
+      </label>
+      <label class="rc-campo" data-cuando-uso="apartamentos_turisticos hotel_apartamento hotelero" data-visible-en-planta="pb">
+        <span class="rc-campo-label">% usos comunes en planta baja</span>
+        <input type="number" name="pct_usos_comunes_pb" min="0" max="100" step="1"
+               value="{{ prog.pct_usos_comunes_pb }}" data-bloque="programa">
+        <small class="rc-hint">Reduce útiles de PB para zonas comunes del establecimiento.</small>
       </label>
     </div>
   </details>
@@ -314,6 +358,10 @@
       {{ dnum("% circulación (tipo)", "pct_circulacion_tipo", "diseno_tipo", d_t.pct_circulacion_tipo, "0", "40", "1", "tipo") }}
       {{ dnum("% circulación (ático)", "pct_circulacion_tipo", "diseno_atico", d_a.pct_circulacion_tipo, "0", "40", "1", "atico") }}
       {{ dnum("% circulación (sótano)", "pct_circulacion_tipo", "diseno_sotano", d_s.pct_circulacion_tipo, "0", "40", "1", "sotano") }}
+
+      {# % circulación INTERIOR de la unidad — único, compartido por todos los usos
+         (vivienda/AT/hotel/hotel-apt). Solo se edita en PB; reemplaza el 15% fijo. #}
+      {{ dnum("% circulación interior unidad", "pct_circulacion_interior", "diseno", d.pct_circulacion_interior, "0", "40", "1", "pb") }}
 
       {# % núcleo — PB / tipo (ático y sótano lo heredan) #}
       {{ dnum("% núcleo (PB)", "pct_nucleo", "diseno", d.pct_nucleo, "0", "30", "1", "pb") }}

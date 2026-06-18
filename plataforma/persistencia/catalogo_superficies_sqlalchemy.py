@@ -13,6 +13,84 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 from .sqlalchemy_base import Base
 
 
+# Estancias que no son "habitaciones" editables (circulación es un derivado del
+# útil, no una superficie mínima de estancia): se excluyen del editor de la UI.
+_ESTANCIAS_NO_EDITABLES = {"circulacion_interior"}
+
+# Clave sintética para editar el ÚTIL MÁXIMO de una tipología (no es una
+# estancia; es el techo de la unidad, columna `max_m2_util`). El editor la envía
+# como una fila aparte por tipología (R3).
+_UTIL_MAXIMO_ESTANCIA = "_util_maximo"
+
+
+def _clave_global_estancia(estancia: str) -> str | None:
+    """Clave de agrupación de las estancias cuyo mínimo es GLOBAL (no varía por
+    nº de dormitorios): dormitorio principal/mínimo, cocina, baño, aseo. Las
+    estancias por tipología (Estancia y Estancia+comedor+cocina, y el espacio
+    único del estudio) devuelven None.
+
+    Resuelve el colapso last-row-wins de `consolidadas_vivienda`: el editor las
+    muestra una sola vez y al editar una se propaga a todas las tipologías
+    (ver `CatalogoSuperficiesSQLAlchemy.actualizar`).
+    """
+    if estancia == "cocina":
+        return "cocina"
+    if estancia == "bano" or estancia.startswith("bano_"):
+        return "bano"
+    if estancia == "aseo" or estancia.startswith("aseo_"):
+        return "aseo"
+    if estancia == "dormitorio_1":
+        return "dormitorio_principal"
+    if estancia.startswith("dormitorio_"):
+        return "dormitorio_minimo"
+    return None
+
+
+def _etiqueta_global(clave: str) -> str:
+    """Etiqueta legible de un mínimo global, independiente de la tipología."""
+    return {
+        "cocina": "Cocina independiente",
+        "bano": "Baño",
+        "aseo": "Aseo",
+        "dormitorio_principal": "Dormitorio principal",
+        "dormitorio_minimo": "Dormitorio mínimo",
+    }.get(clave, clave)
+
+
+def _etiqueta_estancia(estancia: str) -> str:
+    """Nombre legible de una estancia por tipología para el editor."""
+    base = {
+        "salon": "Estancia (E)",
+        "salon_cocina": "Estancia + comedor + cocina",
+        "espacio_principal": "Estancia principal (salón-dormitorio)",
+        "cocina": "Cocina independiente",
+        "dormitorio_1": "Dormitorio principal",
+        "bano": "Baño",
+        "aseo": "Aseo",
+    }
+    if estancia in base:
+        return base[estancia]
+    if estancia.startswith("dormitorio_"):
+        return f"Dormitorio {estancia.split('_', 1)[1]}"
+    if estancia.startswith("bano_"):
+        return f"Baño {estancia.split('_', 1)[1]}"
+    return estancia
+
+
+def _orden_estancia(estancia: str) -> tuple[int, int]:
+    """Orden de presentación de las estancias dentro de una tipología."""
+    fijo = {"salon": 0, "salon_cocina": 1, "espacio_principal": 2, "cocina": 3, "aseo": 4}
+    if estancia in fijo:
+        return (fijo[estancia], 0)
+    if estancia.startswith("dormitorio_"):
+        return (10, int(estancia.split("_", 1)[1]))
+    if estancia == "bano":
+        return (20, 0)
+    if estancia.startswith("bano_"):
+        return (20, int(estancia.split("_", 1)[1]))
+    return (99, 0)
+
+
 class AnexoIViviendaORM(Base):
     """Una fila por (n_dormitorios, estancia) con su mínimo y máximo (m²).
 
@@ -70,6 +148,48 @@ class CatalogoSuperficiesSQLAlchemy:
             out[f.estancia + "_max"] = f.max_m2_util
         return out
 
+    def filas_vivienda(self) -> list[dict]:
+        """Filas crudas de superficies mínimas para el editor de la UI.
+
+        Una entrada por (n_dormitorios, estancia) con su mínimo (m²) y etiqueta
+        legible, ordenadas por tipología y orden de presentación. Excluye las
+        estancias no editables (circulación). El frontend las agrupa por nº de
+        dormitorios para construir la tabla por tipología (incluido estudio=0).
+        """
+        filas = self._session.scalars(select(AnexoIViviendaORM)).all()
+        out: list[dict] = []
+        for f in filas:
+            if f.estancia in _ESTANCIAS_NO_EDITABLES:
+                continue
+            clave = _clave_global_estancia(f.estancia)
+            es_global = clave is not None
+            out.append({
+                "n_dormitorios": f.n_dormitorios,
+                "estancia": f.estancia,
+                "etiqueta": _etiqueta_global(clave) if es_global else _etiqueta_estancia(f.estancia),
+                "min_m2": f.min_m2,
+                "editable_por_usuario": bool(f.editable_por_usuario),
+                # "global" → mínimo común a todas las tipologías (el editor lo
+                # muestra una vez); "tipologia" → varía por nº de dormitorios.
+                "ambito": "global" if es_global else "tipologia",
+                "clave_global": clave or "",
+            })
+        out.sort(key=lambda r: (r["n_dormitorios"], _orden_estancia(r["estancia"])))
+        return out
+
+    def util_maximo_por_tipologia(self) -> dict[int, float]:
+        """Útil máximo editable por nº de dormitorios (techo de la unidad, R3).
+
+        Es el máximo de `max_m2_util` entre las estancias de cada tipología — el
+        mismo valor que `consolidadas_vivienda` consolida como `UTIL_MAX[n]`.
+        """
+        out: dict[int, float] = {}
+        for f in self._session.scalars(select(AnexoIViviendaORM)).all():
+            n = f.n_dormitorios
+            if n not in out or f.max_m2_util > out[n]:
+                out[n] = f.max_m2_util
+        return out
+
     def consolidadas_vivienda(self) -> dict:
         """Devuelve todos los mínimos + targets consolidados como dicts.
         Estructura:
@@ -105,6 +225,8 @@ class CatalogoSuperficiesSQLAlchemy:
                 valores["MIN_BANO"] = f.min_m2
             elif est == "aseo":
                 valores["MIN_ASEO"] = f.min_m2
+            elif est == "espacio_principal":
+                valores["MIN_ESPACIO_PRINCIPAL"] = f.min_m2
             elif est == "dormitorio_1":
                 valores["MIN_DORM_DOBLE"] = f.min_m2
             elif est.startswith("dormitorio_") and est != "dormitorio_1":
@@ -138,10 +260,40 @@ class CatalogoSuperficiesSQLAlchemy:
             raise NotImplementedError(
                 "Anexo I solo soporta vivienda en este MVP; hotel/apt llegarán en iteración posterior."
             )
+
+        # Mínimo GLOBAL (dormitorio principal/mínimo, cocina, baño, aseo): se
+        # propaga a TODAS las tipologías con la misma clave. Así el valor que
+        # `consolidadas_vivienda` consolida (last-row-wins) es siempre coherente
+        # y editar la cocina de una tipología no se pierde (resuelve R1).
+        clave = _clave_global_estancia(estancia)
+        if clave is not None:
+            ahora = datetime.now(timezone.utc)
+            for orm in self._session.scalars(select(AnexoIViviendaORM)).all():
+                if _clave_global_estancia(orm.estancia) == clave:
+                    orm.min_m2 = valor
+                    orm.editable_por_usuario = 1
+                    orm.actualizado_en = ahora
+            self._session.commit()
+            return
+
         try:
             n_dorms = int(categoria)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Categoría inválida para vivienda: {categoria!r}") from exc
+
+        # Útil máximo de la tipología (R3): no es una estancia, es el techo de la
+        # unidad. Se escribe en `max_m2_util` de TODAS las estancias de la
+        # tipología (consolidadas_vivienda toma el máximo → UTIL_MAX[n]).
+        if estancia == _UTIL_MAXIMO_ESTANCIA:
+            ahora = datetime.now(timezone.utc)
+            for orm in self._session.scalars(
+                select(AnexoIViviendaORM).where(AnexoIViviendaORM.n_dormitorios == n_dorms)
+            ).all():
+                orm.max_m2_util = valor
+                orm.editable_por_usuario = 1
+                orm.actualizado_en = ahora
+            self._session.commit()
+            return
 
         orm = self._session.get(AnexoIViviendaORM, (n_dorms, estancia))
         if orm is None:

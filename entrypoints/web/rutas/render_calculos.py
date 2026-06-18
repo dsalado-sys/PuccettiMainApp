@@ -31,6 +31,7 @@ from app.contextos.render_calculos.casos_uso import (
     parametros_desde_proyecto,
 )
 from app.contextos.render_calculos.dominio import UsoEdificio
+from app.contextos.render_calculos.geometria import programa
 from app.contextos.render_calculos.parametros import (
     ParametrosUrbanisticos,
     parametros_a_dict,
@@ -336,6 +337,158 @@ def guardar_normativa(
 # desde el frontend; aquí no expone esas rutas.
 
 
+# ─── Superficies mínimas de estancias (vivienda · Normativa) ────────────────
+@router.get("/superficies-vivienda")
+def listar_superficies_vivienda(
+    rol: Rol = Depends(rol_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+):
+    """Mínimos de superficie por estancia y tipología de vivienda (incl. estudio)."""
+    _exige_permiso(rol, PermisoModulo.VER)
+    return JSONResponse({
+        "filas": catalogo_viv.filas_vivienda(),
+        "util_maximo": {str(n): v for n, v in catalogo_viv.util_maximo_por_tipologia().items()},
+    })
+
+
+@router.post("/superficies-vivienda")
+def guardar_superficies_vivienda(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+):
+    """Persiste los mínimos editados. `payload = {"cambios": [{n_dormitorios,
+    estancia, valor}, ...]}`. Tras guardar, recarga las constantes vivas del
+    motor para que el siguiente cálculo use los nuevos mínimos sin reiniciar."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    cambios = payload.get("cambios") or []
+    aplicados = 0
+    for c in cambios:
+        if not isinstance(c, dict):
+            continue
+        estancia = str(c.get("estancia") or "").strip()
+        if not estancia:
+            continue
+        try:
+            n_dorms = int(c.get("n_dormitorios"))
+            valor = float(c.get("valor"))
+        except (TypeError, ValueError):
+            continue
+        if valor < 0:
+            continue
+        catalogo_viv.actualizar("vivienda", str(n_dorms), estancia, valor)
+        aplicados += 1
+    if aplicados:
+        programa.cargar_desde_repo(catalogo_viv)
+    return JSONResponse({"ok": True, "aplicados": aplicados})
+
+
+@router.post("/superficies-vivienda/reset")
+def reset_superficies_vivienda(
+    rol: Rol = Depends(rol_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+):
+    """Restablece los mínimos a los valores sembrados (defaults del motor)."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    catalogo_viv.reset()
+    programa.cargar_desde_repo(catalogo_viv)
+    return JSONResponse({"ok": True})
+
+
+# ─── Superficies mínimas de los usos turístico/hoteleros (Anexo I.1–I.4) ─────
+# Análogo a vivienda, pero acotado a la categoría seleccionada en el panel
+# (las tablas tienen una entrada por categoría × tipología × estancia). Los
+# adapters de apartamentos/hotel-apt/hotelero se consultan en vivo en cada
+# cálculo, así que no hay constantes que recargar tras editar (a diferencia de
+# vivienda, cuyo motor cachea los mínimos).
+_USOS_MINIMOS = {"apartamentos_turisticos", "hotel_apartamento", "hotelero"}
+
+
+def _adapter_minimos(uso: str, apt, hap, hot):
+    if uso == "apartamentos_turisticos":
+        return apt
+    if uso == "hotel_apartamento":
+        return hap
+    if uso == "hotelero":
+        return hot
+    raise HTTPException(404, f"Uso desconocido para el editor de mínimos: {uso!r}.")
+
+
+@router.get("/minimos/{uso}")
+def listar_minimos(
+    uso: str,
+    categoria: Annotated[str, Query(...)],
+    grupo: Annotated[str, Query()] = "edificios",
+    rol: Rol = Depends(rol_activo),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Mínimos por estancia y tipología de la categoría seleccionada del uso dado."""
+    _exige_permiso(rol, PermisoModulo.VER)
+    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hap, catalogo_hot)
+    if uso == "apartamentos_turisticos":
+        filas = adapter.filas_min(categoria, grupo)
+    else:
+        filas = adapter.filas_min(categoria)
+    return JSONResponse({"filas": filas})
+
+
+@router.post("/minimos/{uso}")
+def guardar_minimos(
+    uso: str,
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Persiste los mínimos editados de la categoría. `payload = {categoria,
+    grupo, cambios: [{tipologia, estancia, valor}, ...]}`."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hap, catalogo_hot)
+    categoria = str(payload.get("categoria") or "").strip()
+    grupo = str(payload.get("grupo") or "edificios").strip() or "edificios"
+    if not categoria:
+        raise HTTPException(422, "Falta la categoría.")
+    cambios = payload.get("cambios") or []
+    aplicados = 0
+    for c in cambios:
+        if not isinstance(c, dict):
+            continue
+        tipologia = str(c.get("tipologia") or "").strip()
+        estancia = str(c.get("estancia") or "").strip()
+        if not tipologia or not estancia:
+            continue
+        try:
+            valor = float(c.get("valor"))
+        except (TypeError, ValueError):
+            continue
+        if valor < 0:
+            continue
+        if uso == "apartamentos_turisticos":
+            adapter.actualizar(categoria, tipologia, estancia, valor, grupo=grupo)
+        else:
+            adapter.actualizar(categoria, tipologia, estancia, valor)
+        aplicados += 1
+    return JSONResponse({"ok": True, "aplicados": aplicados})
+
+
+@router.post("/minimos/{uso}/reset")
+def reset_minimos(
+    uso: str,
+    rol: Rol = Depends(rol_activo),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Restablece los mínimos del uso a los valores sembrados (Anexo I)."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hap, catalogo_hot)
+    adapter.reset()
+    return JSONResponse({"ok": True})
+
+
 # ─── Export CSV ─────────────────────────────────────────────────────────────
 @router.post("/export.csv")
 def export_csv(
@@ -366,11 +519,13 @@ def export_csv(
     writer = csv.writer(buf, delimiter=";")
     writer.writerow(["# Tabla de superficies por planta — Render y cálculos §2.7"])
     writer.writerow(["planta", "tipo", "viviendas", "construida_m2", "util_viviendas_m2",
-                     "muros_m2", "circulacion_m2", "nucleo_m2"])
+                     "muros_m2", "circulacion_m2", "nucleo_m2",
+                     "local_m2", "otros_m2", "usos_comunes_m2"])
     for r in resultado.get("tabla_planta", []):
         writer.writerow([r["planta"], r.get("tipo", "regular"), r["viviendas"], r["construida_m2"],
                          r["util_viviendas_m2"], r.get("muros_m2", 0.0),
-                         r["circulacion_m2"], r.get("nucleo_m2", 0.0)])
+                         r["circulacion_m2"], r.get("nucleo_m2", 0.0),
+                         r.get("local_m2", 0.0), r.get("otros_m2", 0.0), r.get("usos_comunes_m2", 0.0)])
     writer.writerow([])
     writer.writerow(["# Tabla por unidad (iter. 3 — sintética desde cálculo)"])
     writer.writerow(["planta", "vivienda", "dorms", "tipo", "util_m2_objetivo",

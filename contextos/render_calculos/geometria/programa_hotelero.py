@@ -69,6 +69,30 @@ TIPOLOGIA_HABITACION_A_PLAZAS = {
 }
 
 
+def cargar_desde_repo(catalogo) -> bool:
+    """Vuelca los mínimos editables de BBDD (Anexo I.1) a las constantes del módulo.
+
+    Hermano de `programa.cargar_desde_repo` (vivienda): hace que las ediciones del
+    editor de mínimos lleguen al dimensionado de habitación/baño. Devuelve True si
+    aplicó algún override; False si la BBDD está vacía o falta el método.
+    """
+    obtener = getattr(catalogo, "consolidadas_hotelero", None)
+    if obtener is None:
+        return False
+    datos = obtener() or {}
+    if not datos:
+        return False
+    g = globals()
+    hab = datos.get("MIN_HABITACION")
+    if isinstance(hab, dict):
+        # Claves tupla (categoria, tipologia); update in-place conserva la referencia.
+        g["MIN_HABITACION"].update({tuple(k): float(v) for k, v in hab.items()})
+    banos = datos.get("MIN_BANO_HOTELERO")
+    if isinstance(banos, dict):
+        g["MIN_BANO_HOTELERO"].update({str(k): float(v) for k, v in banos.items()})
+    return True
+
+
 def _cat_validada(categoria: str) -> str:
     return categoria if categoria in SALON_SOCIAL_MIN else "hotel_3"
 
@@ -106,14 +130,29 @@ def programa_habitacion(tipo: str, categoria: str, util_disponible: float) -> li
     return estancias
 
 
+# % de circulación interior de la unidad, editable y compartido con los demás
+# usos (antes 1.15 fijo). `casos_uso` lo fija con `set_pct_circulacion_interior`.
+PCT_CIRCULACION_INTERIOR = 15.0
+
+
+def set_pct_circulacion_interior(pct: float) -> None:
+    """Fija el % de circulación interior (panel de diseño → motor)."""
+    global PCT_CIRCULACION_INTERIOR
+    PCT_CIRCULACION_INTERIOR = max(0.0, float(pct))
+
+
+def _factor_circulacion() -> float:
+    return 1.0 + PCT_CIRCULACION_INTERIOR / 100.0
+
+
 def util_minimo_habitacion(categoria: str, tipo: str) -> float:
     cat = _cat_validada(categoria)
     return round(_habitacion_min(cat, tipo) + _bano_target(cat), 2)
 
 
 def util_objetivo_habitacion(categoria: str, tipo: str) -> float:
-    """Objetivo de m² útil por unidad, con margen del 15% sobre el mínimo."""
-    return round(util_minimo_habitacion(categoria, tipo) * 1.15, 2)
+    """Objetivo de m² útil por unidad: mínimo + % circulación interior."""
+    return round(util_minimo_habitacion(categoria, tipo) * _factor_circulacion(), 2)
 
 
 def areas_sociales_obligatorias_hotel(
@@ -142,12 +181,12 @@ def total_sociales_obligatorias_m2(
 
 def descriptor_tipologia_hotelero(categoria: str, tipo: str) -> TipologiaUnidadDescriptor:
     util_obj = util_objetivo_habitacion(categoria, tipo)
-    util_min = util_minimo_habitacion(categoria, tipo)
     plazas = TIPOLOGIA_HABITACION_A_PLAZAS.get(tipo, 2)
     return TipologiaUnidadDescriptor(
         slug=tipo,
         util_objetivo=util_obj,
-        util_minimo=util_min,
+        # Mínimo viable con circulación interior reservada (R4).
+        util_minimo=util_obj,
         util_maximo=round(util_obj * 1.25, 2),
         n_dorms_label=plazas,
         tipo_unidad="habitacion",

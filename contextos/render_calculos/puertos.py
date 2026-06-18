@@ -40,6 +40,10 @@ class CatalogoSuperficiesRepositorio(Protocol):
         """m² útiles objetivo por unidad (None si no hay fila → motor usa fallback)."""
         ...
 
+    def consolidadas_vivienda(self) -> dict:
+        """Mínimos/targets consolidados para `programa.cargar_desde_repo` ({} si vacía)."""
+        ...
+
     def actualizar(
         self,
         uso: str,
@@ -62,7 +66,13 @@ class CatalogoApartamentosRepositorio(Protocol):
 
     def util_objetivo_apartamento(self, categoria: str, tipologia: str, grupo: str = "edificios") -> float | None: ...
 
+    def consolidadas_apartamentos(self, grupo: str = "edificios") -> dict:
+        """Mínimos consolidados para `programa_apartamentos.cargar_desde_repo` ({} si vacía)."""
+        ...
+
     def areas_comunes(self, categoria: str, grupo: str = "edificios") -> dict[str, float]: ...
+
+    def filas_min(self, categoria: str, grupo: str = "edificios") -> list[dict]: ...
 
     def actualizar(
         self,
@@ -84,7 +94,13 @@ class CatalogoHotelApartamentoRepositorio(Protocol):
 
     def util_objetivo(self, categoria: str, tipologia: str) -> float | None: ...
 
+    def consolidadas_hotel_apartamento(self) -> dict:
+        """Mínimos consolidados para `programa_hotel_apartamento.cargar_desde_repo` ({} si vacía)."""
+        ...
+
     def areas_sociales(self, categoria: str) -> dict[str, float]: ...
+
+    def filas_min(self, categoria: str) -> list[dict]: ...
 
     def actualizar(
         self,
@@ -105,7 +121,13 @@ class CatalogoHoteleroRepositorio(Protocol):
 
     def util_objetivo_habitacion(self, categoria: str, tipologia: str) -> float | None: ...
 
+    def consolidadas_hotelero(self) -> dict:
+        """Mínimos consolidados para `programa_hotelero.cargar_desde_repo` ({} si vacía)."""
+        ...
+
     def areas_sociales(self, categoria: str) -> dict[str, float]: ...
+
+    def filas_min(self, categoria: str) -> list[dict]: ...
 
     def actualizar(
         self,

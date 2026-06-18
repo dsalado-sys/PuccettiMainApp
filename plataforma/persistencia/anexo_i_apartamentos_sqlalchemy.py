@@ -66,22 +66,73 @@ class CatalogoApartamentosSQLAlchemy:
     def util_objetivo_apartamento(
         self, categoria: str, tipologia: str, grupo: str = "edificios",
     ) -> float | None:
-        """m² útiles objetivo por unidad (mínimo del Anexo × 1.15).
+        """m² útiles objetivo por unidad (Σ mínimos de las estancias × 1.15).
 
-        Las filas del mismo `(categoria, tipologia)` comparten `max_m2_util`
-        (mínimo del Anexo de esa combinación). Si no hay filas → None y el motor
-        usa fallback.
+        Se calcula sumando el `min_m2` EDITABLE de cada estancia de la unidad
+        `(categoria, tipologia)`, de modo que cualquier mínimo editado en el editor
+        se refleja en el objetivo (antes se leía `max_m2_util` de una fila al azar,
+        que no se actualizaba al editar). Si no hay filas → None (fallback motor).
         """
         orm = self._orm(grupo)
-        fila = self._session.scalar(
+        filas = self._session.scalars(
             select(orm)
             .where(orm.categoria == categoria)
             .where(orm.tipologia == tipologia)
-            .limit(1)
-        )
-        if fila is None:
+        ).all()
+        if not filas:
             return None
-        return round(float(fila.max_m2_util) * 1.15, 2)
+        base = sum(float(f.min_m2) for f in filas)
+        return round(base * 1.15, 2)
+
+    def consolidadas_apartamentos(self, grupo: str = "edificios") -> dict:
+        """Mínimos editables de BBDD en la forma de las constantes del motor.
+
+        Hermano de `consolidadas_vivienda`: `programa_apartamentos.cargar_desde_repo`
+        lo vuelca a sus diccionarios `MIN_*` para que el dimensionado de estancias
+        respete los mínimos editados. Devuelve `{}` si la tabla está vacía.
+
+        Mapeo (excluye las filas `comunes_*`):
+        - `dormitorio_1` por tipología de ocupación → `MIN_DORMITORIO[tip][cat]`.
+        - `salon_comedor` del estudio              → `MIN_ESTUDIO[cat]`.
+        - `salon_comedor` de la doble (base ≤4 pax) → `MIN_SALON_COMEDOR[cat]`.
+        - `cocina` / `bano` (dependen solo de cat)  → `MIN_COCINA` / `MIN_BANO`.
+        """
+        orm = self._orm(grupo)
+        filas = self._session.scalars(select(orm)).all()
+        if not filas:
+            return {}
+        dorm: dict[str, dict[str, float]] = {}
+        estudio: dict[str, float] = {}
+        salon: dict[str, float] = {}
+        cocina: dict[str, float] = {}
+        bano: dict[str, float] = {}
+        for f in filas:
+            if str(f.categoria).startswith("comunes"):
+                continue
+            cat, tip, est = f.categoria, f.tipologia, f.estancia
+            if est == "dormitorio_1" and tip in ("individual", "doble", "triple", "cuadruple"):
+                dorm.setdefault(tip, {})[cat] = float(f.min_m2)
+            elif est == "cocina":
+                cocina[cat] = float(f.min_m2)
+            elif est in ("bano", "bano_1"):
+                bano[cat] = float(f.min_m2)
+            elif est == "salon_comedor":
+                if tip == "estudio":
+                    estudio[cat] = float(f.min_m2)
+                elif tip == "doble":
+                    salon[cat] = float(f.min_m2)
+        out: dict = {}
+        if dorm:
+            out["MIN_DORMITORIO"] = dorm
+        if estudio:
+            out["MIN_ESTUDIO"] = estudio
+        if salon:
+            out["MIN_SALON_COMEDOR"] = salon
+        if cocina:
+            out["MIN_COCINA"] = cocina
+        if bano:
+            out["MIN_BANO"] = bano
+        return out
 
     def areas_comunes(self, categoria: str, grupo: str = "edificios") -> dict[str, float]:
         """Devuelve los m² por servicio común para la categoría dada."""
@@ -90,6 +141,18 @@ class CatalogoApartamentosSQLAlchemy:
             select(orm).where(orm.categoria == "comunes_" + categoria)
         ).all()
         return {f.estancia: f.min_m2 for f in filas}
+
+    def filas_min(self, categoria: str, grupo: str = "edificios") -> list[dict]:
+        """Filas del editor de mínimos para una categoría (unidades + áreas comunes)."""
+        from .etiquetas_anexo import construir_filas_min
+        orm = self._orm(grupo)
+        unidad = self._session.scalars(
+            select(orm).where(orm.categoria == categoria)
+        ).all()
+        comunes = self._session.scalars(
+            select(orm).where(orm.categoria == "comunes_" + categoria)
+        ).all()
+        return construir_filas_min(unidad, comunes)
 
     def actualizar(
         self,

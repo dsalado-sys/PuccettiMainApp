@@ -218,6 +218,8 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
     muros_est = list(getattr(cap, "muros_estimados_por_planta", [])) or [0.0] * len(cap.nombres_planta)
     patio_pp = list(getattr(cap, "patio_por_planta", [])) or [0.0] * len(cap.nombres_planta)
     local_pp = list(getattr(cap, "local_por_planta", [])) or [0.0] * len(cap.nombres_planta)
+    otros_pp = list(getattr(cap, "otros_por_planta", [])) or [0.0] * len(cap.nombres_planta)
+    comunes_pp = list(getattr(cap, "usos_comunes_por_planta", [])) or [0.0] * len(cap.nombres_planta)
     mix_pp = list(getattr(cap, "viviendas_por_tipologia", [])) or [{}] * len(cap.nombres_planta)
 
     for i, nombre in enumerate(cap.nombres_planta):
@@ -229,6 +231,8 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
         nucleo_i = cap.nucleo_por_planta[i]
         patio_i = patio_pp[i] if i < len(patio_pp) else 0.0
         local_i = local_pp[i] if i < len(local_pp) else 0.0
+        otros_i = otros_pp[i] if i < len(otros_pp) else 0.0
+        comunes_i = comunes_pp[i] if i < len(comunes_pp) else 0.0
         mix_i = mix_pp[i] if i < len(mix_pp) else {}
         viv_i = cap.viv_por_planta[i]
         tipo_i = cap.tipo_planta[i]
@@ -245,6 +249,8 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
             "nucleo_m2": round(nucleo_i, 2),
             "patios_m2": round(patio_i, 2),
             "local_m2": round(local_i, 2),
+            "otros_m2": round(otros_i, 2),
+            "usos_comunes_m2": round(comunes_i, 2),
             "mix_tipologia": dict(mix_i),
         })
 
@@ -256,8 +262,9 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
     #
     # El patio interior NO computa como construido (vacío a cielo abierto): la
     # columna `construida_m2` es la huella menos el patio, así que la identidad
-    # por planta es `construida = útil + muros + circulación + núcleo + local`
-    # y la columna `patios_m2` queda fuera de esa suma (se reporta aparte).
+    # por planta es `construida = útil + muros + circulación + núcleo + local +
+    # otros + usos comunes` y la columna `patios_m2` queda fuera de esa suma
+    # (se reporta aparte). Otros y usos comunes solo son > 0 en planta baja.
     return rows
 
 
@@ -282,7 +289,7 @@ _DIAMETROS_MIN_M: dict[str, float] = {
     "dormitorio_4": 2.00,
     "dormitorio": 2.40,          # estudio (legacy nombre)
     "habitacion": 2.70,          # unidad de alojamiento hotelera (Anexo I.1)
-    "espacio_principal": 3.00,   # estudio: salón+cocina+zona dormir integrados
+    "espacio_principal": 3.00,   # estudio: salón + zona dormir (cocina y baño aparte)
     "cocina": 1.60,
     "bano": 1.20, "bano_1": 1.20, "bano_2": 1.20, "aseo": 1.20, "aseo_2": 1.20,
     "vestibulo": 1.20,
@@ -511,31 +518,44 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
 
     local_pp = list(getattr(cap, "local_por_planta", [])) or [0.0] * len(cap.nombres_planta)
     pct_local_pb = float(getattr(cap, "pct_local_pb", 0.0))
+    otros_pp = list(getattr(cap, "otros_por_planta", [])) or [0.0] * len(cap.nombres_planta)
+    pct_otros_pb = float(getattr(cap, "pct_otros_pb", 0.0))
+    comunes_pp = list(getattr(cap, "usos_comunes_por_planta", [])) or [0.0] * len(cap.nombres_planta)
+    pct_usos_comunes_pb = float(getattr(cap, "pct_usos_comunes_pb", 0.0))
     unidades_pp = list(getattr(cap, "unidades_por_planta", []))
     tipologias_pp = list(getattr(cap, "tipologias_unidad_por_planta", []))
 
     for i, nombre_planta in enumerate(cap.nombres_planta):
         viv_i = cap.viv_por_planta[i]
         local_i = local_pp[i] if i < len(local_pp) else 0.0
+        otros_i = otros_pp[i] if i < len(otros_pp) else 0.0
+        comunes_i = comunes_pp[i] if i < len(comunes_pp) else 0.0
         unidades_i = unidades_pp[i] if i < len(unidades_pp) else []
         tipologias_i = tipologias_pp[i] if i < len(tipologias_pp) else []
 
-        # Fila "Local" — solo aparece si la planta tiene m² destinados a local.
-        if local_i > 0:
-            rows.append({
-                "planta": nombre_planta,
-                "vivienda": "Local",
-                "dorms": "—",
-                "tipo": "local",
-                "util_m2_objetivo": 0.0,
-                "construida_por_unidad_m2": round(local_i, 2),
-                "util_por_unidad_m2": round(local_i, 2),
-                "muros_por_unidad_m2": 0.0,
-                "circulacion_por_unidad_m2": 0.0,
-                "pct_util_destinado": round(pct_local_pb, 1),
-                "adaptada": False,
-                "estancias": [],
-            })
+        # Filas de reserva de PB (local / otros / usos comunes) — cada una aparece
+        # solo si la planta tiene m² destinados a ese uso. Sin estancias y sin
+        # circulación: son superficie útil de PB apartada para uso no residencial.
+        for etiqueta, tipo_reserva, m2_reserva, pct_reserva in (
+            ("Local", "local", local_i, pct_local_pb),
+            ("Otros", "otros", otros_i, pct_otros_pb),
+            ("Usos comunes", "usos_comunes", comunes_i, pct_usos_comunes_pb),
+        ):
+            if m2_reserva > 0:
+                rows.append({
+                    "planta": nombre_planta,
+                    "vivienda": etiqueta,
+                    "dorms": "—",
+                    "tipo": tipo_reserva,
+                    "util_m2_objetivo": 0.0,
+                    "construida_por_unidad_m2": round(m2_reserva, 2),
+                    "util_por_unidad_m2": round(m2_reserva, 2),
+                    "muros_por_unidad_m2": 0.0,
+                    "circulacion_por_unidad_m2": 0.0,
+                    "pct_util_destinado": round(pct_reserva, 1),
+                    "adaptada": False,
+                    "estancias": [],
+                })
 
         if viv_i == 0 or not unidades_i:
             continue

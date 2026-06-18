@@ -305,6 +305,26 @@ class CalcularLayout:
         el técnico. Si se indica y el uso es apartamentos turísticos, sustituye la
         tipología por la combinación (toda la unidad, PB y plantas tipo). Selección
         temporal: el caso de uso no la persiste."""
+        # Antes de calcular, vuelca los mínimos editables de BBDD a las constantes
+        # del motor, para que las ediciones del editor de superficies mínimas se
+        # respeten en cada cálculo (Anexo I.1–I.5).
+        self._sincronizar_minimos(params)
+
+        # R3: error bloqueante si la suma de mínimos de una tipología de vivienda
+        # supera su útil máximo editable (antes se infradimensionaba en silencio).
+        err_util_max = self._validar_util_maximo_vivienda(params, combo_override=combo_override)
+        if err_util_max:
+            return {
+                "error": err_util_max,
+                "edificio": None,
+                "capacidad": None,
+                "alertas": [_alerta_dict(Alerta("incumplimiento", "Normativa", err_util_max))],
+                "tabla_planta": [],
+                "tabla_unidad": [],
+                "indicadores": None,
+                "envolvente": None,
+            }
+
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
         try:
@@ -389,6 +409,93 @@ class CalcularLayout:
         }
 
     # ─── Helpers privados de CalcularLayout ────────────────────────────────
+    def _sincronizar_minimos(self, params: ParametrosRender) -> None:
+        """BBDD → constantes del motor antes de calcular (Anexo I.1–I.5).
+
+        Hace que las superficies mínimas editadas desde el editor lleguen al
+        dimensionado de estancias en CADA cálculo (no solo vivienda). Es no-op si
+        no hay catálogo inyectado (p. ej. en los tests, que usan las constantes del
+        Anexo). Ante cualquier fallo, el motor mantiene sus constantes por defecto.
+        """
+        uso = params.programa.uso
+        # % circulación interior de la unidad (panel de diseño, bloque PB). Único
+        # y compartido por todos los usos; sustituye el 1.15 antes hardcodeado (R4).
+        # Se aplica DESPUÉS de `cargar_desde_repo` para que el valor del panel gane
+        # sobre el persistido por defecto (15%).
+        pct_circ = float(params.diseno.pct_circulacion_interior)
+        try:
+            if uso == UsoEdificio.VIVIENDA:
+                from .geometria import programa
+                if self.catalogo_vivienda is not None:
+                    programa.cargar_desde_repo(self.catalogo_vivienda)
+                programa.set_pct_circulacion_interior(pct_circ)
+            elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+                from .geometria import programa_apartamentos
+                if self.catalogo_apartamentos is not None:
+                    grupo = params.programa.grupo_apartamentos.value
+                    programa_apartamentos.cargar_desde_repo(self.catalogo_apartamentos, grupo)
+                programa_apartamentos.set_pct_circulacion_interior(pct_circ)
+            elif uso == UsoEdificio.HOTEL_APARTAMENTO:
+                from .geometria import programa_hotel_apartamento
+                if self.catalogo_hotel_apartamento is not None:
+                    programa_hotel_apartamento.cargar_desde_repo(self.catalogo_hotel_apartamento)
+                programa_hotel_apartamento.set_pct_circulacion_interior(pct_circ)
+            elif uso == UsoEdificio.HOTELERO:
+                from .geometria import programa_hotelero
+                if self.catalogo_hotelero is not None:
+                    programa_hotelero.cargar_desde_repo(self.catalogo_hotelero)
+                programa_hotelero.set_pct_circulacion_interior(pct_circ)
+        except Exception:
+            pass
+
+    def _validar_util_maximo_vivienda(self, params: ParametrosRender, combo_override=None) -> str | None:
+        """R3: mensaje de error si Σ mínimos de una tipología supera su útil máximo.
+
+        Solo vivienda (único uso con útil máximo editable por tipología). Devuelve
+        None si todo cumple. Se evalúa tras `_sincronizar_minimos`, así que usa los
+        mínimos y el útil máximo YA editados en BBDD. Sin referencias al PDF.
+        """
+        prog = params.programa
+        if prog.uso != UsoEdificio.VIVIENDA:
+            return None
+        from .dominio import CATEGORIA_A_NUM_DORMS
+        from .geometria.programa import (
+            util_maximo,
+            util_minimo_vivienda,
+            util_minimo_vivienda_combo,
+        )
+        sco = bool(prog.salon_cocina_open)
+
+        def _mensaje(n: int, umin: float, umax: float) -> str:
+            etiqueta = (
+                "estudio" if n == 0
+                else f"{n} dormitorios" if n < 5
+                else "más de 4 dormitorios"
+            )
+            return (
+                f"Tipología «{etiqueta}»: la suma de mínimos de estancias "
+                f"({umin:.2f} m²) supera el útil máximo de la vivienda "
+                f"({umax:.2f} m²). Sube el útil máximo de esa tipología o reduce "
+                f"sus superficies mínimas."
+            )
+
+        if combo_override is not None:
+            from .geometria.combinador_tipologias import slug_a_combo
+            combo = slug_a_combo(combo_override)
+            umin = util_minimo_vivienda_combo(combo, sco)
+            umax = util_maximo(combo.n_dorms)
+            return _mensaje(combo.n_dorms, umin, umax) if umin > umax + 1e-6 else None
+
+        slug_a_n = {"estudio": 0, "1d": 1, "2d": 2, "3d": 3, "4d+": 4}
+        ns = [CATEGORIA_A_NUM_DORMS.get(prog.categoria_vivienda, 2)]
+        ns += [slug_a_n[s] for s in prog.tipologias_extra if s in slug_a_n]
+        for n in ns:
+            umin = util_minimo_vivienda(n, sco)
+            umax = util_maximo(n)
+            if umin > umax + 1e-6:
+                return _mensaje(n, umin, umax)
+        return None
+
     def _resolver_util_objetivo(self, params: ParametrosRender, prog=None, combo_override=None) -> float | None:
         """Lee el m² útil objetivo por unidad desde la BBDD del Anexo I.
 
@@ -530,37 +637,14 @@ class CalcularLayout:
         else:
             return None
 
+        # Tras `_sincronizar_minimos`, el descriptor que produce `constructor(slug)`
+        # ya refleja los mínimos editados en BBDD (su util_objetivo = Σ mínimos del
+        # Anexo × 1.15). No se sobreescribe con el adapter, que antes leía un
+        # `max_m2_util` que no se actualizaba al editar y dejaba la unidad —y por
+        # tanto sus estancias— por debajo de los mínimos reales.
         slugs = [principal] + [s for s in prog.tipologias_extra]
-        descriptores = []
-        for idx, slug in enumerate(slugs):
-            d = constructor(slug)
-            # El útil objetivo de la principal proviene de BBDD (si está); las
-            # extras usan la constante del Anexo (mismo valor salvo edición).
-            uo_bbdd = util_objetivo if idx == 0 else self._util_objetivo_bbdd(params, slug, prog)
-            if uo_bbdd is not None and uo_bbdd > 0:
-                d = replace(d, util_objetivo=uo_bbdd, util_maximo=round(uo_bbdd * 1.25, 2))
-            descriptores.append(d)
+        descriptores = [constructor(slug) for slug in slugs]
         return descriptores or None
-
-    def _util_objetivo_bbdd(self, params: ParametrosRender, slug: str, prog=None):
-        """Útil objetivo de una tipología desde BBDD (None si no hay catálogo/fila)."""
-        prog = prog if prog is not None else params.programa
-        try:
-            if prog.uso == UsoEdificio.APARTAMENTOS_TURISTICOS and self.catalogo_apartamentos:
-                return self.catalogo_apartamentos.util_objetivo_apartamento(
-                    prog.categoria_apartamentos.value, slug, prog.grupo_apartamentos.value
-                )
-            if prog.uso == UsoEdificio.HOTEL_APARTAMENTO and self.catalogo_hotel_apartamento:
-                return self.catalogo_hotel_apartamento.util_objetivo(
-                    prog.categoria_hotel_apartamento.value, slug
-                )
-            if prog.uso == UsoEdificio.HOTELERO and self.catalogo_hotelero:
-                return self.catalogo_hotelero.util_objetivo_habitacion(
-                    prog.categoria_hotelero.value, slug
-                )
-        except Exception:
-            return None
-        return None
 
     def _construir_programa_uso(
         self,
@@ -683,6 +767,16 @@ class CalcularTipologiasDormitorios:
         uso = prog.uso
         n_dorms = max(0, int(n_dorms))
 
+        # Reutiliza el motor de layout (y vuelca los mínimos editables de BBDD a las
+        # constantes ANTES de que las lambdas `objetivo`/`minimo` los lean al ordenar).
+        layout = CalcularLayout(
+            catalogo_vivienda=self.catalogo_vivienda,
+            catalogo_apartamentos=self.catalogo_apartamentos,
+            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
+            catalogo_hotelero=self.catalogo_hotelero,
+        )
+        layout._sincronizar_minimos(params)
+
         # Despacho por uso: alfabeto de tamaños, objetivo, mínimo y plazas.
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             from .geometria.programa_apartamentos import (
@@ -717,13 +811,6 @@ class CalcularTipologiasDormitorios:
 
         # Orden ascendente por útil objetivo → habilita la poda.
         combos = sorted(enumerar_combinaciones(n_dorms, tamanos), key=objetivo)
-
-        layout = CalcularLayout(
-            catalogo_vivienda=self.catalogo_vivienda,
-            catalogo_apartamentos=self.catalogo_apartamentos,
-            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
-            catalogo_hotelero=self.catalogo_hotelero,
-        )
 
         viables: list[dict[str, Any]] = []
         for combo in combos:

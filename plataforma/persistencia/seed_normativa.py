@@ -91,24 +91,30 @@ def _filas_anexo_i_vivienda() -> list[tuple[int, str, float, float, float | None
     `area_target_m2 = None` indica que la estancia ESCALA con el útil
     disponible (salones, dormitorios). Valor concreto = tamaño fijo.
 
-    Política de targets sembrada (suma exacta = util_maximo VPO):
-    - Estudio (0d): espacio_principal=18 + bano=4 + circulacion=3 = 25 m².
+    Política de targets sembrada:
+    - Estudio (0d): estancia única (salón+dormitorio)=18 + cocina=8 + baño=4 +
+      circulación=3 = 33 m². Anexo I.5: el estudio tiene cocina y baño
+      independientes (cocina independiente ≥ 7 m²); la estancia hace de salón y
+      dormitorio.
     - 1d+: cocina=8, baño(s)=5 fijos; salón + dormitorios escalan al restante
       tras descontar la circulación interior (15% del útil). Nº de baños por nº
       de dormitorios (Anexo I.5): 1 hasta 2 dorms, 2 desde 3 dorms.
+    - >4d (clave 5): tramo "más de 4 dormitorios" del Anexo I.5, con la
+      Estancia (E)=24 y Estancia+comedor+cocina (E+C+K)=28.
     """
     filas: list[tuple[int, str, float, float, float | None]] = []
-    # Estudio: 3 estancias con target absoluto sumando UTIL_MAX[0].
+    # Estudio: estancia única + cocina + baño + circulación, target absoluto.
     util_max_estudio = UTIL_MAX[0]
     filas.append((0, "espacio_principal", 14.0, util_max_estudio, 18.0))
+    filas.append((0, "cocina", MIN_COCINA, util_max_estudio, MIN_COCINA + 1.0))
     filas.append((0, "bano", MIN_BANO, util_max_estudio, 4.0))
     filas.append((0, "circulacion_interior", 0.0, util_max_estudio, 3.0))
 
-    # 1d..4d
-    for n in range(1, 5):
+    # 1d..4d y el tramo ">4d" (clave 5, con 5 dormitorios de referencia).
+    for n in range(1, 6):
         util_max = UTIL_MAX.get(n, UTIL_MAX[4])
-        filas.append((n, "salon", SALON_MIN.get(n, 20.0), util_max, None))
-        filas.append((n, "salon_cocina", SALON_MAS_COCINA_MIN.get(n, 24.0), util_max, None))
+        filas.append((n, "salon", SALON_MIN.get(n, 24.0), util_max, None))
+        filas.append((n, "salon_cocina", SALON_MAS_COCINA_MIN.get(n, 28.0), util_max, None))
         filas.append((n, "cocina", MIN_COCINA, util_max, MIN_COCINA + 1.0))
         filas.append((n, "dormitorio_1", MIN_DORM_DOBLE, util_max, None))
         for i in range(2, n + 1):

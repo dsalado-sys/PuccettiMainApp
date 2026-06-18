@@ -1,0 +1,24 @@
+{# Modal genérico de superficies mínimas para los usos turístico/hoteleros
+   (apartamentos turísticos · hotel-apartamento · hotelero). Análogo al de
+   vivienda (_rc_modal_superficies.html), pero acotado a la categoría
+   seleccionada en el panel. Persiste en la BBDD de Normativa. #}
+<dialog id="rc-modal-minimos" class="rc-modal" aria-labelledby="rc-min-titulo">
+  <article class="rc-modal-card">
+    <header class="rc-modal-header">
+      <h2 id="rc-min-titulo">Superficies mínimas de estancias</h2>
+      <button type="button" class="rc-modal-cerrar" id="rc-min-cerrar" aria-label="Cerrar">×</button>
+    </header>
+
+    <div class="rc-modal-cuerpo">
+      <p class="rc-hint" id="rc-min-subtitulo"></p>
+      <div id="rc-min-secciones" class="rc-sup-secciones">
+        <p class="rc-vacio">Cargando…</p>
+      </div>
+
+      <div class="rc-modal-acciones rc-sup-acciones">
+        <button type="button" id="rc-min-reset" class="boton-secundario">Restablecer valores</button>
+        <button type="button" id="rc-min-guardar" class="boton-primario">Guardar cambios</button>
+      </div>
+    </div>
+  </article>
+</dialog>
