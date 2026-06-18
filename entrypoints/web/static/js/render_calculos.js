@@ -874,6 +874,128 @@
   });
   refrescarChipCombo();
 
+  // ─── Modal "Superficies mínimas de estancias" (vivienda · Normativa) ──
+  const API_SUP = "/modulos/render-calculos/superficies-vivienda";
+  const modalSup = document.getElementById("rc-modal-superficies");
+  const btnSuperficies = document.getElementById("rc-btn-superficies");
+  const LBL_TIPOLOGIA_VIV = {
+    0: "Estudio", 1: "1 dormitorio", 2: "2 dormitorios",
+    3: "3 dormitorios", 4: "4 o más dormitorios",
+  };
+
+  async function abrirModalSuperficies() {
+    if (!modalSup) return;
+    const cont = document.getElementById("rc-sup-secciones");
+    cont.innerHTML = '<p class="rc-vacio">Cargando…</p>';
+    if (typeof modalSup.showModal === "function") modalSup.showModal();
+    else modalSup.setAttribute("open", "");
+    try {
+      const resp = await fetch(API_SUP);
+      if (!resp.ok) { cont.innerHTML = '<p class="rc-vacio">No se pudieron cargar las superficies.</p>'; return; }
+      const data = await resp.json();
+      pintarSeccionesSuperficies(data.filas || []);
+    } catch (e) {
+      cont.innerHTML = '<p class="rc-vacio">Error de red.</p>';
+    }
+  }
+
+  function pintarSeccionesSuperficies(filas) {
+    const cont = document.getElementById("rc-sup-secciones");
+    cont.innerHTML = "";
+    if (!filas.length) {
+      cont.innerHTML = '<p class="rc-vacio">No hay superficies registradas.</p>';
+      return;
+    }
+    // Agrupar por nº de dormitorios (el backend ya envía las filas ordenadas).
+    const grupos = new Map();
+    filas.forEach(f => {
+      if (!grupos.has(f.n_dormitorios)) grupos.set(f.n_dormitorios, []);
+      grupos.get(f.n_dormitorios).push(f);
+    });
+    Array.from(grupos.keys()).sort((a, b) => a - b).forEach(n => {
+      const sec = document.createElement("section");
+      sec.className = "rc-sup-seccion";
+      const h = document.createElement("h3");
+      h.textContent = LBL_TIPOLOGIA_VIV[n] || (n + " dormitorios");
+      sec.appendChild(h);
+      const tabla = document.createElement("table");
+      tabla.className = "rc-sup-tabla";
+      tabla.innerHTML = "<thead><tr><th>Estancia</th><th>Mínimo (m²)</th></tr></thead>";
+      const tbody = document.createElement("tbody");
+      grupos.get(n).forEach(f => {
+        const tr = document.createElement("tr");
+        const td1 = document.createElement("td");
+        td1.textContent = f.etiqueta;
+        const td2 = document.createElement("td");
+        const inp = document.createElement("input");
+        inp.type = "number";
+        inp.min = "0";
+        inp.step = "0.5";
+        inp.value = f.min_m2;
+        inp.className = "rc-sup-input";
+        inp.dataset.ndorms = f.n_dormitorios;
+        inp.dataset.estancia = f.estancia;
+        inp.dataset.original = f.min_m2;
+        if (!puedeEditar) inp.disabled = true;
+        td2.appendChild(inp);
+        tr.appendChild(td1);
+        tr.appendChild(td2);
+        tbody.appendChild(tr);
+      });
+      tabla.appendChild(tbody);
+      sec.appendChild(tabla);
+      cont.appendChild(sec);
+    });
+  }
+
+  async function guardarSuperficies() {
+    if (!puedeEditar) { mostrarToast("Sin permiso para editar", true); return; }
+    const inputs = document.querySelectorAll("#rc-sup-secciones .rc-sup-input");
+    const cambios = [];
+    inputs.forEach(inp => {
+      if (inp.value === "") return;
+      const v = Number(inp.value);
+      if (Number.isNaN(v)) return;
+      if (Number(inp.dataset.original) === v) return;   // sin cambio
+      cambios.push({ n_dormitorios: Number(inp.dataset.ndorms), estancia: inp.dataset.estancia, valor: v });
+    });
+    if (!cambios.length) { mostrarToast("No hay cambios que guardar"); return; }
+    try {
+      const resp = await fetch(API_SUP, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cambios }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        mostrarToast(err.detail || "Error al guardar", true);
+        return;
+      }
+      const data = await resp.json();
+      inputs.forEach(inp => { inp.dataset.original = inp.value; });   // nuevos originales
+      mostrarToast(`Superficies guardadas (${data.aplicados})`);
+      if (estado === "ok") pedirPreview();
+    } catch (e) { mostrarToast("Error de red", true); }
+  }
+
+  async function resetSuperficies() {
+    if (!puedeEditar) { mostrarToast("Sin permiso para editar", true); return; }
+    try {
+      const resp = await fetch(`${API_SUP}/reset`, { method: "POST" });
+      if (!resp.ok) { mostrarToast("No se pudo restablecer", true); return; }
+      mostrarToast("Valores restablecidos");
+      abrirModalSuperficies();   // recarga la tabla con los defaults
+    } catch (e) { mostrarToast("Error de red", true); }
+  }
+
+  if (btnSuperficies) btnSuperficies.addEventListener("click", abrirModalSuperficies);
+  const btnSupCerrar = document.getElementById("rc-sup-cerrar");
+  if (btnSupCerrar && modalSup) btnSupCerrar.addEventListener("click", () => modalSup.close());
+  const btnSupGuardar = document.getElementById("rc-sup-guardar");
+  if (btnSupGuardar) btnSupGuardar.addEventListener("click", guardarSuperficies);
+  const btnSupReset = document.getElementById("rc-sup-reset");
+  if (btnSupReset) btnSupReset.addEventListener("click", resetSuperficies);
+
   // ─── Visibilidad combinada: uso × categoría de planta ─────────────────
   // Un campo se ve solo si su `data-cuando-uso` (si lo tiene) incluye el uso activo
   // Y su `data-visible-en-planta` (si lo tiene) incluye la categoría de planta activa.

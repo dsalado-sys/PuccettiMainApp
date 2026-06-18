@@ -13,6 +13,45 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 from .sqlalchemy_base import Base
 
 
+# Estancias que no son "habitaciones" editables (circulación es un derivado del
+# útil, no una superficie mínima de estancia): se excluyen del editor de la UI.
+_ESTANCIAS_NO_EDITABLES = {"circulacion_interior"}
+
+
+def _etiqueta_estancia(estancia: str) -> str:
+    """Nombre legible de una estancia para el editor de superficies mínimas."""
+    base = {
+        "salon": "Salón",
+        "salon_cocina": "Salón-cocina integrado",
+        "espacio_principal": "Estancia principal (salón-dormitorio)",
+        "cocina": "Cocina",
+        "dormitorio_1": "Dormitorio principal (doble)",
+        "bano": "Baño",
+        "aseo": "Aseo",
+    }
+    if estancia in base:
+        return base[estancia]
+    if estancia.startswith("dormitorio_"):
+        return f"Dormitorio {estancia.split('_', 1)[1]}"
+    if estancia.startswith("bano_"):
+        return f"Baño {estancia.split('_', 1)[1]}"
+    return estancia
+
+
+def _orden_estancia(estancia: str) -> tuple[int, int]:
+    """Orden de presentación de las estancias dentro de una tipología."""
+    fijo = {"salon": 0, "salon_cocina": 1, "espacio_principal": 2, "cocina": 3, "aseo": 4}
+    if estancia in fijo:
+        return (fijo[estancia], 0)
+    if estancia.startswith("dormitorio_"):
+        return (10, int(estancia.split("_", 1)[1]))
+    if estancia == "bano":
+        return (20, 0)
+    if estancia.startswith("bano_"):
+        return (20, int(estancia.split("_", 1)[1]))
+    return (99, 0)
+
+
 class AnexoIViviendaORM(Base):
     """Una fila por (n_dormitorios, estancia) con su mínimo y máximo (m²).
 
@@ -68,6 +107,29 @@ class CatalogoSuperficiesSQLAlchemy:
         for f in filas:
             out[f.estancia + "_min"] = f.min_m2
             out[f.estancia + "_max"] = f.max_m2_util
+        return out
+
+    def filas_vivienda(self) -> list[dict]:
+        """Filas crudas de superficies mínimas para el editor de la UI.
+
+        Una entrada por (n_dormitorios, estancia) con su mínimo (m²) y etiqueta
+        legible, ordenadas por tipología y orden de presentación. Excluye las
+        estancias no editables (circulación). El frontend las agrupa por nº de
+        dormitorios para construir la tabla por tipología (incluido estudio=0).
+        """
+        filas = self._session.scalars(select(AnexoIViviendaORM)).all()
+        out: list[dict] = []
+        for f in filas:
+            if f.estancia in _ESTANCIAS_NO_EDITABLES:
+                continue
+            out.append({
+                "n_dormitorios": f.n_dormitorios,
+                "estancia": f.estancia,
+                "etiqueta": _etiqueta_estancia(f.estancia),
+                "min_m2": f.min_m2,
+                "editable_por_usuario": bool(f.editable_por_usuario),
+            })
+        out.sort(key=lambda r: (r["n_dormitorios"], _orden_estancia(r["estancia"])))
         return out
 
     def consolidadas_vivienda(self) -> dict:

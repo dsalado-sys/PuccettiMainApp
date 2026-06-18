@@ -31,6 +31,7 @@ from app.contextos.render_calculos.casos_uso import (
     parametros_desde_proyecto,
 )
 from app.contextos.render_calculos.dominio import UsoEdificio
+from app.contextos.render_calculos.geometria import programa
 from app.contextos.render_calculos.parametros import (
     ParametrosUrbanisticos,
     parametros_a_dict,
@@ -334,6 +335,61 @@ def guardar_normativa(
 # Los endpoints de carpetas + normativas archivadas viven ahora en el módulo
 # Normativa municipal (/modulos/normativa-municipal/...). Render solo lo consulta
 # desde el frontend; aquí no expone esas rutas.
+
+
+# ─── Superficies mínimas de estancias (vivienda · Normativa) ────────────────
+@router.get("/superficies-vivienda")
+def listar_superficies_vivienda(
+    rol: Rol = Depends(rol_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+):
+    """Mínimos de superficie por estancia y tipología de vivienda (incl. estudio)."""
+    _exige_permiso(rol, PermisoModulo.VER)
+    return JSONResponse({"filas": catalogo_viv.filas_vivienda()})
+
+
+@router.post("/superficies-vivienda")
+def guardar_superficies_vivienda(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+):
+    """Persiste los mínimos editados. `payload = {"cambios": [{n_dormitorios,
+    estancia, valor}, ...]}`. Tras guardar, recarga las constantes vivas del
+    motor para que el siguiente cálculo use los nuevos mínimos sin reiniciar."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    cambios = payload.get("cambios") or []
+    aplicados = 0
+    for c in cambios:
+        if not isinstance(c, dict):
+            continue
+        estancia = str(c.get("estancia") or "").strip()
+        if not estancia:
+            continue
+        try:
+            n_dorms = int(c.get("n_dormitorios"))
+            valor = float(c.get("valor"))
+        except (TypeError, ValueError):
+            continue
+        if valor < 0:
+            continue
+        catalogo_viv.actualizar("vivienda", str(n_dorms), estancia, valor)
+        aplicados += 1
+    if aplicados:
+        programa.cargar_desde_repo(catalogo_viv)
+    return JSONResponse({"ok": True, "aplicados": aplicados})
+
+
+@router.post("/superficies-vivienda/reset")
+def reset_superficies_vivienda(
+    rol: Rol = Depends(rol_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+):
+    """Restablece los mínimos a los valores sembrados (defaults del motor)."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    catalogo_viv.reset()
+    programa.cargar_desde_repo(catalogo_viv)
+    return JSONResponse({"ok": True})
 
 
 # ─── Export CSV ─────────────────────────────────────────────────────────────

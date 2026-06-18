@@ -167,6 +167,17 @@
         </select>
       </label>
 
+      {# Editor de superficies mínimas de estancias (vivienda · Anexo I.5).
+         Recoge los mínimos por estancia y tipología (incluido estudio), los
+         muestra y permite editarlos desde el modal. #}
+      <div class="rc-campo" data-cuando-uso="vivienda" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Superficies mínimas de estancias</span>
+        <button type="button" class="boton-secundario rc-btn-pequeno" id="rc-btn-superficies">
+          Ver / editar mínimos
+        </button>
+        <small class="rc-hint">Mínimo de cada estancia por tipología (incluido estudio), según Normativa.</small>
+      </div>
+
       {# El ático/sótano no editan tipología: heredan la de las plantas tipo. #}
       <p class="rc-hint" data-visible-en-planta="atico">
         El ático usa el tipo de unidad y el diseño de las plantas tipo. Aquí solo se
