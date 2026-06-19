@@ -26,6 +26,27 @@
   </div>
 </section>
 
+{% if catastro %}
+<section class="rc-catastro-bar" aria-label="Datos catastrales de la parcela">
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Sup. parcela</span>
+    <span class="rc-cat-v">{% if catastro.superficie_m2 %}{{ "%.2f"|format(catastro.superficie_m2|float) }} m²{% else %}—{% endif %}</span>
+  </span>
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Sup. construida</span>
+    <span class="rc-cat-v">{% if catastro.superficie_construida_total_m2 %}{{ "%.2f"|format(catastro.superficie_construida_total_m2|float) }} m²{% else %}—{% endif %}</span>
+  </span>
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Plantas / Sótanos</span>
+    <span class="rc-cat-v">{{ catastro.plantas_sobre_rasante if catastro.plantas_sobre_rasante is not none else "—" }} / {{ catastro.plantas_bajo_rasante if catastro.plantas_bajo_rasante is not none else "—" }}</span>
+  </span>
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Año construcción</span>
+    <span class="rc-cat-v">{{ catastro.anio_construccion if catastro.anio_construccion else "—" }}</span>
+  </span>
+</section>
+{% endif %}
+
 {% if estado == "sin_proyecto" %}
   <section class="aviso aviso-info">
     <h2>No hay proyecto activo</h2>
@@ -43,6 +64,7 @@
       data-puede-editar="{{ 'true' if puede_editar else 'false' }}"
       data-estado="{{ estado }}"
       data-modo="{{ modo.slug if modo else '' }}"
+      data-construida-existente="{{ catastro.superficie_construida_total_m2 if catastro and catastro.superficie_construida_total_m2 else '' }}"
       autocomplete="off">
 
   {% include "_rc_panel_params.html" %}
@@ -134,12 +156,19 @@
   </aside>
 </form>
 
+<div id="rc-aviso-exceso" class="rc-aviso-exceso" role="status" aria-live="polite" hidden>
+  <span class="rc-aviso-exceso-icono" aria-hidden="true">⚠</span>
+  <span>La superficie construida proyectada (<strong data-exceso="proyectada">—</strong>)
+  supera la del edificio existente (<strong data-exceso="existente">—</strong>).</span>
+</div>
+
 <section class="rc-alertas" id="rc-alertas" aria-live="assertive" hidden>
   <header><h2>Alertas y avisos</h2></header>
   <ul></ul>
 </section>
 
 {% include "_rc_modal_normativa.html" %}
+{% include "_rc_modal_exceso.html" %}
 {% include "_rc_modal_unidad.html" %}
 {% include "_rc_modal_tipologias.html" %}
 {% include "_rc_modal_superficies.html" %}

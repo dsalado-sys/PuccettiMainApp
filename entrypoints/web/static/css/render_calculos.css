@@ -599,3 +599,37 @@
 .rc-mu-no-comp .rc-mu-fila-comp { display: none; }
 /* La nota "computable a efectos turísticos" solo aplica a usos turísticos. */
 .rc-mu-no-turismo .rc-mu-nota-turismo { display: none; }
+
+/* ── Barra de datos catastrales (siempre visible en el módulo) ──────── */
+.rc-catastro-bar {
+  display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: center;
+  background: var(--blanco); border: 1px solid #EEE9D5;
+  border-left: 4px solid var(--dorado);
+  border-radius: var(--radio); box-shadow: var(--sombra);
+  padding: 10px 18px; margin: 0 0 16px;
+}
+.rc-cat-item { display: flex; flex-direction: column; gap: 1px; }
+.rc-cat-k {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--gris-medio);
+}
+.rc-cat-v { font-size: 15px; font-weight: 600; color: var(--negro); }
+
+/* ── Aviso inferior de exceso de construida (rehabilitación) ────────── */
+.rc-aviso-exceso {
+  display: flex; align-items: center; gap: 10px;
+  background: #FFF8E1; border: 1px solid #E0A800; border-left: 4px solid #E0A800;
+  color: #7A5B00; border-radius: var(--radio);
+  padding: 10px 16px; margin: 16px 0 0; font-size: 13px; line-height: 1.4;
+}
+.rc-aviso-exceso[hidden] { display: none; }
+.rc-aviso-exceso strong { color: #5e4600; }
+.rc-aviso-exceso-icono { font-size: 18px; line-height: 1; }
+
+/* ── Modal de exceso ────────────────────────────────────────────────── */
+.rc-modal-exceso-card { max-width: 520px; width: 92vw; }
+.rc-exceso-sub { font-size: 13px; color: #555; line-height: 1.5; margin: 8px 0 0; }
+.rc-modal-pie {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 24px 20px; border-top: 1px solid #EEE9D5;
+}

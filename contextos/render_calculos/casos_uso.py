@@ -973,10 +973,21 @@ class ValidarCumplimiento:
         return alertas
 
 
+# Claves del formato plano LEGADO (anterior a la separación por modo). Se tratan
+# como pertenecientes al modo por defecto (obra nueva) y se migran al guardar.
+_CLAVES_LEGADO = ("parametros", "resumen_ultimo_calculo", "timestamp")
+
+
 # ─── Caso de uso 4: GuardarRender ───────────────────────────────────────────
 @dataclass
 class GuardarRender:
-    """Persiste parámetros + resumen del último cálculo en el aggregate."""
+    """Persiste parámetros + resumen del último cálculo en el aggregate, **por modo**.
+
+    Cada modo (obra nueva / rehabilitación) guarda su propio bloque bajo
+    `datos(RENDER_CALCULOS)[modo_key]`, de forma que guardar en uno no pisa al otro.
+    `modo_key` es una clave opaca (el slug del modo); el caso de uso no interpreta
+    su semántica. Al guardar se descarta el formato plano legado (migración).
+    """
 
     repo_proyectos: ProyectoRepositorio
 
@@ -985,26 +996,73 @@ class GuardarRender:
         proyecto: Proyecto,
         params: ParametrosRender,
         resumen: dict[str, Any],
+        modo_key: str = "obra-nueva",
     ) -> Proyecto:
-        datos = {
+        bloque = {
             "parametros": parametros_a_dict(params),
             "resumen_ultimo_calculo": resumen,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        proyecto.fijar_datos(ModuloPuccetti.RENDER_CALCULOS, datos)
+        datos_actual = dict(proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {})
+        # Conserva los bloques de OTROS modos; descarta el plano legado.
+        nuevos = {k: v for k, v in datos_actual.items() if k not in _CLAVES_LEGADO}
+        nuevos[modo_key] = bloque
+        proyecto.fijar_datos(ModuloPuccetti.RENDER_CALCULOS, nuevos)
         return self.repo_proyectos.guardar(proyecto)
 
 
-def parametros_desde_proyecto(proyecto: Proyecto | None) -> ParametrosRender:
-    """Lee parámetros del aggregate; usa los del módulo de viabilidad como fallback."""
+def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proyecto) -> None:
+    """Ajusta los parámetros de partida al edificio catastral EXISTENTE de la parcela.
+
+    Para que el modo Rehabilitación arranque encajado con lo que hay (no como una
+    obra nueva genérica): nº de plantas y existencia de sótano se toman del catastro
+    (§2.1). No se llama si el modo ya tiene parámetros propios guardados, así que
+    nunca pisa una edición del usuario.
+    """
+    loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    try:
+        plantas_sr = loc.get("plantas_sobre_rasante")
+        if plantas_sr is not None and int(plantas_sr) >= 1:
+            params.urbanisticos.n_plantas_max = int(plantas_sr)
+    except (TypeError, ValueError):
+        pass
+    try:
+        plantas_br = loc.get("plantas_bajo_rasante")
+        if plantas_br is not None and int(plantas_br) > 0:
+            params.urbanisticos.tiene_sotano = True
+    except (TypeError, ValueError):
+        pass
+
+
+def parametros_desde_proyecto(
+    proyecto: Proyecto | None,
+    modo_key: str | None = None,
+    *,
+    heredar_legado: bool = False,
+    adaptar_a_existente: bool = False,
+) -> ParametrosRender:
+    """Lee parámetros del aggregate para un MODO; usa viabilidad como fallback.
+
+    - `modo_key`: clave del bloque del modo en `datos(RENDER_CALCULOS)`.
+    - `heredar_legado`: si el modo no tiene bloque propio, ¿puede heredar el formato
+      plano legado? (solo el modo por defecto / obra nueva debería).
+    - `adaptar_a_existente`: si no hay params guardados, adapta al edificio existente
+      (rehabilitación). El que decide estos flags es la capa que conoce los modos.
+    """
     if proyecto is None:
         return ParametrosRender()
     datos_render = proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}
-    if datos_render.get("parametros"):
-        return parametros_desde_dict(datos_render["parametros"])
 
-    # Si no se ha guardado nada todavía, intentamos heredar la edificabilidad
-    # introducida en §2.9 viabilidad. Compat con la clave antigua.
+    bloque = None
+    if modo_key and isinstance(datos_render.get(modo_key), dict):
+        bloque = datos_render[modo_key]
+    elif heredar_legado and datos_render.get("parametros"):
+        bloque = datos_render  # formato plano legado = modo por defecto
+    if bloque and bloque.get("parametros"):
+        return parametros_desde_dict(bloque["parametros"])
+
+    # Sin params guardados para este modo: defaults + herencia de edificabilidad
+    # introducida en §2.9 viabilidad (compat con la clave antigua).
     base = ParametrosRender()
     datos_viab = proyecto.datos_por_modulo.get(ModuloPuccetti.VIABILIDAD.value) or {}
     try:
@@ -1018,6 +1076,9 @@ def parametros_desde_proyecto(proyecto: Proyecto | None) -> ParametrosRender:
         )
     except (TypeError, ValueError):
         pass
+
+    if adaptar_a_existente:
+        adaptar_params_a_edificio_existente(base, proyecto)
     return base
 
 

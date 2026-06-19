@@ -13,6 +13,10 @@
 
   const puedeEditar = form.dataset.puedeEditar === "true";
   const estado = form.dataset.estado;
+  // Modo activo (obra-nueva / rehabilitacion) y superficie construida del edificio
+  // existente (catastral). Pilotan el aviso de exceso, exclusivo de rehabilitación.
+  const modoActivo = form.dataset.modo || "";
+  const construidaExistente = parseFloat(form.dataset.construidaExistente);  // NaN si vacío
 
   const canvasEl = document.getElementById("rc-canvas");
   const brujulaEl = document.getElementById("rc-brujula");
@@ -48,6 +52,11 @@
     // turísticos). Temporal: se inyecta en /calcular como `combo_dormitorios`
     // pero NO se persiste en el formulario ni en /guardar.
     comboDormitorios: null,   // { slug, etiqueta } | null
+    // Aviso de exceso de construida (rehabilitación): el modal salta una vez al
+    // superar; tras aceptarlo, solo queda el aviso inferior. `interaccionUsuario`
+    // evita que el modal salte en la carga inicial automática.
+    excesoAceptado: false,
+    interaccionUsuario: false,
   };
 
   function usoActivoForm() {
@@ -152,6 +161,72 @@
       set("n_viviendas", fmt.int.format(env.n_viviendas_objetivo) + " obj.");
     }
   }
+
+  // ─── Aviso de exceso de construida (solo Rehabilitación) ──────────────
+  const modalExceso = document.getElementById("rc-modal-exceso");
+  const avisoExceso = document.getElementById("rc-aviso-exceso");
+
+  function construidaProyectada(payload) {
+    const cap = payload?.capacidad;
+    const env = payload?.envolvente;
+    if (cap && typeof cap.construida_total_m2 === "number") return cap.construida_total_m2;
+    if (env && typeof env.edificabilidad_consumida_m2 === "number") return env.edificabilidad_consumida_m2;
+    return null;
+  }
+
+  function pintarTextoExceso(proyectada) {
+    const txtP = fmt.m2.format(proyectada) + " m²";
+    const txtE = fmt.m2.format(construidaExistente) + " m²";
+    document.querySelectorAll('[data-exceso="proyectada"]').forEach(el => el.textContent = txtP);
+    document.querySelectorAll('[data-exceso="existente"]').forEach(el => el.textContent = txtE);
+    const pm = document.getElementById("rc-exceso-proyectada");
+    const em = document.getElementById("rc-exceso-existente");
+    if (pm) pm.textContent = txtP;
+    if (em) em.textContent = txtE;
+  }
+
+  function abrirModalExceso() {
+    if (!modalExceso) return;
+    if (typeof modalExceso.showModal === "function") { try { modalExceso.showModal(); } catch (e) { modalExceso.setAttribute("open", ""); } }
+    else modalExceso.setAttribute("open", "");
+  }
+  function cerrarModalExceso() {
+    if (!modalExceso) return;
+    if (modalExceso.close) modalExceso.close();
+    else modalExceso.removeAttribute("open");
+  }
+
+  function verificarExcesoConstruida(payload) {
+    // Exclusivo de rehabilitación y solo si conocemos la construida existente.
+    if (modoActivo !== "rehabilitacion" || !(construidaExistente > 0)) return;
+    const proyectada = construidaProyectada(payload);
+    if (proyectada === null) return;
+    const excede = proyectada > construidaExistente + 1e-6;
+
+    if (!excede) {
+      if (avisoExceso) avisoExceso.hidden = true;   // vuelve a estar dentro de lo existente
+      return;
+    }
+    pintarTextoExceso(proyectada);
+    // En la carga inicial automática (sin interacción) no abrimos el modal.
+    if (!ESTADO.interaccionUsuario) return;
+    if (!ESTADO.excesoAceptado) {
+      abrirModalExceso();
+    } else if (avisoExceso) {
+      avisoExceso.hidden = false;                    // ya aceptado → solo aviso inferior
+    }
+  }
+
+  // Aceptar (o cerrar) = se ha visto la advertencia: a partir de ahí, aviso inferior.
+  function aceptarExceso() {
+    ESTADO.excesoAceptado = true;
+    cerrarModalExceso();
+    if (avisoExceso) avisoExceso.hidden = false;
+  }
+  const btnExcesoAceptar = document.getElementById("rc-modal-exceso-aceptar");
+  const btnExcesoCerrar = document.getElementById("rc-modal-exceso-cerrar");
+  if (btnExcesoAceptar) btnExcesoAceptar.addEventListener("click", aceptarExceso);
+  if (btnExcesoCerrar) btnExcesoCerrar.addEventListener("click", aceptarExceso);
 
   // ─── Tabs de planta ───────────────────────────────────────────────────
   function dibujarTabsPlantas(payload) {
@@ -492,6 +567,7 @@
       actualizarBrujula(data);
       repintarKpis(data);
       repintarAlertas(data.alertas);
+      verificarExcesoConstruida(data);
       // Marcamos botón "Distribuir" como stale si ya hubo full payload
       if (ESTADO.fullPayload) btnDistribuir.classList.add("rc-stale");
     } catch (e) {
@@ -502,6 +578,7 @@
   // ─── Fetch /calcular (completo) ───────────────────────────────────────
   async function pedirCalculo() {
     if (estado !== "ok") return;
+    ESTADO.interaccionUsuario = true;
     const bloques = leerFormulario();
     if (ESTADO.abortCalcular) ESTADO.abortCalcular.abort();
     ESTADO.abortCalcular = new AbortController();
@@ -539,6 +616,7 @@
       repintarAlertas(data.alertas);
       repintarTablaPlanta(data.tabla_planta);
       repintarTablaUnidad(data.tabla_unidad);
+      verificarExcesoConstruida(data);
       mostrarToast("Capacidad calculada");
     } catch (e) {
       if (e.name !== "AbortError") mostrarToast("Error de red", true);
@@ -560,7 +638,7 @@
       const resp = await fetch("/modulos/render-calculos/guardar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parametros: bloques, resumen }),
+        body: JSON.stringify({ parametros: bloques, resumen, modo: modoActivo }),
       });
       if (resp.status === 409) { mostrarToast("Crea o abre un proyecto primero", true); return; }
       if (!resp.ok) {
@@ -1337,6 +1415,7 @@
 
   // ─── Bindings ─────────────────────────────────────────────────────────
   function calcularConDebounce() {
+    ESTADO.interaccionUsuario = true;   // cualquier edición habilita el modal de exceso
     aplicarVisibilidad();
     actualizarOpcionesCondicionales();
     if (ESTADO.debounceId) clearTimeout(ESTADO.debounceId);

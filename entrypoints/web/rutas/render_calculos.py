@@ -27,6 +27,7 @@ from app.contextos.render_calculos.casos_uso import (
     CalcularTipologiasDormitorios,
     GuardarRender,
     ValidarCumplimiento,
+    adaptar_params_a_edificio_existente,
     construir_parcela_metrica,
     parametros_desde_proyecto,
 )
@@ -45,7 +46,7 @@ from app.plataforma.persistencia.normativa_municipal_sqlalchemy import (
 )
 
 from ..catalogo_modulos import CATALOGO, TarjetaModulo
-from ..render_modos import MODOS, modo_o_none
+from ..render_modos import MODO_POR_DEFECTO, MODOS, modo_o_none
 from ..dependencias import (
     catalogo_apartamentos_adapter,
     catalogo_hotel_apartamento_adapter,
@@ -138,6 +139,19 @@ def _preview_parcela(proyecto: Proyecto | None) -> dict[str, Any] | None:
     }
 
 
+def _tiene_params_guardados(proyecto: Proyecto | None, modo: str, *, heredar_legado: bool) -> bool:
+    """¿El modo dado ya tiene parámetros propios guardados en el aggregate?
+
+    El formato plano legado solo cuenta para el modo por defecto (`heredar_legado`)."""
+    if proyecto is None:
+        return False
+    datos = proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}
+    blk = datos.get(modo)
+    if isinstance(blk, dict) and blk.get("parametros"):
+        return True
+    return bool(heredar_legado and datos.get("parametros"))
+
+
 # ─── Pantalla principal ─────────────────────────────────────────────────────
 @router.get("", response_class=HTMLResponse)
 def pantalla(
@@ -172,7 +186,17 @@ def pantalla(
             },
         )
 
-    params = parametros_desde_proyecto(proyecto)
+    # Parámetros del MODO activo (cada modo guarda los suyos). El formato plano
+    # legado se trata como del modo por defecto. Rehabilitación, sin params
+    # propios, arranca adaptado al edificio existente.
+    es_modo_defecto = modo_cfg.slug == MODO_POR_DEFECTO
+    es_rehabilitacion = modo_cfg.slug == "rehabilitacion"
+    tiene_params = _tiene_params_guardados(proyecto, modo_cfg.slug, heredar_legado=es_modo_defecto)
+    params = parametros_desde_proyecto(
+        proyecto, modo_cfg.slug,
+        heredar_legado=es_modo_defecto,
+        adaptar_a_existente=es_rehabilitacion,
+    )
 
     municipios = repo_norm.listar()
     # Si la parcela tiene municipio conocido, intentamos cargar su PGOU como
@@ -185,10 +209,13 @@ def pantalla(
             normativa = repo_norm.obtener(mun, prov)
             if normativa is not None:
                 pgou_municipio = {"municipio": mun, "provincia": prov}
-                # solo aplicamos como defaults si el proyecto aún no tiene params guardados
-                datos_render = proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}
-                if not datos_render.get("parametros"):
+                # Solo aplicamos como defaults si el MODO aún no tiene params guardados.
+                if not tiene_params:
                     params.urbanisticos = normativa
+                    # En rehabilitación, el edificio existente manda sobre el PGOU
+                    # genérico en nº de plantas / sótano.
+                    if es_rehabilitacion:
+                        adaptar_params_a_edificio_existente(params, proyecto)
 
     usos_catalogo = [
         {"value": "vivienda", "label": "Vivienda", "habilitado": True},
@@ -216,6 +243,8 @@ def pantalla(
             "municipios_disponibles": municipios,
             "pgou_municipio_activo": pgou_municipio,
             "usos_edificio": usos_catalogo,
+            # Datos catastrales para la barra siempre visible del módulo.
+            "catastro": _preview_parcela(proyecto),
         },
     )
 
@@ -342,8 +371,14 @@ def guardar(
     resumen = payload.get("resumen") or {}
     params = parametros_desde_dict(params_payload)
 
-    actualizado = GuardarRender(repo_proyectos=repo_proy).ejecutar(proyecto, params, resumen)
-    return JSONResponse({"ok": True, "actualizado_en": actualizado.actualizado_en.isoformat()})
+    # Cada modo guarda su propio bloque. Modo inválido → modo por defecto.
+    modo_cfg = modo_o_none(payload.get("modo"))
+    modo_key = modo_cfg.slug if modo_cfg else MODO_POR_DEFECTO
+
+    actualizado = GuardarRender(repo_proyectos=repo_proy).ejecutar(
+        proyecto, params, resumen, modo_key=modo_key
+    )
+    return JSONResponse({"ok": True, "modo": modo_key, "actualizado_en": actualizado.actualizado_en.isoformat()})
 
 
 # ─── Normativa municipal: listado + lectura + escritura ─────────────────────
