@@ -76,11 +76,16 @@ def _disenos_por_categoria(params: ParametrosRender) -> dict[str, DisenoPlanta]:
     propio bucket. Permite que PB sea independiente de las plantas tipo y que ático y
     sótano tengan su propio % muros y % circulación.
     """
+    # % muros interior es unit-level (tabiquería de la unidad), igual que la
+    # circulación interior: se lee solo del bloque PB y aplica a todas las plantas.
+    _pmi = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_interior", 0.0))))
+
     def dp(diseno, circ_field: str) -> DisenoPlanta:
         return DisenoPlanta(
             max(0.0, min(80.0, float(diseno.pct_muros))),
             max(0.0, min(50.0, float(getattr(diseno, circ_field)))),
             max(0.0, min(30.0, float(diseno.pct_nucleo))),
+            _pmi,
         )
 
     return {
@@ -966,11 +971,18 @@ class CalcularEstanciasInmueble:
             except (TypeError, ValueError):
                 pass
 
-        # Construida → útil: descuenta SOLO los muros (% del panel, sanitizado igual
-        # que en el motor). La circulación interior la reserva el programa de estancias.
+        # Construida → útil: descuenta los muros de PERÍMETRO (pct_muros) y los
+        # INTERIORES/tabiquería (pct_muros_interior). La circulación interior de la
+        # unidad la reserva el propio programa de estancias (no se descuenta aquí).
         pct_muros = max(0.0, min(80.0, float(params.diseno.pct_muros)))
-        util = construida_inmueble_m2 * (1.0 - pct_muros / 100.0)
-        muros = construida_inmueble_m2 - util
+        pct_muros_int = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_interior", 0.0))))
+        pct_muros_total = min(90.0, pct_muros + pct_muros_int)   # tope: deja útil > 0
+        util = construida_inmueble_m2 * (1.0 - pct_muros_total / 100.0)
+        muros_total = construida_inmueble_m2 - util
+        # Reparte el total de muros entre perímetro e interior (proporcional a sus %),
+        # de modo que construida = útil + muros + muros_interior exactamente.
+        muros = muros_total * pct_muros / (pct_muros + pct_muros_int) if (pct_muros + pct_muros_int) > 0 else 0.0
+        muros_interior = muros_total - muros
 
         # El motor de estancias solo lee `tipo_unidad` del programa_uso. Vivienda no lo
         # necesita (su rama no usa programa_uso); el resto, un stub con el tipo basta.
@@ -993,9 +1005,11 @@ class CalcularEstanciasInmueble:
                 "construida_m2": round(construida_inmueble_m2, 2),
                 "util_m2": round(util, 2),
                 "muros_m2": round(muros, 2),
+                "muros_interior_m2": round(muros_interior, 2),
                 "computable_m2": round(computable, 2),
                 "circulacion_interior_m2": round(circulacion, 2),
                 "pct_muros": round(pct_muros, 1),
+                "pct_muros_interior": round(pct_muros_int, 1),
                 "uso": uso.value,
                 "tipo_unidad": tipo_unidad,
                 "n_dormitorios": n_dorms,

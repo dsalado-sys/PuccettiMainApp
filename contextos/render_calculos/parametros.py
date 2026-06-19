@@ -96,6 +96,10 @@ class ParametrosDiseno:
     diametro_min_vestibulo_m: float = 1.50
     ancho_min_puerta_m: float = 0.80
     pct_muros: float = 20.0
+    # % muros INTERIORES de la unidad (tabiquería entre estancias). Resta de la
+    # construida, junto con `pct_muros` (perímetro), para obtener la útil neta de la
+    # unidad. Default 0 (opt-in): sin él, la útil solo descuenta el perímetro.
+    pct_muros_interior: float = 0.0
     pct_circulacion_pb: float = 8.0     # % circulación en planta baja
     pct_circulacion_tipo: float = 8.0   # % circulación en plantas tipo / ático
     pct_nucleo: float = 5.0
@@ -266,6 +270,7 @@ def _diseno_a_dict(d: ParametrosDiseno) -> dict[str, Any]:
         "diametro_min_vestibulo_m": d.diametro_min_vestibulo_m,
         "ancho_min_puerta_m": d.ancho_min_puerta_m,
         "pct_muros": d.pct_muros,
+        "pct_muros_interior": d.pct_muros_interior,
         "pct_circulacion_pb": d.pct_circulacion_pb,
         "pct_circulacion_tipo": d.pct_circulacion_tipo,
         "pct_nucleo": d.pct_nucleo,
@@ -386,6 +391,7 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             diametro_min_vestibulo_m=_f(node, "diametro_min_vestibulo_m", base_d.diametro_min_vestibulo_m),
             ancho_min_puerta_m=_f(node, "ancho_min_puerta_m", base_d.ancho_min_puerta_m),
             pct_muros=max(0.0, min(80.0, _f(node, "pct_muros", base_d.pct_muros))),
+            pct_muros_interior=max(0.0, min(80.0, _f(node, "pct_muros_interior", base_d.pct_muros_interior))),
             pct_circulacion_pb=_circ("pct_circulacion_pb", base_d.pct_circulacion_pb),
             pct_circulacion_tipo=_circ("pct_circulacion_tipo", base_d.pct_circulacion_tipo),
             pct_nucleo=max(0.0, min(30.0, _f(node, "pct_nucleo", base_d.pct_nucleo))),

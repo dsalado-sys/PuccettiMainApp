@@ -381,8 +381,6 @@
     <div class="rc-grupo-cuerpo">
       {% set d = parametros.diseno %}
       {% set d_t = parametros.diseno_tipo %}
-      {% set d_a = parametros.diseno_atico %}
-      {% set d_s = parametros.diseno_sotano %}
 
       {{ dnum("Pasillo común mín. (m)", "ancho_min_pasillo_comun_m", "diseno", d.ancho_min_pasillo_comun_m, "0.90", "2.0", "0.05", "pb") }}
       {{ dnum("Pasillo común mín. (m)", "ancho_min_pasillo_comun_m", "diseno_tipo", d_t.ancho_min_pasillo_comun_m, "0.90", "2.0", "0.05", "tipo") }}
@@ -392,13 +390,27 @@
       {{ dnum("Diámetro vestíbulo (m)", "diametro_min_vestibulo_m", "diseno_tipo", d_t.diametro_min_vestibulo_m, "1.20", "2.50", "0.05", "tipo") }}
       {{ dnum("Puerta paso libre (m)", "ancho_min_puerta_m", "diseno", d.ancho_min_puerta_m, "0.60", "1.20", "0.05", "pb") }}
       {{ dnum("Puerta paso libre (m)", "ancho_min_puerta_m", "diseno_tipo", d_t.ancho_min_puerta_m, "0.60", "1.20", "0.05", "tipo") }}
+    </div>
+  </details>
 
-      {# % muros — por categoría de planta (PB / tipo / ático / sótano). En modo
-         inmueble solo hay una unidad: la etiqueta no referencia plantas. #}
+  <details class="rc-grupo">
+    <summary><span class="rc-grupo-titulo">Diseño · porcentajes</span></summary>
+    <div class="rc-grupo-cuerpo">
+      {% set d = parametros.diseno %}
+      {% set d_t = parametros.diseno_tipo %}
+      {% set d_a = parametros.diseno_atico %}
+      {% set d_s = parametros.diseno_sotano %}
+
+      {# % muros de PERÍMETRO — por categoría de planta (PB / tipo / ático / sótano).
+         En modo inmueble solo hay una unidad: la etiqueta no referencia plantas. #}
       {{ dnum("% muros" if es_inmueble else "% muros (PB)", "pct_muros", "diseno", d.pct_muros, "0", "60", "1", "pb") }}
       {{ dnum("% muros (tipo)", "pct_muros", "diseno_tipo", d_t.pct_muros, "0", "60", "1", "tipo") }}
       {{ dnum("% muros (ático)", "pct_muros", "diseno_atico", d_a.pct_muros, "0", "60", "1", "atico") }}
       {{ dnum("% muros (sótano)", "pct_muros", "diseno_sotano", d_s.pct_muros, "0", "60", "1", "sotano") }}
+
+      {# % muros INTERIORES de la unidad (tabiquería entre estancias). Único, solo PB;
+         resta de la construida junto con el % muros para obtener la útil neta. #}
+      {{ dnum("% muros interiores unidad", "pct_muros_interior", "diseno", d.pct_muros_interior, "0", "60", "1", "pb") }}
 
       {# % circulación común del edificio — por categoría de planta. No aplica a un
          inmueble suelto (es circulación de edificio): se oculta en modo inmueble. #}

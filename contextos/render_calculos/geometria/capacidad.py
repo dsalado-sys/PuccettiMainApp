@@ -50,6 +50,9 @@ class DisenoPlanta:
     pct_muros: float
     pct_circulacion: float
     pct_nucleo: float
+    # % muros INTERIORES de la unidad (tabiquería). Se suma a `pct_muros` al descontar
+    # de la construida; default 0 (sin él, comportamiento idéntico al previo).
+    pct_muros_interior: float = 0.0
 
 
 @dataclass
@@ -214,14 +217,15 @@ def calcular_capacidad(
     # reproduciendo el comportamiento histórico (sótano con circulación 0).
     if disenos is None:
         _pm = max(0.0, min(80.0, float(params.diseno.pct_muros)))
+        _pmi = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_interior", 0.0))))
         _cpb = max(0.0, min(50.0, float(params.diseno.pct_circulacion_pb)))
         _ct = max(0.0, min(50.0, float(params.diseno.pct_circulacion_tipo)))
         _nu = max(0.0, min(30.0, float(params.diseno.pct_nucleo)))
         disenos = {
-            "pb": DisenoPlanta(_pm, _cpb, _nu),
-            "tipo": DisenoPlanta(_pm, _ct, _nu),
-            "atico": DisenoPlanta(_pm, _ct, _nu),
-            "sotano": DisenoPlanta(_pm, 0.0, _nu),
+            "pb": DisenoPlanta(_pm, _cpb, _nu, _pmi),
+            "tipo": DisenoPlanta(_pm, _ct, _nu, _pmi),
+            "atico": DisenoPlanta(_pm, _ct, _nu, _pmi),
+            "sotano": DisenoPlanta(_pm, 0.0, _nu, _pmi),
         }
     dis_pb = disenos["pb"]
     dis_tipo = disenos["tipo"]
@@ -241,7 +245,10 @@ def calcular_capacidad(
     if uso_edificio == "vivienda":
         pct_usos_comunes_pb = 0.0
     # Verificación de no quedar útil: usamos el % de circulación más exigente.
-    pct_total_max = dis_pb.pct_muros + max(dis_pb.pct_circulacion, dis_tipo.pct_circulacion) + dis_pb.pct_nucleo
+    pct_total_max = (
+        dis_pb.pct_muros + dis_pb.pct_muros_interior
+        + max(dis_pb.pct_circulacion, dis_tipo.pct_circulacion) + dis_pb.pct_nucleo
+    )
 
     huella = envolvente.plantas[0].footprint.area if envolvente.plantas else parcela_area
     coef = urb.coeficiente_edificabilidad
@@ -344,7 +351,8 @@ def calcular_capacidad(
         # plantas tipo (ver §perfiles arriba). El sótano no aloja unidades.
         perfil = perfil_pb if cat == "pb" else perfil_tipo
 
-        muros_i = construida_i * dis.pct_muros / 100.0
+        # «Muros» = perímetro (pct_muros) + tabiquería interior (pct_muros_interior).
+        muros_i = construida_i * (dis.pct_muros + dis.pct_muros_interior) / 100.0
         muros_est_i = construida_i * pct_muros_normativo / 100.0
         nucl_i = construida_i * dis.pct_nucleo / 100.0
         circ_i = construida_i * dis.pct_circulacion / 100.0

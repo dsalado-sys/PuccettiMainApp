@@ -33,6 +33,31 @@ def test_pct_muros_distinto_cambia_el_util():
     assert abs(res["totales"]["util_m2"] - 150.0) < 1e-6  # 200 × 0.75
 
 
+def test_muros_interior_descuenta_de_la_util():
+    """útil = construida × (1 − (pct_muros + pct_muros_interior)/100); la identidad
+    construida = útil + muros + muros_interior se mantiene exacta."""
+    params = ParametrosRender()
+    params.diseno.pct_muros = 15.0
+    params.diseno.pct_muros_interior = 8.0
+    res = CalcularEstanciasInmueble().ejecutar(params, 100.0, n_dormitorios=2)
+    tot = res["totales"]
+    assert abs(tot["util_m2"] - 77.0) < 1e-6                 # 100 × (1 − 0.23)
+    assert abs(tot["muros_m2"] + tot["muros_interior_m2"] - 23.0) < 1e-6
+    assert abs(tot["construida_m2"] - (tot["util_m2"] + tot["muros_m2"] + tot["muros_interior_m2"])) < 1e-6
+    # Las estancias siguen sumando la útil neta.
+    suma = sum(e["area_target_m2"] for e in res["estancias"])
+    assert abs(suma - tot["util_m2"]) < 0.1
+
+
+def test_muros_interior_default_cero_no_cambia_nada():
+    """Sin fijar muros interior (default 0), la útil solo descuenta el perímetro."""
+    params = ParametrosRender()  # pct_muros=20, pct_muros_interior=0
+    res = CalcularEstanciasInmueble().ejecutar(params, 100.0, n_dormitorios=2)
+    tot = res["totales"]
+    assert abs(tot["util_m2"] - 80.0) < 1e-6
+    assert tot["muros_interior_m2"] == 0.0
+
+
 def test_estancias_suman_el_util_y_contienen_el_programa():
     """Las estancias (incl. circulación interior) suman el útil; hay salón,
     dormitorios y baño (programa de vivienda del Anexo I.5)."""
