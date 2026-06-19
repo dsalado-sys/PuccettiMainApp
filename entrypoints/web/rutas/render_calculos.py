@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.contextos.proyectos.puertos import ProyectoRepositorio
 from app.contextos.render_calculos.casos_uso import (
     CalcularEnvolvente,
+    CalcularEstanciasInmueble,
     CalcularLayout,
     CalcularTipologiasDormitorios,
     GuardarRender,
@@ -155,6 +156,33 @@ def _preview_parcela(proyecto: Proyecto | None) -> dict[str, Any] | None:
     }
 
 
+def _inmueble_seleccionado(proyecto: Proyecto | None) -> bool:
+    """¿El proyecto trata sobre un inmueble concreto de la parcela (§2.1)?"""
+    if proyecto is None:
+        return False
+    loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    return bool(loc.get("inmueble_seleccionado"))
+
+
+def _construida_inmueble_m2(proyecto: Proyecto | None) -> float:
+    """Superficie construida del inmueble elegido (m²); la total de la parcela si no hay."""
+    if proyecto is None:
+        return 0.0
+    loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    inm = loc.get("inmueble_seleccionado")
+    inm = inm if isinstance(inm, dict) else {}
+    try:
+        sup = float(inm.get("superficie_construida_m2") or 0.0)
+    except (TypeError, ValueError):
+        sup = 0.0
+    if sup > 0:
+        return sup
+    try:
+        return float(loc.get("superficie_construida_total_m2") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _tiene_params_guardados(proyecto: Proyecto | None, modo: str, *, heredar_legado: bool) -> bool:
     """¿El modo dado ya tiene parámetros propios guardados en el aggregate?
 
@@ -181,10 +209,20 @@ def pantalla(
     tarjeta = _tarjeta()
     estado = _estado_pantalla(proyecto)
 
-    # Sin modo válido en la URL → pantalla de selección (preview de la parcela +
-    # botones Obra nueva / Rehabilitación). El modo elegido reabre esta misma
-    # ruta con ?modo=… y entonces se dibuja el módulo.
-    modo_cfg = modo_o_none(modo)
+    # Auto (decisión de negocio): si el proyecto trata sobre un INMUEBLE concreto de
+    # la parcela (§2.1 eligió uno), el módulo entra directo en modo «inmueble»
+    # (estancias de esa unidad), sin pasar por la landing ni por obra-nueva/rehab.
+    if _inmueble_seleccionado(proyecto):
+        modo_cfg = MODOS["inmueble"]
+    else:
+        # Sin modo válido en la URL → pantalla de selección (preview de la parcela +
+        # botones Obra nueva / Rehabilitación). El modo elegido reabre esta misma
+        # ruta con ?modo=… y entonces se dibuja el módulo.
+        modo_cfg = modo_o_none(modo)
+        # «inmueble» solo es válido auto-derivado (hay un inmueble elegido en §2.1):
+        # si llega por URL sin inmueble, se ignora y se cae a la pantalla de selección.
+        if modo_cfg is not None and modo_cfg.es_inmueble:
+            modo_cfg = None
     if modo_cfg is None:
         return plantillas.TemplateResponse(
             request,
@@ -194,7 +232,9 @@ def pantalla(
                 "rol_activo": rol,
                 "proyecto_activo": proyecto,
                 "estado": estado,
-                "modos": list(MODOS.values()),
+                # La landing solo ofrece los modos elegibles a mano; «inmueble» es
+                # automático (se activa al elegir un inmueble en la localización).
+                "modos": [m for m in MODOS.values() if not m.es_inmueble],
                 "preview": _preview_parcela(proyecto),
                 "puede_editar": puede_acceder(
                     rol, ModuloPuccetti.RENDER_CALCULOS.value, PermisoModulo.EDITAR
@@ -331,6 +371,45 @@ def calcular(
         {"nivel": a.nivel, "regla": a.regla, "mensaje": a.mensaje, "elemento": a.elemento}
         for a in alertas_extra
     ]
+    return JSONResponse(resultado)
+
+
+# ─── Estancias de un inmueble concreto (modo «inmueble») ────────────────────
+@router.post("/estancias")
+def estancias_inmueble(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Distribuye las estancias de un inmueble concreto a partir de su construida.
+
+    No usa envolvente: parte de la superficie construida del inmueble elegido en §2.1
+    y reparte sus estancias como una sola unidad (modo «inmueble»). El nº de
+    dormitorios llega en el payload (`n_dormitorios`); el resto de datos, del panel."""
+    _exige_permiso(rol, PermisoModulo.VER)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    construida = _construida_inmueble_m2(proyecto)
+    if construida <= 0:
+        raise HTTPException(409, "El inmueble no tiene superficie construida. Elígelo en §2.1.")
+
+    params = parametros_desde_dict(payload)
+    n_dorms_raw = payload.get("n_dormitorios")
+    try:
+        n_dorms = int(n_dorms_raw) if n_dorms_raw is not None else None
+    except (TypeError, ValueError):
+        n_dorms = None
+
+    resultado = CalcularEstanciasInmueble(
+        catalogo_vivienda=catalogo_viv,
+        catalogo_apartamentos=catalogo_apt,
+        catalogo_hotel_apartamento=catalogo_hap,
+        catalogo_hotelero=catalogo_hot,
+    ).ejecutar(params, construida, n_dormitorios=n_dorms)
     return JSONResponse(resultado)
 
 

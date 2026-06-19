@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from pyproj import Transformer
@@ -30,6 +31,7 @@ from .geometria.capacidad import DisenoPlanta, calcular_capacidad, capacidad_a_d
 from .geometria.envolvente import construir_envolvente
 from .geometria.parcelas import LadoParcela, azimut_normal_exterior, orientacion_cardinal
 from .geometria.serializacion import (
+    _estancias_por_unidad_dorms,
     lados_a_dict,
     ring,
     tabla_planta_desde_capacidad,
@@ -889,6 +891,136 @@ class CalcularTipologiasDormitorios:
             except Exception:
                 pass
         return util_objetivo_combo(combo, cat, grupo)
+
+
+# Uso del edificio → tipo de unidad que entiende el motor de estancias (Anexo I).
+_USO_A_TIPO_UNIDAD: dict[UsoEdificio, str] = {
+    UsoEdificio.VIVIENDA: "vivienda",
+    UsoEdificio.APARTAMENTOS_TURISTICOS: "apartamento",
+    UsoEdificio.HOTEL_APARTAMENTO: "hotel_apartamento",
+    UsoEdificio.HOTELERO: "habitacion",
+}
+
+
+# ─── Caso de uso 5: CalcularEstanciasInmueble (inmueble concreto → estancias) ─
+@dataclass
+class CalcularEstanciasInmueble:
+    """Estancias de UNA unidad a partir de la superficie construida del inmueble.
+
+    Cuando el proyecto trata sobre un inmueble concreto de la parcela (§2.1), no se
+    calcula el edificio completo (footprint×plantas): se parte de la construida del
+    inmueble y se distribuyen sus estancias como una sola unidad.
+
+    Paso construida→útil: se descuentan SOLO los muros (% del panel). La circulación
+    común y el núcleo son de edificio y no aplican a una unidad suelta; la circulación
+    INTERIOR de la unidad la reserva el propio programa de estancias (`programa_*`),
+    así que NO se descuenta aquí —se contaría dos veces—.
+
+    Reutiliza el motor de estancias por unidad (`_estancias_por_unidad_dorms`), que ya
+    ramifica por uso (vivienda / apartamento / hotel-apartamento / habitación).
+    """
+
+    catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
+    catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
+    catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
+    catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
+
+    def ejecutar(
+        self,
+        params: ParametrosRender,
+        construida_inmueble_m2: float,
+        n_dormitorios: int | None = None,
+    ) -> dict[str, Any]:
+        if not construida_inmueble_m2 or construida_inmueble_m2 <= 0:
+            return {
+                "estancias": [],
+                "totales": None,
+                "error": "El inmueble no tiene superficie construida con la que calcular sus estancias.",
+                "alertas": [_alerta_dict(Alerta(
+                    "incumplimiento", "Inmueble",
+                    "Sin superficie construida del inmueble: localízalo y elígelo en §2.1.",
+                ))],
+            }
+
+        # Vuelca mínimos editables de BBDD + % circulación interior a las constantes
+        # del motor (igual que CalcularLayout antes de calcular). Reusa su helper.
+        layout = CalcularLayout(
+            catalogo_vivienda=self.catalogo_vivienda,
+            catalogo_apartamentos=self.catalogo_apartamentos,
+            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
+            catalogo_hotelero=self.catalogo_hotelero,
+        )
+        layout._sincronizar_minimos(params)
+
+        uso = params.programa.uso
+        tipo_unidad = _USO_A_TIPO_UNIDAD.get(uso, "vivienda")
+
+        # nº de dormitorios: vivienda y apartamentos lo fijan por nº de dorms (panel);
+        # el resto de usos lo determina su tipología, vía el mapeo del motor.
+        n_dorms = params.a_parametros_motor().programa.n_dormitorios
+        if n_dormitorios is not None and uso in (
+            UsoEdificio.VIVIENDA, UsoEdificio.APARTAMENTOS_TURISTICOS
+        ):
+            try:
+                n_dorms = max(0, int(n_dormitorios))
+            except (TypeError, ValueError):
+                pass
+
+        # Construida → útil: descuenta SOLO los muros (% del panel, sanitizado igual
+        # que en el motor). La circulación interior la reserva el programa de estancias.
+        pct_muros = max(0.0, min(80.0, float(params.diseno.pct_muros)))
+        util = construida_inmueble_m2 * (1.0 - pct_muros / 100.0)
+        muros = construida_inmueble_m2 - util
+
+        # El motor de estancias solo lee `tipo_unidad` del programa_uso. Vivienda no lo
+        # necesita (su rama no usa programa_uso); el resto, un stub con el tipo basta.
+        programa_uso = None if tipo_unidad == "vivienda" else SimpleNamespace(tipo_unidad=tipo_unidad)
+        estancias = _estancias_por_unidad_dorms(params, n_dorms, util, programa_uso, None)
+
+        # Computable / circulación con el mismo criterio que el detalle por unidad:
+        # computa todo salvo la circulación de acceso (vestíbulos/pasillos).
+        computable = sum(
+            e["area_target_m2"] for e in estancias
+            if e.get("computa_turismo", e.get("categoria") != "circulacion")
+        )
+        circulacion = max(0.0, util - computable)
+
+        alertas = self._alertas(params, uso, n_dorms, util)
+
+        return {
+            "estancias": estancias,
+            "totales": {
+                "construida_m2": round(construida_inmueble_m2, 2),
+                "util_m2": round(util, 2),
+                "muros_m2": round(muros, 2),
+                "computable_m2": round(computable, 2),
+                "circulacion_interior_m2": round(circulacion, 2),
+                "pct_muros": round(pct_muros, 1),
+                "uso": uso.value,
+                "tipo_unidad": tipo_unidad,
+                "n_dormitorios": n_dorms,
+                "n_estancias": sum(1 for e in estancias if e.get("categoria") != "circulacion"),
+            },
+            "alertas": [_alerta_dict(a) for a in alertas],
+        }
+
+    def _alertas(self, params: ParametrosRender, uso, n_dorms: int, util: float) -> list[Alerta]:
+        """Aviso si el inmueble queda por debajo del útil mínimo viable (solo vivienda)."""
+        alertas: list[Alerta] = []
+        if uso == UsoEdificio.VIVIENDA:
+            from .geometria.programa import util_minimo_vivienda
+            try:
+                umin = util_minimo_vivienda(n_dorms, bool(params.programa.salon_cocina_open))
+            except Exception:
+                umin = 0.0
+            if umin > 0 and util + 1e-6 < umin:
+                alertas.append(Alerta(
+                    "aviso", "Normativa",
+                    f"El útil del inmueble ({util:.2f} m²) queda por debajo del mínimo "
+                    f"viable para esta tipología ({umin:.2f} m²): alguna estancia se "
+                    f"ajusta a su superficie mínima.",
+                ))
+        return alertas
 
 
 # ─── Caso de uso 4: ValidarCumplimiento ─────────────────────────────────────

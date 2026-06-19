@@ -17,6 +17,10 @@
   // existente (catastral). Pilotan el aviso de exceso, exclusivo de rehabilitación.
   const modoActivo = form.dataset.modo || "";
   const construidaExistente = parseFloat(form.dataset.construidaExistente);  // NaN si vacío
+  // Modo «inmueble»: se trabaja sobre un inmueble concreto (estancias de UNA unidad)
+  // a partir de su construida. No hay envolvente, canvas ni tabs de planta: el cálculo
+  // va a /estancias y la columna derecha es una sola tabla de estancias.
+  const esInmueble = modoActivo === "inmueble";
 
   const canvasEl = document.getElementById("rc-canvas");
   const brujulaEl = document.getElementById("rc-brujula");
@@ -24,6 +28,9 @@
   const tabsPlantasEl = document.getElementById("rc-tabs-plantas");
   const tablaPlantaBody = document.querySelector("#rc-tabla-planta tbody");
   const tablaUnidadBody = document.querySelector("#rc-tabla-unidad tbody");
+  // Solo existen en modo inmueble (tabla única de estancias).
+  const tablaEstanciasBody = document.querySelector("#rc-tabla-estancias tbody");
+  const estTotalUtilEl = document.getElementById("rc-est-total-util");
   const alertasBox = document.getElementById("rc-alertas");
   const alertasUl = alertasBox.querySelector("ul");
   const toast = document.getElementById("rc-toast");
@@ -33,7 +40,8 @@
   const btnNormativa = document.getElementById("rc-btn-normativa");
   const modal = document.getElementById("rc-modal-normativa");
 
-  const renderer = new window.RenderCanvas(canvasEl);
+  // En modo inmueble no hay canvas → no se instancia el renderer.
+  const renderer = canvasEl ? new window.RenderCanvas(canvasEl) : null;
 
   const fmt = {
     m2: new Intl.NumberFormat("es-ES", { maximumFractionDigits: 1, minimumFractionDigits: 1 }),
@@ -542,6 +550,7 @@
 
   async function pedirPreview() {
     if (estado !== "ok") return;
+    if (esInmueble) return pedirEstancias();
     const bloques = leerFormulario();
     actualizarResumen(bloques);
     if (ESTADO.abortPreview) ESTADO.abortPreview.abort();
@@ -563,7 +572,7 @@
       ESTADO.previewPayload = data;
       ESTADO.plantaActiva = Math.min(ESTADO.plantaActiva, (data.envolvente?.plantas?.length || 1) - 1);
       dibujarTabsPlantas(data);
-      renderer.dibujar(data, ESTADO.plantaActiva);
+      if (renderer) renderer.dibujar(data, ESTADO.plantaActiva);
       actualizarBrujula(data);
       repintarKpis(data);
       repintarAlertas(data.alertas);
@@ -578,6 +587,7 @@
   // ─── Fetch /calcular (completo) ───────────────────────────────────────
   async function pedirCalculo() {
     if (estado !== "ok") return;
+    if (esInmueble) return pedirEstancias();
     ESTADO.interaccionUsuario = true;
     const bloques = leerFormulario();
     if (ESTADO.abortCalcular) ESTADO.abortCalcular.abort();
@@ -610,7 +620,7 @@
       const n_plantas = (data.envolvente?.plantas?.length) || (data.edificio?.plantas?.length) || 1;
       ESTADO.plantaActiva = Math.min(ESTADO.plantaActiva, n_plantas - 1);
       dibujarTabsPlantas(data);
-      renderer.dibujar(data, ESTADO.plantaActiva);
+      if (renderer) renderer.dibujar(data, ESTADO.plantaActiva);
       actualizarBrujula(data);
       repintarKpis(data);
       repintarAlertas(data.alertas);
@@ -625,12 +635,112 @@
     }
   }
 
+  // ─── Modo «inmueble»: estancias de UNA unidad ─────────────────────────
+  // Nº de dormitorios del inmueble (el input directo del panel; en modo inmueble
+  // no hay combinaciones — pilota las estancias de esta única vivienda).
+  function ndormsInmueble() {
+    const inp = document.getElementById("rc-apt-ndorms");
+    const n = inp ? parseInt(inp.value, 10) : 0;
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  }
+
+  function repintarKpisInmueble(t) {
+    const set = (key, v) => {
+      const el = document.querySelector(`[data-kpi="${key}"]`);
+      if (el) el.textContent = v;
+    };
+    if (!t) {
+      ["inm_construida_m2", "inm_util_m2", "inm_n_estancias", "inm_n_dormitorios"]
+        .forEach(k => set(k, "—"));
+      return;
+    }
+    set("inm_construida_m2", fmt.m2.format(t.construida_m2) + " m²");
+    set("inm_util_m2", fmt.m2.format(t.util_m2) + " m²");
+    set("inm_n_estancias", fmt.int.format(t.n_estancias));
+    set("inm_n_dormitorios", fmt.int.format(t.n_dormitorios));
+  }
+
+  function repintarTablaEstancias(estancias, totales) {
+    if (!tablaEstanciasBody) return;
+    tablaEstanciasBody.innerHTML = "";
+    if (!estancias || !estancias.length) {
+      tablaEstanciasBody.innerHTML =
+        '<tr><td colspan="4" class="rc-vacio">Sin estancias. Ajusta el nº de dormitorios y calcula.</td></tr>';
+      if (estTotalUtilEl) estTotalUtilEl.textContent = "—";
+      return;
+    }
+    let totalUtil = 0;
+    estancias.forEach(e => {
+      const sup = e.area_target_m2 || 0;
+      totalUtil += sup;
+      const tr = document.createElement("tr");
+      tr.className = "rc-mu-estancia rc-mu-estancia-" + (e.categoria || "");
+      // Dos niveles de fallo del círculo mínimo inscribible (Ø), igual que el modal.
+      const nivel = e.nivel_diametro || (e.cabe_diametro === false ? "amarillo" : "ok");
+      let warn = "";
+      if (nivel === "rojo") {
+        tr.classList.add("rc-mu-estancia-rojo");
+        warn = `<span class="rc-mu-est-warn rc-mu-est-warn-rojo" title="No cabe el círculo de Ø ${e.diametro_min_m} m ni en planta cuadrada">⚠</span>`;
+      } else if (nivel === "amarillo") {
+        tr.classList.add("rc-mu-estancia-amarillo");
+        warn = `<span class="rc-mu-est-warn rc-mu-est-warn-amarillo" title="El círculo de Ø ${e.diametro_min_m} m solo cabe en planta cuadrada; no con proporción 1:1.5">⚠</span>`;
+      }
+      tr.innerHTML = `
+        <td class="rc-mu-est-nombre">${warn}${e.etiqueta || e.nombre}</td>
+        <td class="rc-mu-est-cat">${e.categoria || ""}</td>
+        <td class="rc-num">${fmt.m2.format(sup)} m²</td>
+        <td class="rc-num">${fmt.m2.format(e.area_min_m2 || 0)} m²</td>`;
+      tablaEstanciasBody.appendChild(tr);
+    });
+    if (estTotalUtilEl) {
+      const t = totales && typeof totales.util_m2 === "number" ? totales.util_m2 : totalUtil;
+      estTotalUtilEl.textContent = fmt.m2.format(t) + " m²";
+    }
+  }
+
+  async function pedirEstancias() {
+    if (estado !== "ok") return;
+    ESTADO.interaccionUsuario = true;
+    const bloques = leerFormulario();
+    if (ESTADO.abortCalcular) ESTADO.abortCalcular.abort();
+    ESTADO.abortCalcular = new AbortController();
+    try {
+      const resp = await fetch("/modulos/render-calculos/estancias", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...bloques, n_dormitorios: ndormsInmueble() }),
+        signal: ESTADO.abortCalcular.signal,
+      });
+      if (resp.status === 409) { mostrarToast("Elige un inmueble en la localización", true); return; }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        mostrarToast(err.detail || "Error al calcular estancias", true);
+        return;
+      }
+      const data = await resp.json();
+      if (data.error) {
+        repintarAlertas(data.alertas || []);
+        repintarTablaEstancias([], null);
+        repintarKpisInmueble(null);
+        mostrarToast(data.error, true);
+        return;
+      }
+      ESTADO.fullPayload = data;
+      repintarKpisInmueble(data.totales);
+      repintarTablaEstancias(data.estancias, data.totales);
+      repintarAlertas(data.alertas || []);
+    } catch (e) {
+      if (e.name !== "AbortError") mostrarToast("Error de red", true);
+    }
+  }
+
   // ─── Guardar parámetros ───────────────────────────────────────────────
   async function guardar() {
     if (!puedeEditar) return;
     const bloques = leerFormulario();
     // Iter. 3: el resumen ahora viene de data.capacidad (no de edificio.totales).
     const resumen = ESTADO.fullPayload?.capacidad
+      || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
       || ESTADO.fullPayload?.edificio?.totales
       || ESTADO.previewPayload?.envolvente
       || {};
@@ -1427,8 +1537,8 @@
   if (btnGuardar) btnGuardar.addEventListener("click", guardar);
   if (btnCsv) btnCsv.addEventListener("click", exportCsv);
 
-  // Brújula inicial vacía + handler de rotación → render
-  if (window.RcBrujula) {
+  // Brújula inicial vacía + handler de rotación → render (no existe en inmueble).
+  if (window.RcBrujula && brujulaEl) {
     window.RcBrujula.dibujar(brujulaEl, []);
     window.RcBrujula.onRotate(deg => {
       if (renderer && typeof renderer.setRotation === "function") {
