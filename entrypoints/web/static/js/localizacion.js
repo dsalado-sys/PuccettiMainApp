@@ -336,6 +336,21 @@
       .finally(ocultarSpinner);
   }
 
+  // Elegir un inmueble de la metaparcela SIN volver a llamar al Catastro: la
+  // subreferencia (escalera·planta·puerta + construida) ya está cargada.
+  function seleccionarInmueble(rc) {
+    if (!puedeEditar) return;
+    limpiarMensaje();
+    fetch("/modulos/localizacion/seleccionar-inmueble", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rc: rc }),
+    })
+      .then(parseRespuesta)
+      .then(pintarParcela)
+      .catch(mostrarError);
+  }
+
   function cambiarTipoLado(indice, nuevoTipo) {
     fetch("/modulos/localizacion/lado/" + indice + "/tipo", {
       method: "POST",
@@ -431,6 +446,14 @@
       ? String(p.plantas_sobre_rasante) : "—";
     document.getElementById("loc-cat-sotanos").textContent = tieneSo
       ? String(p.plantas_bajo_rasante) : "—";
+
+    // Inmueble elegido (escalera·planta·puerta + su construida propia).
+    const inm = p.inmueble_seleccionado || null;
+    const inmLoc = inm && inm.localizacion ? inm.localizacion : "—";
+    const inmSup = inm && inm.superficie_construida_m2
+      ? formatoNum(inm.superficie_construida_m2, 1) + " m²" : "—";
+    document.getElementById("loc-cat-inm").textContent = inmLoc;
+    document.getElementById("loc-cat-inm-sup").textContent = inmSup;
   }
 
   function pintarCardsSubref(p) {
@@ -443,17 +466,20 @@
     }
     box.classList.remove("oculto");
 
+    const rcElegido = p.inmueble_seleccionado ? p.inmueble_seleccionado.rc : null;
+
     p.subreferencias.forEach(function (s) {
       const card = document.createElement("article");
-      card.className = "loc-card";
+      card.className = "loc-card" + (s.rc === rcElegido ? " loc-card-elegida" : "");
       card.title =
-        "Click para abrir esta parcela · RC: " + s.rc +
+        "Click para elegir este inmueble · RC: " + s.rc +
         (s.localizacion ? "  ·  Localización: " + s.localizacion : "") +
         (s.uso ? "  ·  Uso: " + s.uso : "");
       card.tabIndex = 0;
-      card.addEventListener("click", function () { buscarPorRcStr(s.rc); });
+      card.setAttribute("aria-pressed", s.rc === rcElegido ? "true" : "false");
+      card.addEventListener("click", function () { seleccionarInmueble(s.rc); });
       card.addEventListener("keydown", function (ev) {
-        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); buscarPorRcStr(s.rc); }
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); seleccionarInmueble(s.rc); }
       });
 
       const head = document.createElement("header");
@@ -698,11 +724,23 @@
   const inpNombre = document.getElementById("inp-nombre-proyecto");
   const formGuardarModal = document.getElementById("form-guardar-modal");
 
+  // Nombre sugerido: dirección (o RC) y, si hay un inmueble elegido, su
+  // escalera·planta·puerta. Ej. "Calle X, 12 · Es 1 · Pl 03 · Pt B".
+  function nombreSugerido(p) {
+    if (!p) return "";
+    let base = p.direccion || p.referencia_catastral || "";
+    const inm = p.inmueble_seleccionado;
+    if (inm && inm.localizacion) {
+      base = base ? base + " · " + inm.localizacion : inm.localizacion;
+    }
+    return base;
+  }
+
   function abrirModal() {
     if (!overlay) return;
-    // Sugerir un nombre a partir de la parcela en pantalla (dirección o RC).
+    // Sugerir un nombre a partir de la parcela en pantalla (+ inmueble elegido).
     if (inpNombre && !inpNombre.value && parcelaActual) {
-      inpNombre.value = parcelaActual.direccion || parcelaActual.referencia_catastral || "";
+      inpNombre.value = nombreSugerido(parcelaActual);
     }
     overlay.classList.remove("oculto");
     if (inpNombre) { inpNombre.focus(); inpNombre.select(); }

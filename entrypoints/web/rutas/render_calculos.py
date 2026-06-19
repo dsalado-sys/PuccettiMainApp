@@ -119,23 +119,39 @@ def _preview_parcela(proyecto: Proyecto | None) -> dict[str, Any] | None:
     selección. Devuelve None si el proyecto aún no tiene parcela localizada.
 
     La superficie es la **catastral real** guardada por §2.1 (`superficie_m2`),
-    la misma que alimenta ahora el cálculo de edificabilidad."""
+    la misma que alimenta ahora el cálculo de edificabilidad.
+
+    Si en §2.1 se eligió un inmueble concreto de la metaparcela, la construida
+    pasa a ser la de ESE inmueble (no la suma de la parcela) y se expone su
+    localización (escalera·planta·puerta)."""
     if proyecto is None:
         return None
     loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
     if not loc:
         return None
+
+    inm = loc.get("inmueble_seleccionado") or None
+    inm = inm if isinstance(inm, dict) else None
+    inm_loc = (inm or {}).get("localizacion") or ""
+    inm_uso = (inm or {}).get("uso") or ""
+    inm_sup = (inm or {}).get("superficie_construida_m2")
+    # Construida de referencia: la del inmueble elegido si la hay; si no, la total.
+    construida = inm_sup if (inm_sup and inm_sup > 0) else loc.get("superficie_construida_total_m2")
+
     return {
         "referencia_catastral": loc.get("referencia_catastral"),
         "direccion": loc.get("direccion"),
         "municipio": loc.get("municipio"),
         "provincia": loc.get("provincia"),
         "superficie_m2": loc.get("superficie_m2"),
-        "uso_catastral": loc.get("uso_catastral"),
+        "uso_catastral": inm_uso or loc.get("uso_catastral"),
         "anio_construccion": loc.get("anio_construccion"),
-        "superficie_construida_total_m2": loc.get("superficie_construida_total_m2"),
+        "superficie_construida_total_m2": construida,
         "plantas_sobre_rasante": loc.get("plantas_sobre_rasante"),
         "plantas_bajo_rasante": loc.get("plantas_bajo_rasante"),
+        # Inmueble elegido (escalera·planta·puerta) o "" si no se eligió ninguno.
+        "inmueble_localizacion": inm_loc,
+        "inmueble_rc": (inm or {}).get("rc") or "",
     }
 
 

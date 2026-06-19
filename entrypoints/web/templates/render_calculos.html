@@ -33,9 +33,15 @@
     <span class="rc-cat-v">{% if catastro.superficie_m2 %}{{ "%.2f"|format(catastro.superficie_m2|float) }} m²{% else %}—{% endif %}</span>
   </span>
   <span class="rc-cat-item">
-    <span class="rc-cat-k">Sup. construida</span>
+    <span class="rc-cat-k">Sup. construida{% if catastro.inmueble_localizacion %} (inmueble){% endif %}</span>
     <span class="rc-cat-v">{% if catastro.superficie_construida_total_m2 %}{{ "%.2f"|format(catastro.superficie_construida_total_m2|float) }} m²{% else %}—{% endif %}</span>
   </span>
+  {% if catastro.inmueble_localizacion %}
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Inmueble (esc./pl./pt.)</span>
+    <span class="rc-cat-v">{{ catastro.inmueble_localizacion }}</span>
+  </span>
+  {% endif %}
   <span class="rc-cat-item">
     <span class="rc-cat-k">Plantas / Sótanos</span>
     <span class="rc-cat-v">{{ catastro.plantas_sobre_rasante if catastro.plantas_sobre_rasante is not none else "—" }} / {{ catastro.plantas_bajo_rasante if catastro.plantas_bajo_rasante is not none else "—" }}</span>

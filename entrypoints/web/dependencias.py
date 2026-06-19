@@ -19,6 +19,7 @@ from app.contextos.localizacion.casos_uso import (
     LocalizarPorCoordenada,
     LocalizarPorDireccion,
     LocalizarPorRC,
+    SeleccionarInmueble,
     SimplificarContorno,
 )
 from app.contextos.localizacion.dominio import Parcela as ParcelaLoc
@@ -138,6 +139,12 @@ def corregir_orientacion_uc(
     repo: ParcelaTemporalRepositorio = Depends(parcelas_temporales),
 ) -> CorregirOrientacionLado:
     return CorregirOrientacionLado(repo=repo)
+
+
+def seleccionar_inmueble_uc(
+    repo: ParcelaTemporalRepositorio = Depends(parcelas_temporales),
+) -> SeleccionarInmueble:
+    return SeleccionarInmueble(repo=repo)
 
 
 def cargar_detalle_subref_uc(
