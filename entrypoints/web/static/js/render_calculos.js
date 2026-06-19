@@ -224,9 +224,9 @@
     if (avisoExceso) avisoExceso.hidden = false;
   }
   const btnExcesoAceptar = document.getElementById("rc-modal-exceso-aceptar");
-  const btnExcesoCerrar = document.getElementById("rc-modal-exceso-cerrar");
   if (btnExcesoAceptar) btnExcesoAceptar.addEventListener("click", aceptarExceso);
-  if (btnExcesoCerrar) btnExcesoCerrar.addEventListener("click", aceptarExceso);
+  // Solo se cierra con «Aceptar»: bloqueamos el cierre por tecla Escape.
+  if (modalExceso) modalExceso.addEventListener("cancel", ev => ev.preventDefault());
 
   // ─── Tabs de planta ───────────────────────────────────────────────────
   function dibujarTabsPlantas(payload) {
