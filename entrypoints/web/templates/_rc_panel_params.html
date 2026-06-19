@@ -54,7 +54,12 @@
 
     <div class="rc-grupo-cuerpo">
       {% set urb = parametros.urbanisticos %}
+      {# Bloques que el modo activo decide ocultar (p. ej. rehabilitación oculta
+         edificabilidad/ocupación/retranqueos: la envolvente la fija el edificio
+         existente, no el PGOU). Ver `render_modos.py` → `secciones_ocultas`. #}
+      {% set _ocultas = modo.secciones_ocultas if modo else [] %}
 
+      {% if "edificabilidad" not in _ocultas %}
       <label class="rc-checkbox">
         <input type="checkbox" name="usar_coeficiente_edificabilidad"
                {% if urb.usar_coeficiente_edificabilidad %}checked{% endif %}
@@ -68,12 +73,15 @@
                id="rc-input-coef"
                {% if not urb.usar_coeficiente_edificabilidad %}disabled{% endif %}>
       </label>
+      {% endif %}
 
+      {% if "ocupacion" not in _ocultas %}
       <label class="rc-campo">
         <span class="rc-campo-label">Ocupación máxima (%)</span>
         <input type="number" name="ocupacion_maxima_pct" min="10" max="100" step="1"
                value="{{ urb.ocupacion_maxima_pct }}" data-bloque="urbanisticos">
       </label>
+      {% endif %}
 
       <label class="rc-campo">
         <span class="rc-campo-label">Número máximo de plantas</span>
@@ -81,6 +89,7 @@
                value="{{ urb.n_plantas_max }}" data-bloque="urbanisticos">
       </label>
 
+      {% if "retranqueos" not in _ocultas %}
       <div class="rc-fila">
         <label class="rc-campo">
           <span class="rc-campo-label">Retranq. fachada (m)</span>
@@ -93,6 +102,7 @@
                  value="{{ urb.retranqueo_linderos_m }}" data-bloque="urbanisticos">
         </label>
       </div>
+      {% endif %}
 
       <fieldset class="rc-usos">
         <legend>Usos permitidos por el PGOU</legend>

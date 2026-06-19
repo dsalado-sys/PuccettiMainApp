@@ -29,11 +29,13 @@ class ModoRender:
     descripcion: str                  # texto del botón en la pantalla de selección
     badge: str = ""                   # etiqueta corta opcional junto al título
     nota: str = ""                    # aclaración opcional bajo el hero
-    # ── Hooks para diferenciar más adelante (hoy idénticos en ambos modos) ──
+    # ── Hooks para diferenciar los modos ──
     # Usos del catálogo ofrecidos en este modo. Vacío = todos los del catálogo.
     usos_permitidos: tuple[str, ...] = ()
-    # IDs de secciones del panel de parámetros a ocultar en este modo (la plantilla
-    # las consulta; hoy vacío, así que no se oculta nada).
+    # Claves de bloques del panel de parámetros a ocultar en este modo. La plantilla
+    # `_rc_panel_params.html` las consulta (`modo.secciones_ocultas`) y omite del DOM
+    # los campos cuya clave aparezca aquí. Claves soportadas hoy:
+    #   "edificabilidad" · "ocupacion" · "retranqueos"
     secciones_ocultas: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -56,6 +58,13 @@ MODOS: dict[str, ModoRender] = {
             "de su estado actual."
         ),
         badge="Rehabilitación",
+        nota=(
+            "La envolvente parte del edificio existente: la edificabilidad, la "
+            "ocupación y los retranqueos del PGOU no se editan en este modo."
+        ),
+        # La envolvente la fija el edificio existente, no el PGOU: estos parámetros
+        # de obra nueva no aplican y se ocultan del panel.
+        secciones_ocultas=("edificabilidad", "ocupacion", "retranqueos"),
     ),
 }
 
