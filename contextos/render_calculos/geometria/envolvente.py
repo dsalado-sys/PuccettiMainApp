@@ -42,6 +42,10 @@ class Envolvente:
     plantas: list[Planta]
     edificabilidad_consumida: float
     edificabilidad_max: float
+    # Superficie de SUELO usada para los límites legales (edificabilidad y
+    # ocupación). Es la superficie catastral real de la parcela cuando se conoce;
+    # si es 0, los consumidores caen en el área geométrica del polígono.
+    superficie_referencia_m2: float = 0.0
 
 
 def _restar_franja_lado(huella: Polygon, p1, p2, retranqueo: float) -> Polygon:
@@ -165,18 +169,34 @@ def _huella_atico(huella: Polygon, retranqueo_atico: float) -> Polygon:
     return reducida
 
 
-def construir_envolvente(parcela: Polygon, params: Parametros, lados=None) -> Envolvente:
+def construir_envolvente(
+    parcela: Polygon,
+    params: Parametros,
+    lados=None,
+    superficie_referencia: float | None = None,
+) -> Envolvente:
     """Pipeline §2.4 completo: retranqueos direccionales → ocupación → N plantas → patios.
 
     Iteración 4: acepta `lados: list[LadoParcela] | None`. Si se pasan, los
     retranqueos se aplican direccionalmente según el tipo de cada lado.
+
+    `superficie_referencia` es la superficie de SUELO contra la que se calculan los
+    límites legales (edificabilidad y ocupación máxima). Cuando se conoce la
+    superficie catastral real de la parcela se pasa aquí; si es None/0 se usa el
+    área geométrica del polígono reproyectado (comportamiento histórico). La FORMA
+    de la huella (retranqueos, geometría) siempre proviene del polígono.
     """
+    sup_ref = (
+        float(superficie_referencia)
+        if superficie_referencia and superficie_referencia > 0
+        else parcela.area
+    )
     huella = aplicar_retranqueos(parcela, params, lados)
     if huella.is_empty:
         raise ValueError("Tras retranqueos no queda espacio edificable.")
 
-    # Aplicar ocupación máxima: si la huella excede `ocupacion × parcela`, recortar.
-    ocup_area = params.urbanismo.ocupacion_maxima * parcela.area
+    # Aplicar ocupación máxima: si la huella excede `ocupacion × superficie`, recortar.
+    ocup_area = params.urbanismo.ocupacion_maxima * sup_ref
     if ocup_area > 0:
         huella = _aplicar_ocupacion_maxima(huella, ocup_area)
         if huella.is_empty:
@@ -258,13 +278,14 @@ def construir_envolvente(parcela: Polygon, params: Parametros, lados=None) -> En
     # dimensionaba por ocupación.
     urb = params.urbanismo
     if getattr(urb, "usar_coeficiente_edificabilidad", True):
-        edif_max = parcela.area * urb.coeficiente_edificabilidad
+        edif_max = sup_ref * urb.coeficiente_edificabilidad
     else:
-        ocup_area_max = urb.ocupacion_maxima * parcela.area
+        ocup_area_max = urb.ocupacion_maxima * sup_ref
         edif_max = ocup_area_max * max(1, urb.n_plantas_max)
     return Envolvente(
         parcela=parcela,
         plantas=plantas,
         edificabilidad_consumida=edif_acumulada,
         edificabilidad_max=edif_max,
+        superficie_referencia_m2=sup_ref,
     )

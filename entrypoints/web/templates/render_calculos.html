@@ -4,16 +4,26 @@
 {% block contenido %}
 <link rel="stylesheet" href="/static/css/render_calculos.css?v={{ estaticos_version }}" />
 
+{# Modo «inmueble»: se trabaja sobre un inmueble concreto de la parcela. Sin
+   urbanismo ni canvas de plantas; una sola tabla de estancias a la derecha. #}
+{% set es_inmueble = modo and modo.es_inmueble %}
+
 <section class="hero rc-hero">
   <div class="rc-hero-titulo">
-    <h1>{{ tarjeta.titulo }}</h1>
+    <h1>{% if modo %}{{ modo.titulo }}{% else %}{{ tarjeta.titulo }}{% endif %}</h1>
+    <p style="margin:.15rem 0 0;font-size:.85rem;opacity:.8;">
+      {{ tarjeta.titulo }} · <a href="/modulos/render-calculos">cambiar modo</a>
+    </p>
   </div>
   <div class="rc-hero-acciones">
+    {% if not es_inmueble %}
     <button type="button" id="rc-btn-normativa" class="boton-secundario" title="Normativa municipal del PGOU">
       Normativa municipal
     </button>
-    <button type="button" id="rc-btn-distribuir" class="boton-primario" title="Calcular capacidad numérica (envolvente + Normativa)">
-      Calcular capacidad
+    {% endif %}
+    <button type="button" id="rc-btn-distribuir" class="boton-primario"
+            title="{% if es_inmueble %}Distribuir las estancias del inmueble{% else %}Calcular capacidad numérica (envolvente + Normativa){% endif %}">
+      {% if es_inmueble %}Calcular estancias{% else %}Calcular capacidad{% endif %}
     </button>
     <button type="button" id="rc-btn-guardar" class="boton-secundario" title="Guardar parámetros en el proyecto">
       Guardar
@@ -21,6 +31,33 @@
     <span id="rc-toast" class="rc-toast" role="status" aria-live="polite"></span>
   </div>
 </section>
+
+{% if catastro %}
+<section class="rc-catastro-bar" aria-label="Datos catastrales de la parcela">
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Sup. parcela</span>
+    <span class="rc-cat-v">{% if catastro.superficie_m2 %}{{ "%.2f"|format(catastro.superficie_m2|float) }} m²{% else %}—{% endif %}</span>
+  </span>
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Sup. construida{% if catastro.inmueble_localizacion %} (inmueble){% endif %}</span>
+    <span class="rc-cat-v">{% if catastro.superficie_construida_total_m2 %}{{ "%.2f"|format(catastro.superficie_construida_total_m2|float) }} m²{% else %}—{% endif %}</span>
+  </span>
+  {% if catastro.inmueble_localizacion %}
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Inmueble (esc./pl./pt.)</span>
+    <span class="rc-cat-v">{{ catastro.inmueble_localizacion }}</span>
+  </span>
+  {% endif %}
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Plantas / Sótanos</span>
+    <span class="rc-cat-v">{{ catastro.plantas_sobre_rasante if catastro.plantas_sobre_rasante is not none else "—" }} / {{ catastro.plantas_bajo_rasante if catastro.plantas_bajo_rasante is not none else "—" }}</span>
+  </span>
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Año construcción</span>
+    <span class="rc-cat-v">{{ catastro.anio_construccion if catastro.anio_construccion else "—" }}</span>
+  </span>
+</section>
+{% endif %}
 
 {% if estado == "sin_proyecto" %}
   <section class="aviso aviso-info">
@@ -38,11 +75,38 @@
       class="rc-layout"
       data-puede-editar="{{ 'true' if puede_editar else 'false' }}"
       data-estado="{{ estado }}"
+      data-modo="{{ modo.slug if modo else '' }}"
+      data-construida-existente="{{ catastro.superficie_construida_total_m2 if catastro and catastro.superficie_construida_total_m2 else '' }}"
       autocomplete="off">
 
   {% include "_rc_panel_params.html" %}
 
   <!-- ────────── Columna centro: visualización ────────── -->
+  {% if es_inmueble %}
+  <section class="rc-viz rc-viz-inmueble" aria-label="Datos del inmueble">
+    <article class="rc-inmueble-ficha">
+      <h2>Inmueble</h2>
+      <dl class="rc-inmueble-datos">
+        {% if catastro and catastro.inmueble_localizacion %}
+        <div><dt>Localización (esc./pl./pt.)</dt><dd>{{ catastro.inmueble_localizacion }}</dd></div>
+        {% endif %}
+        {% if catastro and catastro.inmueble_rc %}
+        <div><dt>Referencia catastral</dt><dd>{{ catastro.inmueble_rc }}</dd></div>
+        {% endif %}
+        <div><dt>Uso catastral</dt><dd>{{ catastro.uso_catastral if catastro and catastro.uso_catastral else "—" }}</dd></div>
+        <div><dt>Superficie construida</dt>
+          <dd>{% if catastro and catastro.superficie_construida_total_m2 %}{{ "%.2f"|format(catastro.superficie_construida_total_m2|float) }} m²{% else %}—{% endif %}</dd></div>
+        {% if catastro and catastro.direccion %}
+        <div><dt>Dirección</dt><dd>{{ catastro.direccion }}</dd></div>
+        {% endif %}
+      </dl>
+      <p class="rc-inmueble-nota">
+        Las estancias se distribuyen a partir de la superficie construida del inmueble,
+        descontando los muros y reservando la circulación interior de la unidad.
+      </p>
+    </article>
+  </section>
+  {% else %}
   <section class="rc-viz" aria-label="Plano de planta y orientaciones">
     <nav class="rc-plantas" id="rc-tabs-plantas" role="tablist" aria-label="Selector de planta">
       <!-- los tabs se inyectan desde JS tras /preview -->
@@ -57,23 +121,50 @@
         <span>Calculando capacidad…</span>
       </div>
     </div>
-
-    <p class="rc-banner-render" id="rc-banner-render">
-      Render gráfico de unidades en desarrollo — los números mostrados son los del cálculo.
-    </p>
-
-    <footer class="rc-leyenda">
-      <span class="rc-leg rc-leg-fachada">Fachada</span>
-      <span class="rc-leg rc-leg-medianera">Medianera</span>
-      <span class="rc-leg rc-leg-unidad">Vivienda</span>
-      <span class="rc-leg rc-leg-adaptada">Vivienda adaptada</span>
-      <span class="rc-leg rc-leg-nucleo">Núcleo vertical</span>
-      <span class="rc-leg rc-leg-patio">Patio interior</span>
-    </footer>
   </section>
+  {% endif %}
 
   <!-- ────────── Columna derecha: tabla + KPIs ────────── -->
   <aside class="rc-tabla" aria-label="Tabla de superficies en tiempo real" aria-live="polite">
+    {% if es_inmueble %}
+    <div class="rc-kpis">
+      <article class="rc-kpi">
+        <span class="rc-kpi-label">Superficie construida</span>
+        <span class="rc-kpi-valor" data-kpi="inm_construida_m2">—</span>
+      </article>
+      <article class="rc-kpi">
+        <span class="rc-kpi-label">Superficie útil</span>
+        <span class="rc-kpi-valor" data-kpi="inm_util_m2">—</span>
+      </article>
+      <article class="rc-kpi rc-kpi-destacada">
+        <span class="rc-kpi-label">Estancias</span>
+        <span class="rc-kpi-valor" data-kpi="inm_n_estancias">—</span>
+      </article>
+      <article class="rc-kpi">
+        <span class="rc-kpi-label">Dormitorios</span>
+        <span class="rc-kpi-valor" data-kpi="inm_n_dormitorios">—</span>
+      </article>
+    </div>
+
+    <div class="rc-tabla-wrap" id="rc-tabla-estancias-wrap">
+      <table class="rc-tabla-tabla" id="rc-tabla-estancias">
+        <thead class="rc-thead-sticky">
+          <tr>
+            <th>Estancia</th><th>Categoría</th>
+            <th class="rc-num">Superficie</th><th class="rc-num">Mínimo</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+        <tfoot>
+          <tr>
+            <th colspan="2">Útil total</th>
+            <td class="rc-num" id="rc-est-total-util">—</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    {% else %}
     <div class="rc-kpis">
       <article class="rc-kpi">
         <span class="rc-kpi-label">Superficie construida</span>
@@ -103,7 +194,7 @@
         <thead class="rc-thead-sticky">
           <tr>
             <th>Planta</th><th>Uds.</th><th>Construida</th><th>Útil</th>
-            <th>Muros</th><th>Muros est.</th><th>Circul.</th><th>Núcleo</th><th>Patio</th><th class="rc-col-local">Local</th><th>Otros</th><th class="rc-col-comunes">Usos com.</th>
+            <th>Muros</th><th>Muros int.</th><th>Muros est.</th><th>Circul.</th><th>Núcleo</th><th>Patio</th><th class="rc-col-local">Local</th><th>Otros</th><th class="rc-col-comunes">Usos com.</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -126,8 +217,15 @@
     <div class="rc-export">
       <button type="button" id="rc-btn-csv" class="boton-secundario">Exportar CSV</button>
     </div>
+    {% endif %}
   </aside>
 </form>
+
+<div id="rc-aviso-exceso" class="rc-aviso-exceso" role="status" aria-live="polite" hidden>
+  <span class="rc-aviso-exceso-icono" aria-hidden="true">⚠</span>
+  <span>La superficie construida proyectada (<strong data-exceso="proyectada">—</strong>)
+  supera la del edificio existente (<strong data-exceso="existente">—</strong>).</span>
+</div>
 
 <section class="rc-alertas" id="rc-alertas" aria-live="assertive" hidden>
   <header><h2>Alertas y avisos</h2></header>
@@ -135,6 +233,7 @@
 </section>
 
 {% include "_rc_modal_normativa.html" %}
+{% include "_rc_modal_exceso.html" %}
 {% include "_rc_modal_unidad.html" %}
 {% include "_rc_modal_tipologias.html" %}
 {% include "_rc_modal_superficies.html" %}

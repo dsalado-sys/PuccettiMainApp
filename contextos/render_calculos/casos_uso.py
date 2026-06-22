@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from pyproj import Transformer
@@ -30,6 +31,7 @@ from .geometria.capacidad import DisenoPlanta, calcular_capacidad, capacidad_a_d
 from .geometria.envolvente import construir_envolvente
 from .geometria.parcelas import LadoParcela, azimut_normal_exterior, orientacion_cardinal
 from .geometria.serializacion import (
+    _estancias_por_unidad_dorms,
     lados_a_dict,
     ring,
     tabla_planta_desde_capacidad,
@@ -74,11 +76,19 @@ def _disenos_por_categoria(params: ParametrosRender) -> dict[str, DisenoPlanta]:
     propio bucket. Permite que PB sea independiente de las plantas tipo y que ático y
     sótano tengan su propio % muros y % circulación.
     """
+    # % núcleo y % muros interior son GLOBALES del edificio: se leen solo del bloque
+    # PB y aplican igual a todas las plantas. El núcleo es la caja de escaleras /
+    # ascensor, que es vertical y única para el edificio entero (no tiene sentido un
+    # núcleo distinto por planta). El % muros interior es la tabiquería de la unidad.
+    _pmi = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_interior", 0.0))))
+    _nucleo = max(0.0, min(30.0, float(params.diseno.pct_nucleo)))
+
     def dp(diseno, circ_field: str) -> DisenoPlanta:
         return DisenoPlanta(
             max(0.0, min(80.0, float(diseno.pct_muros))),
             max(0.0, min(50.0, float(getattr(diseno, circ_field)))),
-            max(0.0, min(30.0, float(diseno.pct_nucleo))),
+            _nucleo,
+            _pmi,
         )
 
     return {
@@ -98,6 +108,19 @@ class ParcelaMetrica:
     provincia: str | None
     centroide_lonlat: tuple[float, float] | None
     referencia_catastral: str | None
+    # Superficie catastral REAL de la parcela (m² de suelo), tal y como la guardó
+    # §2.1. Es la fuente de verdad para edificabilidad/ocupación; el área del
+    # polígono reproyectado solo se usa si esta falta.
+    superficie_catastral_m2: float | None = None
+
+
+def superficie_referencia_parcela(parcela: ParcelaMetrica) -> float:
+    """Superficie de suelo de referencia: catastral real si se conoce, si no la
+    geométrica del polígono reproyectado."""
+    s = parcela.superficie_catastral_m2
+    if s and s > 0:
+        return float(s)
+    return parcela.poligono_utm.area
 
 
 def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
@@ -159,6 +182,11 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
     if centroide_raw and len(centroide_raw) >= 2:
         centroide = (float(centroide_raw[0]), float(centroide_raw[1]))
 
+    try:
+        superficie_cat = float(datos.get("superficie_m2") or 0.0)
+    except (TypeError, ValueError):
+        superficie_cat = 0.0
+
     return ParcelaMetrica(
         poligono_utm=poly,
         lados=lados,
@@ -166,6 +194,7 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
         provincia=datos.get("provincia"),
         centroide_lonlat=centroide,
         referencia_catastral=datos.get("referencia_catastral"),
+        superficie_catastral_m2=superficie_cat if superficie_cat > 0 else None,
     )
 
 
@@ -181,8 +210,12 @@ class CalcularEnvolvente:
     ) -> dict[str, Any]:
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
+        sup_ref = superficie_referencia_parcela(parcela)
         try:
-            envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
+            envolvente = construir_envolvente(
+                parcela.poligono_utm, params_motor, parcela.lados,
+                superficie_referencia=sup_ref,
+            )
         except ValueError as exc:
             return {
                 "error": str(exc),
@@ -229,7 +262,9 @@ class CalcularEnvolvente:
             },
             "parcela": {
                 "poligono": ring(parcela.poligono_utm),
-                "area_m2": round(parcela.poligono_utm.area, 2),
+                "area_m2": round(sup_ref, 2),
+                "area_geometrica_m2": round(parcela.poligono_utm.area, 2),
+                "superficie_catastral_m2": parcela.superficie_catastral_m2,
                 "municipio": parcela.municipio,
                 "provincia": parcela.provincia,
                 "bbox": [round(v, 2) for v in parcela.poligono_utm.bounds],
@@ -327,8 +362,12 @@ class CalcularLayout:
 
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
+        sup_ref = superficie_referencia_parcela(parcela)
         try:
-            envolvente = construir_envolvente(parcela.poligono_utm, params_motor, parcela.lados)
+            envolvente = construir_envolvente(
+                parcela.poligono_utm, params_motor, parcela.lados,
+                superficie_referencia=sup_ref,
+            )
         except ValueError as exc:
             return {
                 "error": str(exc),
@@ -400,7 +439,9 @@ class CalcularLayout:
             },
             "parcela": {
                 "poligono": ring(parcela.poligono_utm),
-                "area_m2": round(parcela.poligono_utm.area, 2),
+                "area_m2": round(sup_ref, 2),
+                "area_geometrica_m2": round(parcela.poligono_utm.area, 2),
+                "superficie_catastral_m2": parcela.superficie_catastral_m2,
                 "municipio": parcela.municipio,
                 "provincia": parcela.provincia,
                 "bbox": [round(v, 2) for v in parcela.poligono_utm.bounds],
@@ -860,6 +901,145 @@ class CalcularTipologiasDormitorios:
         return util_objetivo_combo(combo, cat, grupo)
 
 
+# Uso del edificio → tipo de unidad que entiende el motor de estancias (Anexo I).
+_USO_A_TIPO_UNIDAD: dict[UsoEdificio, str] = {
+    UsoEdificio.VIVIENDA: "vivienda",
+    UsoEdificio.APARTAMENTOS_TURISTICOS: "apartamento",
+    UsoEdificio.HOTEL_APARTAMENTO: "hotel_apartamento",
+    UsoEdificio.HOTELERO: "habitacion",
+}
+
+
+# ─── Caso de uso 5: CalcularEstanciasInmueble (inmueble concreto → estancias) ─
+@dataclass
+class CalcularEstanciasInmueble:
+    """Estancias de UNA unidad a partir de la superficie construida del inmueble.
+
+    Cuando el proyecto trata sobre un inmueble concreto de la parcela (§2.1), no se
+    calcula el edificio completo (footprint×plantas): se parte de la construida del
+    inmueble y se distribuyen sus estancias como una sola unidad.
+
+    Paso construida→útil: se descuentan SOLO los muros (% del panel). La circulación
+    común y el núcleo son de edificio y no aplican a una unidad suelta; la circulación
+    INTERIOR de la unidad la reserva el propio programa de estancias (`programa_*`),
+    así que NO se descuenta aquí —se contaría dos veces—.
+
+    Reutiliza el motor de estancias por unidad (`_estancias_por_unidad_dorms`), que ya
+    ramifica por uso (vivienda / apartamento / hotel-apartamento / habitación).
+    """
+
+    catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
+    catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
+    catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
+    catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
+
+    def ejecutar(
+        self,
+        params: ParametrosRender,
+        construida_inmueble_m2: float,
+        n_dormitorios: int | None = None,
+    ) -> dict[str, Any]:
+        if not construida_inmueble_m2 or construida_inmueble_m2 <= 0:
+            return {
+                "estancias": [],
+                "totales": None,
+                "error": "El inmueble no tiene superficie construida con la que calcular sus estancias.",
+                "alertas": [_alerta_dict(Alerta(
+                    "incumplimiento", "Inmueble",
+                    "Sin superficie construida del inmueble: localízalo y elígelo en §2.1.",
+                ))],
+            }
+
+        # Vuelca mínimos editables de BBDD + % circulación interior a las constantes
+        # del motor (igual que CalcularLayout antes de calcular). Reusa su helper.
+        layout = CalcularLayout(
+            catalogo_vivienda=self.catalogo_vivienda,
+            catalogo_apartamentos=self.catalogo_apartamentos,
+            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
+            catalogo_hotelero=self.catalogo_hotelero,
+        )
+        layout._sincronizar_minimos(params)
+
+        uso = params.programa.uso
+        tipo_unidad = _USO_A_TIPO_UNIDAD.get(uso, "vivienda")
+
+        # nº de dormitorios: vivienda y apartamentos lo fijan por nº de dorms (panel);
+        # el resto de usos lo determina su tipología, vía el mapeo del motor.
+        n_dorms = params.a_parametros_motor().programa.n_dormitorios
+        if n_dormitorios is not None and uso in (
+            UsoEdificio.VIVIENDA, UsoEdificio.APARTAMENTOS_TURISTICOS
+        ):
+            try:
+                n_dorms = max(0, int(n_dormitorios))
+            except (TypeError, ValueError):
+                pass
+
+        # Construida → útil: descuenta los muros de PERÍMETRO (pct_muros) y los
+        # INTERIORES/tabiquería (pct_muros_interior). La circulación interior de la
+        # unidad la reserva el propio programa de estancias (no se descuenta aquí).
+        pct_muros = max(0.0, min(80.0, float(params.diseno.pct_muros)))
+        pct_muros_int = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_interior", 0.0))))
+        pct_muros_total = min(90.0, pct_muros + pct_muros_int)   # tope: deja útil > 0
+        util = construida_inmueble_m2 * (1.0 - pct_muros_total / 100.0)
+        muros_total = construida_inmueble_m2 - util
+        # Reparte el total de muros entre perímetro e interior (proporcional a sus %),
+        # de modo que construida = útil + muros + muros_interior exactamente.
+        muros = muros_total * pct_muros / (pct_muros + pct_muros_int) if (pct_muros + pct_muros_int) > 0 else 0.0
+        muros_interior = muros_total - muros
+
+        # El motor de estancias solo lee `tipo_unidad` del programa_uso. Vivienda no lo
+        # necesita (su rama no usa programa_uso); el resto, un stub con el tipo basta.
+        programa_uso = None if tipo_unidad == "vivienda" else SimpleNamespace(tipo_unidad=tipo_unidad)
+        estancias = _estancias_por_unidad_dorms(params, n_dorms, util, programa_uso, None)
+
+        # Computable / circulación con el mismo criterio que el detalle por unidad:
+        # computa todo salvo la circulación de acceso (vestíbulos/pasillos).
+        computable = sum(
+            e["area_target_m2"] for e in estancias
+            if e.get("computa_turismo", e.get("categoria") != "circulacion")
+        )
+        circulacion = max(0.0, util - computable)
+
+        alertas = self._alertas(params, uso, n_dorms, util)
+
+        return {
+            "estancias": estancias,
+            "totales": {
+                "construida_m2": round(construida_inmueble_m2, 2),
+                "util_m2": round(util, 2),
+                "muros_m2": round(muros, 2),
+                "muros_interior_m2": round(muros_interior, 2),
+                "computable_m2": round(computable, 2),
+                "circulacion_interior_m2": round(circulacion, 2),
+                "pct_muros": round(pct_muros, 1),
+                "pct_muros_interior": round(pct_muros_int, 1),
+                "uso": uso.value,
+                "tipo_unidad": tipo_unidad,
+                "n_dormitorios": n_dorms,
+                "n_estancias": sum(1 for e in estancias if e.get("categoria") != "circulacion"),
+            },
+            "alertas": [_alerta_dict(a) for a in alertas],
+        }
+
+    def _alertas(self, params: ParametrosRender, uso, n_dorms: int, util: float) -> list[Alerta]:
+        """Aviso si el inmueble queda por debajo del útil mínimo viable (solo vivienda)."""
+        alertas: list[Alerta] = []
+        if uso == UsoEdificio.VIVIENDA:
+            from .geometria.programa import util_minimo_vivienda
+            try:
+                umin = util_minimo_vivienda(n_dorms, bool(params.programa.salon_cocina_open))
+            except Exception:
+                umin = 0.0
+            if umin > 0 and util + 1e-6 < umin:
+                alertas.append(Alerta(
+                    "aviso", "Normativa",
+                    f"El útil del inmueble ({util:.2f} m²) queda por debajo del mínimo "
+                    f"viable para esta tipología ({umin:.2f} m²): alguna estancia se "
+                    f"ajusta a su superficie mínima.",
+                ))
+        return alertas
+
+
 # ─── Caso de uso 4: ValidarCumplimiento ─────────────────────────────────────
 @dataclass
 class ValidarCumplimiento:
@@ -942,10 +1122,21 @@ class ValidarCumplimiento:
         return alertas
 
 
+# Claves del formato plano LEGADO (anterior a la separación por modo). Se tratan
+# como pertenecientes al modo por defecto (obra nueva) y se migran al guardar.
+_CLAVES_LEGADO = ("parametros", "resumen_ultimo_calculo", "timestamp")
+
+
 # ─── Caso de uso 4: GuardarRender ───────────────────────────────────────────
 @dataclass
 class GuardarRender:
-    """Persiste parámetros + resumen del último cálculo en el aggregate."""
+    """Persiste parámetros + resumen del último cálculo en el aggregate, **por modo**.
+
+    Cada modo (obra nueva / rehabilitación) guarda su propio bloque bajo
+    `datos(RENDER_CALCULOS)[modo_key]`, de forma que guardar en uno no pisa al otro.
+    `modo_key` es una clave opaca (el slug del modo); el caso de uso no interpreta
+    su semántica. Al guardar se descarta el formato plano legado (migración).
+    """
 
     repo_proyectos: ProyectoRepositorio
 
@@ -954,26 +1145,73 @@ class GuardarRender:
         proyecto: Proyecto,
         params: ParametrosRender,
         resumen: dict[str, Any],
+        modo_key: str = "obra-nueva",
     ) -> Proyecto:
-        datos = {
+        bloque = {
             "parametros": parametros_a_dict(params),
             "resumen_ultimo_calculo": resumen,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        proyecto.fijar_datos(ModuloPuccetti.RENDER_CALCULOS, datos)
+        datos_actual = dict(proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {})
+        # Conserva los bloques de OTROS modos; descarta el plano legado.
+        nuevos = {k: v for k, v in datos_actual.items() if k not in _CLAVES_LEGADO}
+        nuevos[modo_key] = bloque
+        proyecto.fijar_datos(ModuloPuccetti.RENDER_CALCULOS, nuevos)
         return self.repo_proyectos.guardar(proyecto)
 
 
-def parametros_desde_proyecto(proyecto: Proyecto | None) -> ParametrosRender:
-    """Lee parámetros del aggregate; usa los del módulo de viabilidad como fallback."""
+def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proyecto) -> None:
+    """Ajusta los parámetros de partida al edificio catastral EXISTENTE de la parcela.
+
+    Para que el modo Rehabilitación arranque encajado con lo que hay (no como una
+    obra nueva genérica): nº de plantas y existencia de sótano se toman del catastro
+    (§2.1). No se llama si el modo ya tiene parámetros propios guardados, así que
+    nunca pisa una edición del usuario.
+    """
+    loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    try:
+        plantas_sr = loc.get("plantas_sobre_rasante")
+        if plantas_sr is not None and int(plantas_sr) >= 1:
+            params.urbanisticos.n_plantas_max = int(plantas_sr)
+    except (TypeError, ValueError):
+        pass
+    try:
+        plantas_br = loc.get("plantas_bajo_rasante")
+        if plantas_br is not None and int(plantas_br) > 0:
+            params.urbanisticos.tiene_sotano = True
+    except (TypeError, ValueError):
+        pass
+
+
+def parametros_desde_proyecto(
+    proyecto: Proyecto | None,
+    modo_key: str | None = None,
+    *,
+    heredar_legado: bool = False,
+    adaptar_a_existente: bool = False,
+) -> ParametrosRender:
+    """Lee parámetros del aggregate para un MODO; usa viabilidad como fallback.
+
+    - `modo_key`: clave del bloque del modo en `datos(RENDER_CALCULOS)`.
+    - `heredar_legado`: si el modo no tiene bloque propio, ¿puede heredar el formato
+      plano legado? (solo el modo por defecto / obra nueva debería).
+    - `adaptar_a_existente`: si no hay params guardados, adapta al edificio existente
+      (rehabilitación). El que decide estos flags es la capa que conoce los modos.
+    """
     if proyecto is None:
         return ParametrosRender()
     datos_render = proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}
-    if datos_render.get("parametros"):
-        return parametros_desde_dict(datos_render["parametros"])
 
-    # Si no se ha guardado nada todavía, intentamos heredar la edificabilidad
-    # introducida en §2.9 viabilidad. Compat con la clave antigua.
+    bloque = None
+    if modo_key and isinstance(datos_render.get(modo_key), dict):
+        bloque = datos_render[modo_key]
+    elif heredar_legado and datos_render.get("parametros"):
+        bloque = datos_render  # formato plano legado = modo por defecto
+    if bloque and bloque.get("parametros"):
+        return parametros_desde_dict(bloque["parametros"])
+
+    # Sin params guardados para este modo: defaults + herencia de edificabilidad
+    # introducida en §2.9 viabilidad (compat con la clave antigua).
     base = ParametrosRender()
     datos_viab = proyecto.datos_por_modulo.get(ModuloPuccetti.VIABILIDAD.value) or {}
     try:
@@ -987,6 +1225,9 @@ def parametros_desde_proyecto(proyecto: Proyecto | None) -> ParametrosRender:
         )
     except (TypeError, ValueError):
         pass
+
+    if adaptar_a_existente:
+        adaptar_params_a_edificio_existente(base, proyecto)
     return base
 
 
@@ -1086,6 +1327,14 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
         alertas.append(Alerta(
             "info", "Capacidad",
             f"Factor limitante: {cap.factor_limitante}.",
+        ))
+
+    if getattr(cap, "patio_sin_espacio", False):
+        alertas.append(Alerta(
+            "aviso", "Normativa",
+            f"No hay espacio en la planta para el patio interior mínimo "
+            f"({cap.area_patio_min_m2:.2f} m²) tras descontar muros, circulación y "
+            f"núcleo. Reduce la ocupación de la planta o la superficie de patio.",
         ))
 
     if cap.util_objetivo_viv_m2 > 0:

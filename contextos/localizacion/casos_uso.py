@@ -226,6 +226,39 @@ class CorregirOrientacionLado:
 
 
 @dataclass
+class SeleccionarInmueble:
+    """Marca uno de los inmuebles de la metaparcela como el elegido.
+
+    No toca el Catastro: la subreferencia (con su escalera·planta·puerta y su
+    superficie construida ya parseada del listado de la metaparcela) vive en
+    `parcela.subreferencias`. Solo la fija como `inmueble_seleccionado` para que
+    se muestre y se persista con el proyecto (ver [[feedback-no-quemar-api-catastro]]).
+    """
+    repo: ParcelaTemporalRepositorio
+
+    def ejecutar(self, parcela_id: str, rc20: str) -> Parcela:
+        parcela = self.repo.obtener(parcela_id)
+        if parcela is None:
+            raise ParcelaNoEncontrada(f"No hay parcela con id {parcela_id} en memoria.")
+        rc = (rc20 or "").strip().upper().replace(" ", "")
+        if not rc:
+            parcela.inmueble_seleccionado = None
+        else:
+            elegido = next(
+                (s for s in parcela.subreferencias
+                 if (s.rc or "").strip().upper().replace(" ", "") == rc),
+                None,
+            )
+            if elegido is None:
+                raise ParcelaNoEncontrada(
+                    f"La parcela {parcela_id} no contiene la referencia {rc20}."
+                )
+            parcela.inmueble_seleccionado = elegido
+        self.repo.guardar(parcela)
+        return parcela
+
+
+@dataclass
 class CargarTodosLosDetalles:
     """Recorre todas las subreferencias y rellena coef. participación + año.
 
@@ -316,11 +349,9 @@ def restaurar_parcela_desde_proyecto(datos: dict) -> Parcela | None:
                 ))
             except (KeyError, ValueError, TypeError):
                 continue
-        subref_raw = datos.get("subreferencias") or []
-        subreferencias: list[Subreferencia] = []
-        for s in subref_raw:
+        def _subref_desde_dict(s: dict) -> Subreferencia | None:
             try:
-                subreferencias.append(Subreferencia(
+                return Subreferencia(
                     rc=str(s.get("rc") or ""),
                     localizacion=str(s.get("localizacion") or ""),
                     uso=str(s.get("uso") or ""),
@@ -328,9 +359,19 @@ def restaurar_parcela_desde_proyecto(datos: dict) -> Parcela | None:
                     coeficiente_participacion=s.get("coeficiente_participacion"),
                     anio_construccion=s.get("anio_construccion"),
                     detalle_cargado=bool(s.get("detalle_cargado", False)),
-                ))
+                )
             except (TypeError, ValueError):
-                continue
+                return None
+
+        subref_raw = datos.get("subreferencias") or []
+        subreferencias: list[Subreferencia] = []
+        for s in subref_raw:
+            sub = _subref_desde_dict(s)
+            if sub is not None:
+                subreferencias.append(sub)
+
+        inm_raw = datos.get("inmueble_seleccionado")
+        inmueble_sel = _subref_desde_dict(inm_raw) if isinstance(inm_raw, dict) else None
         agg_raw = datos.get("agregados")
         agregados = None
         if isinstance(agg_raw, dict):
@@ -366,6 +407,7 @@ def restaurar_parcela_desde_proyecto(datos: dict) -> Parcela | None:
             lados=lados,
             fuente=str(datos.get("fuente") or "proyecto"),
             subreferencias=subreferencias,
+            inmueble_seleccionado=inmueble_sel,
             agregados=agregados,
             uso_catastral=str(datos.get("uso_catastral") or ""),
             anio_construccion=_entero_o_none(datos.get("anio_construccion")),
@@ -377,6 +419,19 @@ def restaurar_parcela_desde_proyecto(datos: dict) -> Parcela | None:
         )
     except Exception:
         return None
+
+
+def _subref_a_dict(s: Subreferencia) -> dict:
+    """Serializa una subreferencia (inmueble) a JSON-friendly dict."""
+    return {
+        "rc": s.rc,
+        "localizacion": s.localizacion,
+        "uso": s.uso,
+        "superficie_construida_m2": s.superficie_construida_m2,
+        "coeficiente_participacion": s.coeficiente_participacion,
+        "anio_construccion": s.anio_construccion,
+        "detalle_cargado": s.detalle_cargado,
+    }
 
 
 def asociar_a_proyecto(parcela: Parcela, proyecto: Proyecto) -> None:
@@ -425,17 +480,12 @@ def asociar_a_proyecto(parcela: Parcela, proyecto: Proyecto) -> None:
                 for l in parcela.lados
             ],
             "subreferencias": [
-                {
-                    "rc": s.rc,
-                    "localizacion": s.localizacion,
-                    "uso": s.uso,
-                    "superficie_construida_m2": s.superficie_construida_m2,
-                    "coeficiente_participacion": s.coeficiente_participacion,
-                    "anio_construccion": s.anio_construccion,
-                    "detalle_cargado": s.detalle_cargado,
-                }
-                for s in parcela.subreferencias
+                _subref_a_dict(s) for s in parcela.subreferencias
             ],
+            "inmueble_seleccionado": (
+                _subref_a_dict(parcela.inmueble_seleccionado)
+                if parcela.inmueble_seleccionado else None
+            ),
             "agregados": (
                 {
                     "num_referencias": parcela.agregados.num_referencias,

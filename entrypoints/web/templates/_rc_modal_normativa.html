@@ -32,14 +32,25 @@
         <header class="rc-modal-bloque-header">
           <h3>Resumen de la normativa seleccionada</h3>
         </header>
+        {# Mismas claves que oculta el panel de parámetros del modo activo: en
+           rehabilitación la edificabilidad/ocupación/retranqueos no se aplican
+           (el botón «Aplicar» tampoco las tocaría), así que no se muestran aquí
+           para que el resumen coincida con lo que realmente se aplica. #}
+        {% set _ocultas = modo.secciones_ocultas if modo else [] %}
         <dl class="rc-norm-resumen-lista">
           <div><dt>Nombre</dt><dd id="rc-norm-resumen-nombre">—</dd></div>
           <div><dt>Dirección</dt><dd id="rc-norm-resumen-direccion">—</dd></div>
+          {% if "edificabilidad" not in _ocultas %}
           <div><dt>Coef. edificabilidad</dt><dd id="rc-norm-resumen-coef">—</dd></div>
+          {% endif %}
+          {% if "ocupacion" not in _ocultas %}
           <div><dt>Ocupación máx.</dt><dd id="rc-norm-resumen-ocup">—</dd></div>
+          {% endif %}
           <div><dt>Plantas máx.</dt><dd id="rc-norm-resumen-plantas">—</dd></div>
+          {% if "retranqueos" not in _ocultas %}
           <div><dt>Retranq. fachada</dt><dd id="rc-norm-resumen-rfach">—</dd></div>
           <div><dt>Retranq. linderos</dt><dd id="rc-norm-resumen-rlind">—</dd></div>
+          {% endif %}
         </dl>
         <div class="rc-modal-acciones">
           <button type="button" id="rc-norm-aplicar" class="boton-primario">

@@ -23,10 +23,12 @@ from sqlalchemy.orm import Session
 from app.contextos.proyectos.puertos import ProyectoRepositorio
 from app.contextos.render_calculos.casos_uso import (
     CalcularEnvolvente,
+    CalcularEstanciasInmueble,
     CalcularLayout,
     CalcularTipologiasDormitorios,
     GuardarRender,
     ValidarCumplimiento,
+    adaptar_params_a_edificio_existente,
     construir_parcela_metrica,
     parametros_desde_proyecto,
 )
@@ -45,6 +47,7 @@ from app.plataforma.persistencia.normativa_municipal_sqlalchemy import (
 )
 
 from ..catalogo_modulos import CATALOGO, TarjetaModulo
+from ..render_modos import MODO_POR_DEFECTO, MODOS, modo_o_none
 from ..dependencias import (
     catalogo_apartamentos_adapter,
     catalogo_hotel_apartamento_adapter,
@@ -112,18 +115,144 @@ def _estado_pantalla(proyecto: Proyecto | None) -> str:
     return "ok"
 
 
+def _preview_parcela(proyecto: Proyecto | None) -> dict[str, Any] | None:
+    """Resumen de los datos de la parcela del proyecto para la pantalla de
+    selección. Devuelve None si el proyecto aún no tiene parcela localizada.
+
+    La superficie es la **catastral real** guardada por §2.1 (`superficie_m2`),
+    la misma que alimenta ahora el cálculo de edificabilidad.
+
+    Si en §2.1 se eligió un inmueble concreto de la metaparcela, la construida
+    pasa a ser la de ESE inmueble (no la suma de la parcela) y se expone su
+    localización (escalera·planta·puerta)."""
+    if proyecto is None:
+        return None
+    loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    if not loc:
+        return None
+
+    inm = loc.get("inmueble_seleccionado") or None
+    inm = inm if isinstance(inm, dict) else None
+    inm_loc = (inm or {}).get("localizacion") or ""
+    inm_uso = (inm or {}).get("uso") or ""
+    inm_sup = (inm or {}).get("superficie_construida_m2")
+    # Construida de referencia: la del inmueble elegido si la hay; si no, la total.
+    construida = inm_sup if (inm_sup and inm_sup > 0) else loc.get("superficie_construida_total_m2")
+
+    return {
+        "referencia_catastral": loc.get("referencia_catastral"),
+        "direccion": loc.get("direccion"),
+        "municipio": loc.get("municipio"),
+        "provincia": loc.get("provincia"),
+        "superficie_m2": loc.get("superficie_m2"),
+        "uso_catastral": inm_uso or loc.get("uso_catastral"),
+        "anio_construccion": loc.get("anio_construccion"),
+        "superficie_construida_total_m2": construida,
+        "plantas_sobre_rasante": loc.get("plantas_sobre_rasante"),
+        "plantas_bajo_rasante": loc.get("plantas_bajo_rasante"),
+        # Inmueble elegido (escalera·planta·puerta) o "" si no se eligió ninguno.
+        "inmueble_localizacion": inm_loc,
+        "inmueble_rc": (inm or {}).get("rc") or "",
+    }
+
+
+def _inmueble_seleccionado(proyecto: Proyecto | None) -> bool:
+    """¿El proyecto trata sobre un inmueble concreto de la parcela (§2.1)?"""
+    if proyecto is None:
+        return False
+    loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    return bool(loc.get("inmueble_seleccionado"))
+
+
+def _construida_inmueble_m2(proyecto: Proyecto | None) -> float:
+    """Superficie construida del inmueble elegido (m²); la total de la parcela si no hay."""
+    if proyecto is None:
+        return 0.0
+    loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    inm = loc.get("inmueble_seleccionado")
+    inm = inm if isinstance(inm, dict) else {}
+    try:
+        sup = float(inm.get("superficie_construida_m2") or 0.0)
+    except (TypeError, ValueError):
+        sup = 0.0
+    if sup > 0:
+        return sup
+    try:
+        return float(loc.get("superficie_construida_total_m2") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _tiene_params_guardados(proyecto: Proyecto | None, modo: str, *, heredar_legado: bool) -> bool:
+    """¿El modo dado ya tiene parámetros propios guardados en el aggregate?
+
+    El formato plano legado solo cuenta para el modo por defecto (`heredar_legado`)."""
+    if proyecto is None:
+        return False
+    datos = proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}
+    blk = datos.get(modo)
+    if isinstance(blk, dict) and blk.get("parametros"):
+        return True
+    return bool(heredar_legado and datos.get("parametros"))
+
+
 # ─── Pantalla principal ─────────────────────────────────────────────────────
 @router.get("", response_class=HTMLResponse)
 def pantalla(
     request: Request,
+    modo: Annotated[str, Query()] = "",
     rol: Rol = Depends(rol_activo),
     proyecto: Proyecto | None = Depends(proyecto_activo),
     repo_norm: NormativaMunicipalRepositorio = Depends(_normativa_repo),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
     tarjeta = _tarjeta()
-    params = parametros_desde_proyecto(proyecto)
     estado = _estado_pantalla(proyecto)
+
+    # Auto (decisión de negocio): si el proyecto trata sobre un INMUEBLE concreto de
+    # la parcela (§2.1 eligió uno), el módulo entra directo en modo «inmueble»
+    # (estancias de esa unidad), sin pasar por la landing ni por obra-nueva/rehab.
+    if _inmueble_seleccionado(proyecto):
+        modo_cfg = MODOS["inmueble"]
+    else:
+        # Sin modo válido en la URL → pantalla de selección (preview de la parcela +
+        # botones Obra nueva / Rehabilitación). El modo elegido reabre esta misma
+        # ruta con ?modo=… y entonces se dibuja el módulo.
+        modo_cfg = modo_o_none(modo)
+        # «inmueble» solo es válido auto-derivado (hay un inmueble elegido en §2.1):
+        # si llega por URL sin inmueble, se ignora y se cae a la pantalla de selección.
+        if modo_cfg is not None and modo_cfg.es_inmueble:
+            modo_cfg = None
+    if modo_cfg is None:
+        return plantillas.TemplateResponse(
+            request,
+            "render_calculos_landing.html",
+            {
+                "tarjeta": tarjeta,
+                "rol_activo": rol,
+                "proyecto_activo": proyecto,
+                "estado": estado,
+                # La landing solo ofrece los modos elegibles a mano; «inmueble» es
+                # automático (se activa al elegir un inmueble en la localización).
+                "modos": [m for m in MODOS.values() if not m.es_inmueble],
+                "preview": _preview_parcela(proyecto),
+                "puede_editar": puede_acceder(
+                    rol, ModuloPuccetti.RENDER_CALCULOS.value, PermisoModulo.EDITAR
+                ),
+            },
+        )
+
+    # Parámetros del MODO activo (cada modo guarda los suyos). El formato plano
+    # legado se trata como del modo por defecto. Rehabilitación, sin params
+    # propios, arranca adaptado al edificio existente.
+    es_modo_defecto = modo_cfg.slug == MODO_POR_DEFECTO
+    es_rehabilitacion = modo_cfg.slug == "rehabilitacion"
+    tiene_params = _tiene_params_guardados(proyecto, modo_cfg.slug, heredar_legado=es_modo_defecto)
+    params = parametros_desde_proyecto(
+        proyecto, modo_cfg.slug,
+        heredar_legado=es_modo_defecto,
+        adaptar_a_existente=es_rehabilitacion,
+    )
 
     municipios = repo_norm.listar()
     # Si la parcela tiene municipio conocido, intentamos cargar su PGOU como
@@ -136,16 +265,30 @@ def pantalla(
             normativa = repo_norm.obtener(mun, prov)
             if normativa is not None:
                 pgou_municipio = {"municipio": mun, "provincia": prov}
-                # solo aplicamos como defaults si el proyecto aún no tiene params guardados
-                datos_render = proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}
-                if not datos_render.get("parametros"):
+                # Solo aplicamos como defaults si el MODO aún no tiene params guardados.
+                if not tiene_params:
                     params.urbanisticos = normativa
+                    # En rehabilitación, el edificio existente manda sobre el PGOU
+                    # genérico en nº de plantas / sótano.
+                    if es_rehabilitacion:
+                        adaptar_params_a_edificio_existente(params, proyecto)
+
+    usos_catalogo = [
+        {"value": "vivienda", "label": "Vivienda", "habilitado": True},
+        {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": True},
+        {"value": "hotel_apartamento", "label": "Hotel-apartamento", "habilitado": True},
+        {"value": "hotelero", "label": "Hotelero", "habilitado": True},
+    ]
+    # Hook de configuración por modo: si el modo restringe usos, se filtran.
+    if modo_cfg.usos_permitidos:
+        usos_catalogo = [u for u in usos_catalogo if u["value"] in modo_cfg.usos_permitidos]
 
     return plantillas.TemplateResponse(
         request,
         "render_calculos.html",
         {
             "tarjeta": tarjeta,
+            "modo": modo_cfg,
             "rol_activo": rol,
             "proyecto_activo": proyecto,
             "puede_editar": puede_acceder(
@@ -155,12 +298,9 @@ def pantalla(
             "parametros": parametros_a_dict(params),
             "municipios_disponibles": municipios,
             "pgou_municipio_activo": pgou_municipio,
-            "usos_edificio": [
-                {"value": "vivienda", "label": "Vivienda", "habilitado": True},
-                {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": True},
-                {"value": "hotel_apartamento", "label": "Hotel-apartamento", "habilitado": True},
-                {"value": "hotelero", "label": "Hotelero", "habilitado": True},
-            ],
+            "usos_edificio": usos_catalogo,
+            # Datos catastrales para la barra siempre visible del módulo.
+            "catastro": _preview_parcela(proyecto),
         },
     )
 
@@ -234,6 +374,45 @@ def calcular(
     return JSONResponse(resultado)
 
 
+# ─── Estancias de un inmueble concreto (modo «inmueble») ────────────────────
+@router.post("/estancias")
+def estancias_inmueble(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Distribuye las estancias de un inmueble concreto a partir de su construida.
+
+    No usa envolvente: parte de la superficie construida del inmueble elegido en §2.1
+    y reparte sus estancias como una sola unidad (modo «inmueble»). El nº de
+    dormitorios llega en el payload (`n_dormitorios`); el resto de datos, del panel."""
+    _exige_permiso(rol, PermisoModulo.VER)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    construida = _construida_inmueble_m2(proyecto)
+    if construida <= 0:
+        raise HTTPException(409, "El inmueble no tiene superficie construida. Elígelo en §2.1.")
+
+    params = parametros_desde_dict(payload)
+    n_dorms_raw = payload.get("n_dormitorios")
+    try:
+        n_dorms = int(n_dorms_raw) if n_dorms_raw is not None else None
+    except (TypeError, ValueError):
+        n_dorms = None
+
+    resultado = CalcularEstanciasInmueble(
+        catalogo_vivienda=catalogo_viv,
+        catalogo_apartamentos=catalogo_apt,
+        catalogo_hotel_apartamento=catalogo_hap,
+        catalogo_hotelero=catalogo_hot,
+    ).ejecutar(params, construida, n_dormitorios=n_dorms)
+    return JSONResponse(resultado)
+
+
 # ─── Combinaciones por nº de dormitorios (§2.5 — apartamentos turísticos) ────
 @router.post("/tipologias-dormitorios")
 def tipologias_dormitorios(
@@ -287,8 +466,14 @@ def guardar(
     resumen = payload.get("resumen") or {}
     params = parametros_desde_dict(params_payload)
 
-    actualizado = GuardarRender(repo_proyectos=repo_proy).ejecutar(proyecto, params, resumen)
-    return JSONResponse({"ok": True, "actualizado_en": actualizado.actualizado_en.isoformat()})
+    # Cada modo guarda su propio bloque. Modo inválido → modo por defecto.
+    modo_cfg = modo_o_none(payload.get("modo"))
+    modo_key = modo_cfg.slug if modo_cfg else MODO_POR_DEFECTO
+
+    actualizado = GuardarRender(repo_proyectos=repo_proy).ejecutar(
+        proyecto, params, resumen, modo_key=modo_key
+    )
+    return JSONResponse({"ok": True, "modo": modo_key, "actualizado_en": actualizado.actualizado_en.isoformat()})
 
 
 # ─── Normativa municipal: listado + lectura + escritura ─────────────────────
@@ -519,11 +704,11 @@ def export_csv(
     writer = csv.writer(buf, delimiter=";")
     writer.writerow(["# Tabla de superficies por planta — Render y cálculos §2.7"])
     writer.writerow(["planta", "tipo", "viviendas", "construida_m2", "util_viviendas_m2",
-                     "muros_m2", "circulacion_m2", "nucleo_m2",
+                     "muros_m2", "muros_interior_m2", "circulacion_m2", "nucleo_m2",
                      "local_m2", "otros_m2", "usos_comunes_m2"])
     for r in resultado.get("tabla_planta", []):
         writer.writerow([r["planta"], r.get("tipo", "regular"), r["viviendas"], r["construida_m2"],
-                         r["util_viviendas_m2"], r.get("muros_m2", 0.0),
+                         r["util_viviendas_m2"], r.get("muros_m2", 0.0), r.get("muros_interior_m2", 0.0),
                          r["circulacion_m2"], r.get("nucleo_m2", 0.0),
                          r.get("local_m2", 0.0), r.get("otros_m2", 0.0), r.get("usos_comunes_m2", 0.0)])
     writer.writerow([])
