@@ -1372,10 +1372,25 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
     if getattr(cap, "patio_sin_espacio", False):
         alertas.append(Alerta(
             "aviso", "Normativa",
-            f"No hay espacio en la planta para el patio interior mínimo "
+            f"No hay espacio en la planta para los patios definidos "
             f"({cap.area_patio_min_m2:.2f} m²) tras descontar muros, circulación y "
             f"núcleo. Reduce la ocupación de la planta o la superficie de patio.",
         ))
+
+    # Cada patio definido debe alcanzar el área mínima exigida (`area_patio_min_m2`).
+    area_patio_min = float(params.urbanisticos.area_patio_min_m2 or 0.0)
+    if area_patio_min > 0:
+        pequenos = [
+            float(a) for a in params.urbanisticos.patios
+            if 0 < float(a) < area_patio_min - 1e-6
+        ]
+        if pequenos:
+            listado = ", ".join(f"{a:.2f}" for a in pequenos)
+            alertas.append(Alerta(
+                "aviso", "Normativa",
+                f"{len(pequenos)} patio(s) por debajo del área mínima "
+                f"({area_patio_min:.2f} m²): {listado} m². Aumenta su superficie.",
+            ))
 
     if cap.util_objetivo_viv_m2 > 0:
         util_total_habitable = sum(

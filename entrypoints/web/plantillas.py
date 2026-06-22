@@ -9,5 +9,5 @@ RAIZ_WEB = Path(__file__).parent
 plantillas = Jinja2Templates(directory=str(RAIZ_WEB / "templates"))
 
 # Versión global para cache-busting de estáticos. Subir manualmente al tocar CSS/JS.
-ESTATICOS_VERSION = "63"
+ESTATICOS_VERSION = "64"
 plantillas.env.globals["estaticos_version"] = ESTATICOS_VERSION

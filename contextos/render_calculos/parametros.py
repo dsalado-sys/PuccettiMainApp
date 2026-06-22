@@ -63,6 +63,12 @@ class ParametrosUrbanisticos:
     retranqueo_atico_m: float = 3.0         # INFERIOR (mínimo normativo)
     luz_recta_patio_min_m: float = 3.0      # INFERIOR (nombre legacy)
     area_patio_min_m2: float = 12.0                 # INFERIOR
+    # Patios reales del edificio: una superficie (m²) por patio. Atraviesan todas
+    # las plantas (patinejos de luz); el cálculo descuenta su SUMA en cada planta.
+    # `area_patio_min_m2`/`luz_recta_patio_min_m` quedan solo como referencia
+    # normativa (validación de cumplimiento). Default = un patio de 12 m² (= el
+    # comportamiento histórico de patio único).
+    patios: list[float] = field(default_factory=lambda: [12.0])
     pct_unidades_adaptadas_min: float = 5.0         # INFERIOR
     ancho_min_fachada_m: float = 5.0                # INFERIOR (sobre la parcela)
     espesor_tabique_min_m: float = 0.10             # INFERIOR
@@ -223,7 +229,10 @@ class ParametrosRender:
                 diametro_min_vestibulo=diseno.diametro_min_vestibulo_m,
                 radio_apertura_puerta=diseno.ancho_min_puerta_m,
                 luz_recta_patio_min=self.urbanisticos.luz_recta_patio_min_m,
-                area_patio_min=self.urbanisticos.area_patio_min_m2,
+                # El motor descuenta la SUMA de los patios definidos por planta;
+                # el mínimo normativo (`area_patio_min_m2`) queda solo como
+                # referencia para la validación de cumplimiento.
+                area_patio_min=sum(max(0.0, float(a)) for a in self.urbanisticos.patios),
                 pct_muros=pct_muros,
                 pct_muros_interior=pct_muros_interior,
                 pct_circulacion_pb=pct_circulacion_pb,
@@ -311,6 +320,7 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
             "usos_permitidos": list(p.urbanisticos.usos_permitidos),
             "luz_recta_patio_min_m": p.urbanisticos.luz_recta_patio_min_m,
             "area_patio_min_m2": p.urbanisticos.area_patio_min_m2,
+            "patios": [float(a) for a in p.urbanisticos.patios],
             "diametro_max_vestibulo_m": p.urbanisticos.diametro_max_vestibulo_m,
             "espesor_muro_medianero_max_m": p.urbanisticos.espesor_muro_medianero_max_m,
             "espesor_separacion_unidades_max_m": p.urbanisticos.espesor_separacion_unidades_max_m,
@@ -474,6 +484,23 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
     if not usos_validos:
         usos_validos = list(base.urbanisticos.usos_permitidos)
 
+    # Patios reales del edificio (lista de áreas en m²). Si la clave está presente
+    # se respeta tal cual (lista vacía = sin patios, intencional). JSON legado sin
+    # la clave → un patio del área mínima normativa, preservando el patio único
+    # histórico.
+    area_patio_min = _f(urb_in, "area_patio_min_m2", base.urbanisticos.area_patio_min_m2)
+    if "patios" in urb_in:
+        patios: list[float] = []
+        for a in (urb_in.get("patios") or []):
+            try:
+                v = float(a)
+            except (TypeError, ValueError):
+                continue
+            if v > 0:
+                patios.append(v)
+    else:
+        patios = [area_patio_min] if area_patio_min > 0 else []
+
     urb = ParametrosUrbanisticos(
         coeficiente_edificabilidad=coef,
         usar_coeficiente_edificabilidad=_b(urb_in, "usar_coeficiente_edificabilidad", base.urbanisticos.usar_coeficiente_edificabilidad),
@@ -483,7 +510,8 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         retranqueo_linderos_m=retr_linderos,
         usos_permitidos=usos_validos,
         luz_recta_patio_min_m=_f(urb_in, "luz_recta_patio_min_m", base.urbanisticos.luz_recta_patio_min_m),
-        area_patio_min_m2=_f(urb_in, "area_patio_min_m2", base.urbanisticos.area_patio_min_m2),
+        area_patio_min_m2=area_patio_min,
+        patios=patios,
         diametro_max_vestibulo_m=_f(urb_in, "diametro_max_vestibulo_m", base.urbanisticos.diametro_max_vestibulo_m),
         espesor_muro_medianero_max_m=_f(urb_in, "espesor_muro_medianero_max_m", base.urbanisticos.espesor_muro_medianero_max_m),
         espesor_separacion_unidades_max_m=_f(urb_in, "espesor_separacion_unidades_max_m", base.urbanisticos.espesor_separacion_unidades_max_m),
