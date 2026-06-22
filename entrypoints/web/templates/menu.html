@@ -7,35 +7,6 @@
   <p>Elige la herramienta con la que quieres seguir trabajando sobre el proyecto activo.</p>
 </section>
 
-<section class="barra-sesion">
-  <form method="post" action="/sesion/rol" class="form-en-linea">
-    <label for="rol">Rol</label>
-    <select id="rol" name="rol" onchange="this.form.submit()">
-      {% for r in roles %}
-        <option value="{{ r.value }}" {% if r == rol_activo %}selected{% endif %}>
-          {{ r.value | capitalize }}
-        </option>
-      {% endfor %}
-    </select>
-    <noscript><button type="submit">Cambiar rol</button></noscript>
-  </form>
-
-  <form method="post" action="/sesion/proyecto" class="form-en-linea">
-    <label for="proyecto_id">Proyecto</label>
-    <select id="proyecto_id" name="proyecto_id" onchange="this.form.submit()">
-      <option value="">— sin proyecto activo —</option>
-      {% for p in proyectos %}
-        <option value="{{ p.id }}" {% if proyecto_activo and proyecto_activo.id == p.id %}selected{% endif %}>
-          {{ p.nombre }}{% if p.referencia_catastral %} · {{ p.referencia_catastral }}{% endif %}
-        </option>
-      {% endfor %}
-    </select>
-    <noscript><button type="submit">Abrir</button></noscript>
-  </form>
-
-  <a class="boton-secundario" href="/proyectos">Gestionar proyectos</a>
-</section>
-
 <section class="rejilla-modulos">
   {% for item in tarjetas %}
     {% set t = item.modulo %}

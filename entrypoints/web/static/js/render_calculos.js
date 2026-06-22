@@ -1,9 +1,11 @@
 /* §2.4-2.7 — Render y cálculos. Estado, fetch y repintado.
    Estrategia:
-   - cualquier cambio de input dispara /preview (debounce 250 ms) que pinta
-     huella + patios + indicadores rápidos.
-   - el botón «Distribuir viviendas» pide /calcular y trae el macro_layout
-     completo (unidades, núcleo, pasillos, tabla por unidad). Spinner sobre canvas.
+   - cualquier cambio de parámetro recalcula la CAPACIDAD COMPLETA de forma
+     automática y silenciosa (recalcularAuto → /calcular; en modo inmueble,
+     /estancias). Debounce 300 ms. Repinta capacidad, tablas por planta/unidad,
+     KPIs, alertas y canvas, sin spinner ni toasts.
+   - el botón «Calcular capacidad» queda RESERVADO para pintar el render
+     (macro_layout: unidades, núcleo, pasillos) en una próxima iteración.
 */
 (function () {
   "use strict";
@@ -53,7 +55,6 @@
     previewPayload: null,
     fullPayload: null,
     plantaActiva: 0,
-    abortPreview: null,
     abortCalcular: null,
     debounceId: null,
     // §2.5 — combinación de dormitorios elegida en el modal (apartamentos
@@ -539,66 +540,42 @@
     window.RcBrujula.dibujar(brujulaEl, ind ? ind.orientaciones_fachadas : []);
   }
 
-  // ─── Fetch /preview (rápido) ──────────────────────────────────────────
+  // ─── Payload con normativa de referencia ──────────────────────────────
   function payloadConNormativa(bloques) {
     const p = { ...bloques };
     if (ESTADO_NORM.aplicada && ESTADO_NORM.aplicada.urbanisticos) {
       p.normativa_referencia = { urbanisticos: ESTADO_NORM.aplicada.urbanisticos };
     }
-    // §2.5 — combinación elegida (vivienda / apartamentos). El preview la
-    // ignora; en /calcular sustituye la tipología por la combinación.
+    // §2.5 — combinación elegida (vivienda / apartamentos). En /calcular
+    // sustituye la tipología por la combinación.
     if (usoUsaCombo() && ESTADO.comboDormitorios) {
       p.combo_dormitorios = ESTADO.comboDormitorios.slug;
     }
     return p;
   }
 
-  async function pedirPreview() {
-    if (estado !== "ok") return;
-    if (esInmueble) return pedirEstancias();
-    const bloques = leerFormulario();
-    actualizarResumen(bloques);
-    if (ESTADO.abortPreview) ESTADO.abortPreview.abort();
-    ESTADO.abortPreview = new AbortController();
-    try {
-      const resp = await fetch("/modulos/render-calculos/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payloadConNormativa(bloques)),
-        signal: ESTADO.abortPreview.signal,
-      });
-      if (resp.status === 409) { mostrarToast("Localiza primero la parcela", true); return; }
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-        mostrarToast(err.detail || "Error en preview", true);
-        return;
-      }
-      const data = await resp.json();
-      ESTADO.previewPayload = data;
-      ESTADO.plantaActiva = Math.min(ESTADO.plantaActiva, (data.envolvente?.plantas?.length || 1) - 1);
-      dibujarTabsPlantas(data);
-      if (renderer) renderer.dibujar(data, ESTADO.plantaActiva);
-      actualizarBrujula(data);
-      repintarKpis(data);
-      repintarAlertas(data.alertas);
-      verificarExcesoConstruida(data);
-      // Marcamos botón "Distribuir" como stale si ya hubo full payload
-      if (ESTADO.fullPayload) btnDistribuir.classList.add("rc-stale");
-    } catch (e) {
-      if (e.name !== "AbortError") mostrarToast("Error de red", true);
-    }
+  // Recálculo automático y silencioso. Cualquier cambio de parámetro recalcula
+  // la capacidad COMPLETA (tablas + KPIs + alertas + canvas) sin spinner ni
+  // toasts. En modo inmueble, pedirCalculo redirige a /estancias.
+  function recalcularAuto() {
+    return pedirCalculo({ auto: true });
   }
 
   // ─── Fetch /calcular (completo) ───────────────────────────────────────
-  async function pedirCalculo() {
+  // Único camino de cálculo. Lo dispara recalcularAuto (opts.auto) en cada
+  // cambio de parámetro. En modo `auto` NO muestra spinner, toast de éxito ni
+  // toast de error de validación; las alertas se repintan igualmente. Los
+  // errores técnicos (red / servidor) sí se notifican siempre.
+  async function pedirCalculo(opts = {}) {
     if (estado !== "ok") return;
-    if (esInmueble) return pedirEstancias();
+    if (esInmueble) return pedirEstancias(opts);
+    const auto = opts.auto === true;
     ESTADO.interaccionUsuario = true;
     const bloques = leerFormulario();
+    actualizarResumen(bloques);
     if (ESTADO.abortCalcular) ESTADO.abortCalcular.abort();
     ESTADO.abortCalcular = new AbortController();
-    spinner(true);
-    btnDistribuir.classList.remove("rc-stale");
+    if (!auto) spinner(true);
     try {
       const resp = await fetch("/modulos/render-calculos/calcular", {
         method: "POST",
@@ -613,11 +590,11 @@
         return;
       }
       const data = await resp.json();
-      // Error bloqueante (p. ej. R3: Σ mínimos > útil máximo). Muestra la alerta
-      // y NO pinta capacidad vacía.
+      // Error bloqueante (p. ej. R3: Σ mínimos > útil máximo). Repinta la alerta
+      // y NO pinta capacidad vacía. En auto, sin toast (no interrumpe el tecleo).
       if (data.error) {
         repintarAlertas(data.alertas);
-        mostrarToast(data.error, true);
+        if (!auto) mostrarToast(data.error, true);
         return;
       }
       ESTADO.fullPayload = data;
@@ -632,11 +609,11 @@
       repintarTablaPlanta(data.tabla_planta);
       repintarTablaUnidad(data.tabla_unidad);
       verificarExcesoConstruida(data);
-      mostrarToast("Capacidad calculada");
+      if (!auto) mostrarToast("Capacidad calculada");
     } catch (e) {
       if (e.name !== "AbortError") mostrarToast("Error de red", true);
     } finally {
-      spinner(false);
+      if (!auto) spinner(false);
     }
   }
 
@@ -703,8 +680,9 @@
     }
   }
 
-  async function pedirEstancias() {
+  async function pedirEstancias(opts = {}) {
     if (estado !== "ok") return;
+    const auto = opts.auto === true;
     ESTADO.interaccionUsuario = true;
     const bloques = leerFormulario();
     if (ESTADO.abortCalcular) ESTADO.abortCalcular.abort();
@@ -727,7 +705,7 @@
         repintarAlertas(data.alertas || []);
         repintarTablaEstancias([], null);
         repintarKpisInmueble(null);
-        mostrarToast(data.error, true);
+        if (!auto) mostrarToast(data.error, true);
         return;
       }
       ESTADO.fullPayload = data;
@@ -965,7 +943,7 @@
     ESTADO_NORM.aplicada = { id: data.id, nombre: data.nombre, urbanisticos: urb };
     modal.close();
     mostrarToast(`Normativa "${data.nombre}" aplicada`);
-    pedirPreview();
+    recalcularAuto();
   }
 
   // ─── Modal "Combinaciones de dormitorios" (§2.5 — apartamentos) ───────
@@ -1227,7 +1205,7 @@
       const data = await resp.json();
       inputs.forEach(inp => { inp.dataset.original = inp.value; });   // nuevos originales
       mostrarToast(`Superficies guardadas (${data.aplicados})`);
-      if (estado === "ok") pedirPreview();
+      if (estado === "ok") recalcularAuto();
     } catch (e) { mostrarToast("Error de red", true); }
   }
 
@@ -1375,7 +1353,7 @@
       const data = await resp.json();
       inputs.forEach(inp => { inp.dataset.original = inp.value; });   // nuevos originales
       mostrarToast(`Superficies guardadas (${data.aplicados})`);
-      if (estado === "ok") pedirPreview();
+      if (estado === "ok") recalcularAuto();
     } catch (e) { mostrarToast("Error de red", true); }
   }
 
@@ -1534,11 +1512,12 @@
     aplicarVisibilidad();
     actualizarOpcionesCondicionales();
     if (ESTADO.debounceId) clearTimeout(ESTADO.debounceId);
-    ESTADO.debounceId = setTimeout(pedirPreview, 250);
+    ESTADO.debounceId = setTimeout(recalcularAuto, 300);
   }
   form.addEventListener("input", calcularConDebounce);
   form.addEventListener("change", calcularConDebounce);
-  if (btnDistribuir) btnDistribuir.addEventListener("click", pedirCalculo);
+  // El botón «Calcular capacidad» queda reservado para pintar el render (próxima
+  // iteración): el cálculo ya es automático con cada cambio, sin binding aquí.
   if (btnGuardar) btnGuardar.addEventListener("click", guardar);
   if (btnCsv) btnCsv.addEventListener("click", exportCsv);
 
@@ -1565,8 +1544,8 @@
   if (chkUsarCoef) chkUsarCoef.addEventListener("change", aplicarToggleCoef);
   aplicarToggleCoef();
 
-  // Si hay proyecto + parcela, primer preview automático
+  // Si hay proyecto + parcela, primer cálculo automático
   if (estado === "ok") {
-    pedirPreview();
+    recalcularAuto();
   }
 })();
