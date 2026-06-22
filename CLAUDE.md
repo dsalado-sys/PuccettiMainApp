@@ -49,13 +49,19 @@ Variable de entorno: `PUCCETTI_DB_URL` (por defecto `sqlite:///app/data/puccetti
 
 ## Sesión
 
-- Rol activo: cookie `puccetti_rol` (`arquitecto` | `financiero` | `inversor`).
-  Cuando exista login real, `rol_activo()` en `dependencias.py` consultará al
-  `UsuarioRepositorio` en su lugar — la firma no cambia.
+- Login real: contexto `contextos/usuarios/` (puerto `UsuarioRepositorio`,
+  adapter `UsuariosSQLAlchemy`, hash PBKDF2 stdlib en `seguridad.py`). La sesión
+  web usa `SessionMiddleware` (clave `PUCCETTI_SECRET_KEY`, override en prod). Un
+  middleware en `aplicacion.py` redirige a `/login` toda ruta no pública
+  (`/login`, `/logout`, `/static`). Usuario inicial sembrado: `Arquitecto0`.
+- Rol activo: lo fija el usuario conectado. `rol_activo()` en `dependencias.py`
+  deriva de `usuario_actual()` (ya no hay cookie `puccetti_rol` ni selector de
+  rol en la UI); la firma sigue devolviendo `Rol`.
 - Proyecto activo: cookie `puccetti_proyecto` con el `proyecto.id`. Cada módulo
   leerá el proyecto activo por dependencia (`exige_proyecto`) y escribirá sus
   datos en `proyecto.datos(ModuloPuccetti.XXX)`. Los módulos se comunican
-  por el aggregate, no entre sí.
+  por el aggregate, no entre sí. (El selector de proyecto ya no está en la
+  pantalla principal; la página `/proyectos` sigue disponible.)
 
 ## Permisos
 

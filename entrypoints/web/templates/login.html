@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Puccetti · Iniciar sesión</title>
+  <link rel="stylesheet" href="/static/css/puccetti.css?v={{ estaticos_version }}" />
+</head>
+<body class="login-body">
+  <main class="login-caja">
+    <div class="login-marca">
+      <span class="marca-nombre">PUCCETTI</span>
+      <span class="marca-claim">Prefactibilidad inmobiliaria</span>
+    </div>
+
+    <form class="login-form" method="post" action="/login">
+      <h1>Iniciar sesión</h1>
+
+      {% if error %}
+        <p class="login-error" role="alert">{{ error }}</p>
+      {% endif %}
+
+      <label for="usuario">Usuario</label>
+      <input id="usuario" name="usuario" type="text" autocomplete="username"
+             value="{{ usuario or '' }}" required autofocus />
+
+      <label for="contraseña">Contraseña</label>
+      <input id="contraseña" name="contraseña" type="password"
+             autocomplete="current-password" required />
+
+      <button type="submit" class="boton-primario">Entrar</button>
+    </form>
+  </main>
+</body>
+</html>

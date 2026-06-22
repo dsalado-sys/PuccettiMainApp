@@ -5,6 +5,7 @@ hace falta tocar la URL). Casos de uso y rutas no se enteran.
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 from functools import lru_cache
 
@@ -36,16 +37,26 @@ from app.contextos.proyectos.casos_uso import (
     ObtenerProyecto,
 )
 from app.contextos.proyectos.puertos import ProyectoRepositorio
+from app.contextos.usuarios.casos_uso import AutenticarUsuario
+from app.contextos.usuarios.dominio import Usuario
+from app.contextos.usuarios.puertos import UsuarioRepositorio
 from app.nucleo.modelo import Proyecto, Rol
 from app.plataforma.cache.parcelas_en_memoria import ParcelasEnMemoria
 from app.plataforma.catastro.catastro_meh import CatastroMEH
 from app.plataforma.persistencia.proyectos_sqlalchemy import ProyectosSQLAlchemy
 from app.plataforma.persistencia.sqlalchemy_base import SessionLocal
+from app.plataforma.persistencia.usuarios_sqlalchemy import UsuariosSQLAlchemy
 
-COOKIE_ROL = "puccetti_rol"
 COOKIE_PROYECTO = "puccetti_proyecto"
 COOKIE_PARCELA = "puccetti_parcela_temp"
 ROL_POR_DEFECTO = Rol.ARQUITECTO
+
+# Clave de firma de la cookie de sesión. Override por entorno en producción,
+# mismo criterio que PUCCETTI_DB_URL.
+SECRET_KEY = os.environ.get(
+    "PUCCETTI_SECRET_KEY",
+    "puccetti-dev-secret-cambia-esto-en-produccion",
+)
 
 
 # ── Sesión BBDD ─────────────────────────────────────────────────────────────
@@ -98,6 +109,30 @@ def eliminar_proyecto_uc(
     repo: ProyectoRepositorio = Depends(repositorio_proyectos),
 ) -> EliminarProyecto:
     return EliminarProyecto(repo=repo)
+
+
+# ── Usuarios / autenticación ───────────────────────────────────────────────
+def repositorio_usuarios(
+    session: Session = Depends(sesion_bbdd),
+) -> UsuarioRepositorio:
+    return UsuariosSQLAlchemy(session)
+
+
+def autenticar_usuario_uc(
+    repo: UsuarioRepositorio = Depends(repositorio_usuarios),
+) -> AutenticarUsuario:
+    return AutenticarUsuario(repo=repo)
+
+
+def usuario_actual(
+    request: Request,
+    repo: UsuarioRepositorio = Depends(repositorio_usuarios),
+) -> Usuario | None:
+    """Carga el usuario conectado a partir de la sesión, o None si no hay."""
+    usuario_id = request.session.get("usuario_id")
+    if not usuario_id:
+        return None
+    return repo.obtener_por_id(usuario_id)
 
 
 # ── Casos de uso de localización ───────────────────────────────────────────
@@ -211,19 +246,14 @@ def obtener_parcela_temporal(
 
 
 # ── Sesión: rol y proyecto activos ─────────────────────────────────────────
-def rol_activo(request: Request) -> Rol:
-    """Lee el rol activo de la cookie. Por defecto, arquitecto.
+def rol_activo(usuario: Usuario | None = Depends(usuario_actual)) -> Rol:
+    """Rol del usuario conectado. Por defecto, arquitecto si no hay sesión.
 
-    Cuando exista autenticación real (§2.11 deseable), este método consultará
-    al `UsuarioRepositorio` en lugar de la cookie. La firma no cambiará.
+    Con autenticación real (§2.11), el rol lo fija el usuario y no la UI; la
+    firma sigue devolviendo `Rol`, así que las rutas que dependen de ella no
+    cambian.
     """
-    valor = request.cookies.get(COOKIE_ROL)
-    if valor is None:
-        return ROL_POR_DEFECTO
-    try:
-        return Rol(valor)
-    except ValueError:
-        return ROL_POR_DEFECTO
+    return usuario.rol if usuario else ROL_POR_DEFECTO
 
 
 def proyecto_activo(
