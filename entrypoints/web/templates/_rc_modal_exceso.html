@@ -1,0 +1,27 @@
+{# Modal de advertencia: la construida proyectada supera la del edificio existente
+   (solo modo Rehabilitación). Sin referencias normativas en el texto. #}
+<dialog id="rc-modal-exceso" class="rc-modal" aria-labelledby="rc-modal-exceso-titulo">
+  <article class="rc-modal-card rc-modal-exceso-card">
+    <header class="rc-modal-header">
+      <h2 id="rc-modal-exceso-titulo">Se supera la superficie construida existente</h2>
+    </header>
+
+    <div class="rc-modal-cuerpo">
+      <p>
+        La superficie construida proyectada
+        (<strong id="rc-exceso-proyectada">—</strong>)
+        supera la del edificio existente de la parcela
+        (<strong id="rc-exceso-existente">—</strong>).
+      </p>
+      <p class="rc-exceso-sub">
+        En rehabilitación esto implica una ampliación sobre lo construido. Revisa
+        los parámetros si no es lo que buscas; si continúas, se mantendrá un aviso
+        mientras se siga superando.
+      </p>
+    </div>
+
+    <footer class="rc-modal-pie">
+      <button type="button" class="boton-primario" id="rc-modal-exceso-aceptar">Aceptar</button>
+    </footer>
+  </article>
+</dialog>

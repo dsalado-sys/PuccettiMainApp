@@ -66,6 +66,9 @@ class Parcela:
     fuente: str                                            # "rc" | "direccion" | "coordenada"
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     subreferencias: list[Subreferencia] = field(default_factory=list)
+    # Inmueble concreto elegido dentro de la metaparcela (escalera·planta·puerta y
+    # su superficie construida propia). None mientras no se haya elegido ninguno.
+    inmueble_seleccionado: Subreferencia | None = None
     agregados: AgregadosMetaparcela | None = None
     # Datos catastrales del edificio en la parcela (urbano).
     uso_catastral: str = ""

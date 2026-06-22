@@ -3,12 +3,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.plataforma.persistencia.sqlalchemy_base import init_db
 
+from .dependencias import SECRET_KEY
 from .rutas import (
+    autenticacion,
     localizacion,
     menu,
     modulos,
@@ -17,6 +21,9 @@ from .rutas import (
     render_calculos,
     viabilidad,
 )
+
+# Prefijos públicos que no requieren sesión iniciada.
+RUTAS_PUBLICAS = ("/login", "/logout", "/static")
 
 RAIZ_WEB = Path(__file__).parent
 
@@ -72,6 +79,20 @@ def crear_app() -> FastAPI:
         name="static",
     )
 
+    @app.middleware("http")
+    async def exigir_login(request: Request, call_next):
+        """Puerta única: sin sesión iniciada todo redirige a /login."""
+        ruta = request.url.path
+        es_publica = any(ruta == p or ruta.startswith(p + "/") for p in RUTAS_PUBLICAS)
+        if not es_publica and not request.session.get("usuario_id"):
+            return RedirectResponse(url="/login", status_code=303)
+        return await call_next(request)
+
+    # SessionMiddleware se añade el último para quedar como capa más externa y
+    # poblar request.session antes de que corra `exigir_login`.
+    app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, same_site="lax")
+
+    app.include_router(autenticacion.router)
     app.include_router(menu.router)
     app.include_router(proyectos.router)
     app.include_router(localizacion.router)

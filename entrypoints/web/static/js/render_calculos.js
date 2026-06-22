@@ -1,9 +1,11 @@
 /* §2.4-2.7 — Render y cálculos. Estado, fetch y repintado.
    Estrategia:
-   - cualquier cambio de input dispara /preview (debounce 250 ms) que pinta
-     huella + patios + indicadores rápidos.
-   - el botón «Distribuir viviendas» pide /calcular y trae el macro_layout
-     completo (unidades, núcleo, pasillos, tabla por unidad). Spinner sobre canvas.
+   - cualquier cambio de parámetro recalcula la CAPACIDAD COMPLETA de forma
+     automática y silenciosa (recalcularAuto → /calcular; en modo inmueble,
+     /estancias). Debounce 300 ms. Repinta capacidad, tablas por planta/unidad,
+     KPIs, alertas y canvas, sin spinner ni toasts.
+   - el botón «Calcular capacidad» queda RESERVADO para pintar el render
+     (macro_layout: unidades, núcleo, pasillos) en una próxima iteración.
 */
 (function () {
   "use strict";
@@ -13,6 +15,14 @@
 
   const puedeEditar = form.dataset.puedeEditar === "true";
   const estado = form.dataset.estado;
+  // Modo activo (obra-nueva / rehabilitacion) y superficie construida del edificio
+  // existente (catastral). Pilotan el aviso de exceso, exclusivo de rehabilitación.
+  const modoActivo = form.dataset.modo || "";
+  const construidaExistente = parseFloat(form.dataset.construidaExistente);  // NaN si vacío
+  // Modo «inmueble»: se trabaja sobre un inmueble concreto (estancias de UNA unidad)
+  // a partir de su construida. No hay envolvente, canvas ni tabs de planta: el cálculo
+  // va a /estancias y la columna derecha es una sola tabla de estancias.
+  const esInmueble = modoActivo === "inmueble";
 
   const canvasEl = document.getElementById("rc-canvas");
   const brujulaEl = document.getElementById("rc-brujula");
@@ -20,6 +30,9 @@
   const tabsPlantasEl = document.getElementById("rc-tabs-plantas");
   const tablaPlantaBody = document.querySelector("#rc-tabla-planta tbody");
   const tablaUnidadBody = document.querySelector("#rc-tabla-unidad tbody");
+  // Solo existen en modo inmueble (tabla única de estancias).
+  const tablaEstanciasBody = document.querySelector("#rc-tabla-estancias tbody");
+  const estTotalUtilEl = document.getElementById("rc-est-total-util");
   const alertasBox = document.getElementById("rc-alertas");
   const alertasUl = alertasBox.querySelector("ul");
   const toast = document.getElementById("rc-toast");
@@ -29,7 +42,8 @@
   const btnNormativa = document.getElementById("rc-btn-normativa");
   const modal = document.getElementById("rc-modal-normativa");
 
-  const renderer = new window.RenderCanvas(canvasEl);
+  // En modo inmueble no hay canvas → no se instancia el renderer.
+  const renderer = canvasEl ? new window.RenderCanvas(canvasEl) : null;
 
   const fmt = {
     m2: new Intl.NumberFormat("es-ES", { maximumFractionDigits: 1, minimumFractionDigits: 1 }),
@@ -41,13 +55,17 @@
     previewPayload: null,
     fullPayload: null,
     plantaActiva: 0,
-    abortPreview: null,
     abortCalcular: null,
     debounceId: null,
     // §2.5 — combinación de dormitorios elegida en el modal (apartamentos
     // turísticos). Temporal: se inyecta en /calcular como `combo_dormitorios`
     // pero NO se persiste en el formulario ni en /guardar.
     comboDormitorios: null,   // { slug, etiqueta } | null
+    // Aviso de exceso de construida (rehabilitación): el modal salta una vez al
+    // superar; tras aceptarlo, solo queda el aviso inferior. `interaccionUsuario`
+    // evita que el modal salte en la carga inicial automática.
+    excesoAceptado: false,
+    interaccionUsuario: false,
   };
 
   function usoActivoForm() {
@@ -153,6 +171,72 @@
     }
   }
 
+  // ─── Aviso de exceso de construida (solo Rehabilitación) ──────────────
+  const modalExceso = document.getElementById("rc-modal-exceso");
+  const avisoExceso = document.getElementById("rc-aviso-exceso");
+
+  function construidaProyectada(payload) {
+    const cap = payload?.capacidad;
+    const env = payload?.envolvente;
+    if (cap && typeof cap.construida_total_m2 === "number") return cap.construida_total_m2;
+    if (env && typeof env.edificabilidad_consumida_m2 === "number") return env.edificabilidad_consumida_m2;
+    return null;
+  }
+
+  function pintarTextoExceso(proyectada) {
+    const txtP = fmt.m2.format(proyectada) + " m²";
+    const txtE = fmt.m2.format(construidaExistente) + " m²";
+    document.querySelectorAll('[data-exceso="proyectada"]').forEach(el => el.textContent = txtP);
+    document.querySelectorAll('[data-exceso="existente"]').forEach(el => el.textContent = txtE);
+    const pm = document.getElementById("rc-exceso-proyectada");
+    const em = document.getElementById("rc-exceso-existente");
+    if (pm) pm.textContent = txtP;
+    if (em) em.textContent = txtE;
+  }
+
+  function abrirModalExceso() {
+    if (!modalExceso) return;
+    if (typeof modalExceso.showModal === "function") { try { modalExceso.showModal(); } catch (e) { modalExceso.setAttribute("open", ""); } }
+    else modalExceso.setAttribute("open", "");
+  }
+  function cerrarModalExceso() {
+    if (!modalExceso) return;
+    if (modalExceso.close) modalExceso.close();
+    else modalExceso.removeAttribute("open");
+  }
+
+  function verificarExcesoConstruida(payload) {
+    // Exclusivo de rehabilitación y solo si conocemos la construida existente.
+    if (modoActivo !== "rehabilitacion" || !(construidaExistente > 0)) return;
+    const proyectada = construidaProyectada(payload);
+    if (proyectada === null) return;
+    const excede = proyectada > construidaExistente + 1e-6;
+
+    if (!excede) {
+      if (avisoExceso) avisoExceso.hidden = true;   // vuelve a estar dentro de lo existente
+      return;
+    }
+    pintarTextoExceso(proyectada);
+    // En la carga inicial automática (sin interacción) no abrimos el modal.
+    if (!ESTADO.interaccionUsuario) return;
+    if (!ESTADO.excesoAceptado) {
+      abrirModalExceso();
+    } else if (avisoExceso) {
+      avisoExceso.hidden = false;                    // ya aceptado → solo aviso inferior
+    }
+  }
+
+  // Aceptar (o cerrar) = se ha visto la advertencia: a partir de ahí, aviso inferior.
+  function aceptarExceso() {
+    ESTADO.excesoAceptado = true;
+    cerrarModalExceso();
+    if (avisoExceso) avisoExceso.hidden = false;
+  }
+  const btnExcesoAceptar = document.getElementById("rc-modal-exceso-aceptar");
+  if (btnExcesoAceptar) btnExcesoAceptar.addEventListener("click", aceptarExceso);
+  // Solo se cierra con «Aceptar»: bloqueamos el cierre por tecla Escape.
+  if (modalExceso) modalExceso.addEventListener("cancel", ev => ev.preventDefault());
+
   // ─── Tabs de planta ───────────────────────────────────────────────────
   function dibujarTabsPlantas(payload) {
     if (!tabsPlantasEl) return;
@@ -188,14 +272,15 @@
     if (!tablaPlantaBody) return;
     tablaPlantaBody.innerHTML = "";
     if (!filas || !filas.length) {
-      tablaPlantaBody.innerHTML = '<tr><td colspan="12" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
+      tablaPlantaBody.innerHTML = '<tr><td colspan="13" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
       return;
     }
-    const tot = { c: 0, u: 0, mur: 0, murEst: 0, circ: 0, nuc: 0, pat: 0, loc: 0, otr: 0, com: 0, viv: 0 };
+    const tot = { c: 0, u: 0, mur: 0, murInt: 0, murEst: 0, circ: 0, nuc: 0, pat: 0, loc: 0, otr: 0, com: 0, viv: 0 };
     filas.forEach(r => {
       tot.c += r.construida_m2 || 0;
       tot.u += r.util_viviendas_m2 || 0;
       tot.mur += r.muros_m2 || 0;
+      tot.murInt += r.muros_interior_m2 || 0;
       tot.murEst += r.muros_estimados_m2 || 0;
       tot.circ += r.circulacion_m2 || 0;
       tot.nuc += r.nucleo_m2 || 0;
@@ -216,6 +301,7 @@
         <td>${fmt.m2.format(r.construida_m2)}</td>
         <td>${fmt.m2.format(r.util_viviendas_m2)}</td>
         <td>${fmt.m2.format(r.muros_m2 || 0)}</td>
+        <td>${fmt.m2.format(r.muros_interior_m2 || 0)}</td>
         <td>${fmt.m2.format(r.muros_estimados_m2 || 0)}</td>
         <td>${fmt.m2.format(r.circulacion_m2 || 0)}</td>
         <td>${fmt.m2.format(r.nucleo_m2 || 0)}</td>
@@ -234,6 +320,7 @@
       <td>${fmt.m2.format(tot.c)}</td>
       <td>${fmt.m2.format(tot.u)}</td>
       <td>${fmt.m2.format(tot.mur)}</td>
+      <td>${fmt.m2.format(tot.murInt)}</td>
       <td>${fmt.m2.format(tot.murEst)}</td>
       <td>${fmt.m2.format(tot.circ)}</td>
       <td>${fmt.m2.format(tot.nuc)}</td>
@@ -275,6 +362,7 @@
       tr.dataset.util = r.util_por_unidad_m2 ?? 0;
       tr.dataset.circ = r.circulacion_interior_por_unidad_m2 ?? 0;
       tr.dataset.muros = r.muros_por_unidad_m2 ?? 0;
+      tr.dataset.murosInt = r.muros_interior_por_unidad_m2 ?? 0;
       tr.dataset.estancias = JSON.stringify(r.estancias || []);
       const utilCelda = esReserva
         ? `${fmt.m2.format(r.util_por_unidad_m2 ?? 0)} <small>(${fmt.pct.format(r.pct_util_destinado ?? 0)}% útil)</small>`
@@ -314,6 +402,7 @@
     setT("rc-mu-construida", fmt.m2.format(parseFloat(ds.construida || 0)) + " m²");
     setT("rc-mu-util", fmt.m2.format(parseFloat(ds.util || 0)) + " m²");
     setT("rc-mu-muros", fmt.m2.format(parseFloat(ds.muros || 0)) + " m²");
+    setT("rc-mu-muros-int", fmt.m2.format(parseFloat(ds.murosInt || 0)) + " m²");
 
     // La columna/fila "Computable" (útil − circulación) se muestra en vivienda y
     // en usos turísticos; en local (sin estancias) se oculta. La nota turística y
@@ -451,62 +540,42 @@
     window.RcBrujula.dibujar(brujulaEl, ind ? ind.orientaciones_fachadas : []);
   }
 
-  // ─── Fetch /preview (rápido) ──────────────────────────────────────────
+  // ─── Payload con normativa de referencia ──────────────────────────────
   function payloadConNormativa(bloques) {
     const p = { ...bloques };
     if (ESTADO_NORM.aplicada && ESTADO_NORM.aplicada.urbanisticos) {
       p.normativa_referencia = { urbanisticos: ESTADO_NORM.aplicada.urbanisticos };
     }
-    // §2.5 — combinación elegida (vivienda / apartamentos). El preview la
-    // ignora; en /calcular sustituye la tipología por la combinación.
+    // §2.5 — combinación elegida (vivienda / apartamentos). En /calcular
+    // sustituye la tipología por la combinación.
     if (usoUsaCombo() && ESTADO.comboDormitorios) {
       p.combo_dormitorios = ESTADO.comboDormitorios.slug;
     }
     return p;
   }
 
-  async function pedirPreview() {
-    if (estado !== "ok") return;
-    const bloques = leerFormulario();
-    actualizarResumen(bloques);
-    if (ESTADO.abortPreview) ESTADO.abortPreview.abort();
-    ESTADO.abortPreview = new AbortController();
-    try {
-      const resp = await fetch("/modulos/render-calculos/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payloadConNormativa(bloques)),
-        signal: ESTADO.abortPreview.signal,
-      });
-      if (resp.status === 409) { mostrarToast("Localiza primero la parcela", true); return; }
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-        mostrarToast(err.detail || "Error en preview", true);
-        return;
-      }
-      const data = await resp.json();
-      ESTADO.previewPayload = data;
-      ESTADO.plantaActiva = Math.min(ESTADO.plantaActiva, (data.envolvente?.plantas?.length || 1) - 1);
-      dibujarTabsPlantas(data);
-      renderer.dibujar(data, ESTADO.plantaActiva);
-      actualizarBrujula(data);
-      repintarKpis(data);
-      repintarAlertas(data.alertas);
-      // Marcamos botón "Distribuir" como stale si ya hubo full payload
-      if (ESTADO.fullPayload) btnDistribuir.classList.add("rc-stale");
-    } catch (e) {
-      if (e.name !== "AbortError") mostrarToast("Error de red", true);
-    }
+  // Recálculo automático y silencioso. Cualquier cambio de parámetro recalcula
+  // la capacidad COMPLETA (tablas + KPIs + alertas + canvas) sin spinner ni
+  // toasts. En modo inmueble, pedirCalculo redirige a /estancias.
+  function recalcularAuto() {
+    return pedirCalculo({ auto: true });
   }
 
   // ─── Fetch /calcular (completo) ───────────────────────────────────────
-  async function pedirCalculo() {
+  // Único camino de cálculo. Lo dispara recalcularAuto (opts.auto) en cada
+  // cambio de parámetro. En modo `auto` NO muestra spinner, toast de éxito ni
+  // toast de error de validación; las alertas se repintan igualmente. Los
+  // errores técnicos (red / servidor) sí se notifican siempre.
+  async function pedirCalculo(opts = {}) {
     if (estado !== "ok") return;
+    if (esInmueble) return pedirEstancias(opts);
+    const auto = opts.auto === true;
+    ESTADO.interaccionUsuario = true;
     const bloques = leerFormulario();
+    actualizarResumen(bloques);
     if (ESTADO.abortCalcular) ESTADO.abortCalcular.abort();
     ESTADO.abortCalcular = new AbortController();
-    spinner(true);
-    btnDistribuir.classList.remove("rc-stale");
+    if (!auto) spinner(true);
     try {
       const resp = await fetch("/modulos/render-calculos/calcular", {
         method: "POST",
@@ -521,11 +590,11 @@
         return;
       }
       const data = await resp.json();
-      // Error bloqueante (p. ej. R3: Σ mínimos > útil máximo). Muestra la alerta
-      // y NO pinta capacidad vacía.
+      // Error bloqueante (p. ej. R3: Σ mínimos > útil máximo). Repinta la alerta
+      // y NO pinta capacidad vacía. En auto, sin toast (no interrumpe el tecleo).
       if (data.error) {
         repintarAlertas(data.alertas);
-        mostrarToast(data.error, true);
+        if (!auto) mostrarToast(data.error, true);
         return;
       }
       ESTADO.fullPayload = data;
@@ -533,17 +602,118 @@
       const n_plantas = (data.envolvente?.plantas?.length) || (data.edificio?.plantas?.length) || 1;
       ESTADO.plantaActiva = Math.min(ESTADO.plantaActiva, n_plantas - 1);
       dibujarTabsPlantas(data);
-      renderer.dibujar(data, ESTADO.plantaActiva);
+      if (renderer) renderer.dibujar(data, ESTADO.plantaActiva);
       actualizarBrujula(data);
       repintarKpis(data);
       repintarAlertas(data.alertas);
       repintarTablaPlanta(data.tabla_planta);
       repintarTablaUnidad(data.tabla_unidad);
-      mostrarToast("Capacidad calculada");
+      verificarExcesoConstruida(data);
+      if (!auto) mostrarToast("Capacidad calculada");
     } catch (e) {
       if (e.name !== "AbortError") mostrarToast("Error de red", true);
     } finally {
-      spinner(false);
+      if (!auto) spinner(false);
+    }
+  }
+
+  // ─── Modo «inmueble»: estancias de UNA unidad ─────────────────────────
+  // Nº de dormitorios del inmueble (el input directo del panel; en modo inmueble
+  // no hay combinaciones — pilota las estancias de esta única vivienda).
+  function ndormsInmueble() {
+    const inp = document.getElementById("rc-apt-ndorms");
+    const n = inp ? parseInt(inp.value, 10) : 0;
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  }
+
+  function repintarKpisInmueble(t) {
+    const set = (key, v) => {
+      const el = document.querySelector(`[data-kpi="${key}"]`);
+      if (el) el.textContent = v;
+    };
+    if (!t) {
+      ["inm_construida_m2", "inm_util_m2", "inm_n_estancias", "inm_n_dormitorios"]
+        .forEach(k => set(k, "—"));
+      return;
+    }
+    set("inm_construida_m2", fmt.m2.format(t.construida_m2) + " m²");
+    set("inm_util_m2", fmt.m2.format(t.util_m2) + " m²");
+    set("inm_n_estancias", fmt.int.format(t.n_estancias));
+    set("inm_n_dormitorios", fmt.int.format(t.n_dormitorios));
+  }
+
+  function repintarTablaEstancias(estancias, totales) {
+    if (!tablaEstanciasBody) return;
+    tablaEstanciasBody.innerHTML = "";
+    if (!estancias || !estancias.length) {
+      tablaEstanciasBody.innerHTML =
+        '<tr><td colspan="4" class="rc-vacio">Sin estancias. Ajusta el nº de dormitorios y calcula.</td></tr>';
+      if (estTotalUtilEl) estTotalUtilEl.textContent = "—";
+      return;
+    }
+    let totalUtil = 0;
+    estancias.forEach(e => {
+      const sup = e.area_target_m2 || 0;
+      totalUtil += sup;
+      const tr = document.createElement("tr");
+      tr.className = "rc-mu-estancia rc-mu-estancia-" + (e.categoria || "");
+      // Dos niveles de fallo del círculo mínimo inscribible (Ø), igual que el modal.
+      const nivel = e.nivel_diametro || (e.cabe_diametro === false ? "amarillo" : "ok");
+      let warn = "";
+      if (nivel === "rojo") {
+        tr.classList.add("rc-mu-estancia-rojo");
+        warn = `<span class="rc-mu-est-warn rc-mu-est-warn-rojo" title="No cabe el círculo de Ø ${e.diametro_min_m} m ni en planta cuadrada">⚠</span>`;
+      } else if (nivel === "amarillo") {
+        tr.classList.add("rc-mu-estancia-amarillo");
+        warn = `<span class="rc-mu-est-warn rc-mu-est-warn-amarillo" title="El círculo de Ø ${e.diametro_min_m} m solo cabe en planta cuadrada; no con proporción 1:1.5">⚠</span>`;
+      }
+      tr.innerHTML = `
+        <td class="rc-mu-est-nombre">${warn}${e.etiqueta || e.nombre}</td>
+        <td class="rc-mu-est-cat">${e.categoria || ""}</td>
+        <td class="rc-num">${fmt.m2.format(sup)} m²</td>
+        <td class="rc-num">${fmt.m2.format(e.area_min_m2 || 0)} m²</td>`;
+      tablaEstanciasBody.appendChild(tr);
+    });
+    if (estTotalUtilEl) {
+      const t = totales && typeof totales.util_m2 === "number" ? totales.util_m2 : totalUtil;
+      estTotalUtilEl.textContent = fmt.m2.format(t) + " m²";
+    }
+  }
+
+  async function pedirEstancias(opts = {}) {
+    if (estado !== "ok") return;
+    const auto = opts.auto === true;
+    ESTADO.interaccionUsuario = true;
+    const bloques = leerFormulario();
+    if (ESTADO.abortCalcular) ESTADO.abortCalcular.abort();
+    ESTADO.abortCalcular = new AbortController();
+    try {
+      const resp = await fetch("/modulos/render-calculos/estancias", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...bloques, n_dormitorios: ndormsInmueble() }),
+        signal: ESTADO.abortCalcular.signal,
+      });
+      if (resp.status === 409) { mostrarToast("Elige un inmueble en la localización", true); return; }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        mostrarToast(err.detail || "Error al calcular estancias", true);
+        return;
+      }
+      const data = await resp.json();
+      if (data.error) {
+        repintarAlertas(data.alertas || []);
+        repintarTablaEstancias([], null);
+        repintarKpisInmueble(null);
+        if (!auto) mostrarToast(data.error, true);
+        return;
+      }
+      ESTADO.fullPayload = data;
+      repintarKpisInmueble(data.totales);
+      repintarTablaEstancias(data.estancias, data.totales);
+      repintarAlertas(data.alertas || []);
+    } catch (e) {
+      if (e.name !== "AbortError") mostrarToast("Error de red", true);
     }
   }
 
@@ -553,6 +723,7 @@
     const bloques = leerFormulario();
     // Iter. 3: el resumen ahora viene de data.capacidad (no de edificio.totales).
     const resumen = ESTADO.fullPayload?.capacidad
+      || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
       || ESTADO.fullPayload?.edificio?.totales
       || ESTADO.previewPayload?.envolvente
       || {};
@@ -560,7 +731,7 @@
       const resp = await fetch("/modulos/render-calculos/guardar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parametros: bloques, resumen }),
+        body: JSON.stringify({ parametros: bloques, resumen, modo: modoActivo }),
       });
       if (resp.status === 409) { mostrarToast("Crea o abre un proyecto primero", true); return; }
       if (!resp.ok) {
@@ -772,7 +943,7 @@
     ESTADO_NORM.aplicada = { id: data.id, nombre: data.nombre, urbanisticos: urb };
     modal.close();
     mostrarToast(`Normativa "${data.nombre}" aplicada`);
-    pedirPreview();
+    recalcularAuto();
   }
 
   // ─── Modal "Combinaciones de dormitorios" (§2.5 — apartamentos) ───────
@@ -1034,7 +1205,7 @@
       const data = await resp.json();
       inputs.forEach(inp => { inp.dataset.original = inp.value; });   // nuevos originales
       mostrarToast(`Superficies guardadas (${data.aplicados})`);
-      if (estado === "ok") pedirPreview();
+      if (estado === "ok") recalcularAuto();
     } catch (e) { mostrarToast("Error de red", true); }
   }
 
@@ -1182,7 +1353,7 @@
       const data = await resp.json();
       inputs.forEach(inp => { inp.dataset.original = inp.value; });   // nuevos originales
       mostrarToast(`Superficies guardadas (${data.aplicados})`);
-      if (estado === "ok") pedirPreview();
+      if (estado === "ok") recalcularAuto();
     } catch (e) { mostrarToast("Error de red", true); }
   }
 
@@ -1337,19 +1508,21 @@
 
   // ─── Bindings ─────────────────────────────────────────────────────────
   function calcularConDebounce() {
+    ESTADO.interaccionUsuario = true;   // cualquier edición habilita el modal de exceso
     aplicarVisibilidad();
     actualizarOpcionesCondicionales();
     if (ESTADO.debounceId) clearTimeout(ESTADO.debounceId);
-    ESTADO.debounceId = setTimeout(pedirPreview, 250);
+    ESTADO.debounceId = setTimeout(recalcularAuto, 300);
   }
   form.addEventListener("input", calcularConDebounce);
   form.addEventListener("change", calcularConDebounce);
-  if (btnDistribuir) btnDistribuir.addEventListener("click", pedirCalculo);
+  // El botón «Calcular capacidad» queda reservado para pintar el render (próxima
+  // iteración): el cálculo ya es automático con cada cambio, sin binding aquí.
   if (btnGuardar) btnGuardar.addEventListener("click", guardar);
   if (btnCsv) btnCsv.addEventListener("click", exportCsv);
 
-  // Brújula inicial vacía + handler de rotación → render
-  if (window.RcBrujula) {
+  // Brújula inicial vacía + handler de rotación → render (no existe en inmueble).
+  if (window.RcBrujula && brujulaEl) {
     window.RcBrujula.dibujar(brujulaEl, []);
     window.RcBrujula.onRotate(deg => {
       if (renderer && typeof renderer.setRotation === "function") {
@@ -1371,8 +1544,8 @@
   if (chkUsarCoef) chkUsarCoef.addEventListener("change", aplicarToggleCoef);
   aplicarToggleCoef();
 
-  // Si hay proyecto + parcela, primer preview automático
+  // Si hay proyecto + parcela, primer cálculo automático
   if (estado === "ok") {
-    pedirPreview();
+    recalcularAuto();
   }
 })();

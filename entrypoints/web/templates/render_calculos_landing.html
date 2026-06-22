@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
+
+{% block contenido %}
+<style>
+  /* Pantalla de selección de modo de Render y cálculos. Estilo embebido para no
+     tocar el CSS global (evita cache-busting). Paleta corporativa Puccetti. */
+  .rcl-preview {
+    border: 1px solid #2a2a2a;
+    border-left: 4px solid #B8960C;
+    border-radius: 8px;
+    padding: 1.1rem 1.3rem;
+    margin: 1.25rem 0 1.75rem;
+    background: #111;
+  }
+  .rcl-preview h2 { margin: 0 0 .15rem; font-size: 1.05rem; }
+  .rcl-preview .rcl-sub { margin: 0 0 .9rem; color: #C9A84C; font-size: .9rem; }
+  .rcl-datos {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: .7rem 1.4rem;
+  }
+  .rcl-dato { display: flex; flex-direction: column; gap: .12rem; }
+  .rcl-dato .rcl-k { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #9a9a9a; }
+  .rcl-dato .rcl-v { font-size: .98rem; color: #fff; }
+  .rcl-dato.rcl-destacado .rcl-v { color: #C9A84C; font-weight: 600; font-size: 1.15rem; }
+  .rcl-pregunta { margin: 0 0 .9rem; font-size: 1.05rem; }
+  .rcl-modos .tarjeta { cursor: pointer; }
+  .rcl-modos .tarjeta header h2 { display: flex; align-items: center; gap: .5rem; }
+  .rcl-badge {
+    font-size: .65rem; text-transform: uppercase; letter-spacing: .05em;
+    padding: .12rem .5rem; border-radius: 999px; background: #B8960C; color: #0A0A0A;
+  }
+</style>
+
+<section class="hero">
+  <h1>{{ tarjeta.titulo }}</h1>
+  <p>Elige el tipo de intervención para empezar a calcular sobre la parcela del proyecto.</p>
+</section>
+
+{% if estado == "sin_proyecto" %}
+  <section class="aviso aviso-info">
+    <h2>No hay proyecto activo</h2>
+    <p>Abre o crea un proyecto desde <a href="/proyectos">Proyectos</a> y vuelve aquí.</p>
+  </section>
+{% else %}
+
+  {% if estado == "sin_parcela" %}
+    <section class="aviso aviso-info">
+      <h2>El proyecto aún no tiene parcela asociada</h2>
+      <p>Localiza la parcela en <a href="/modulos/localizacion">Buscar parcela</a> para ver aquí su resumen. Aun así puedes entrar al módulo.</p>
+    </section>
+  {% elif preview %}
+    <section class="rcl-preview" aria-label="Resumen de la parcela del proyecto">
+      <h2>{{ proyecto_activo.nombre }}</h2>
+      <p class="rcl-sub">
+        {% if preview.referencia_catastral %}RC {{ preview.referencia_catastral }}{% else %}Parcela del proyecto{% endif %}
+      </p>
+      <div class="rcl-datos">
+        {% if preview.superficie_m2 %}
+          <div class="rcl-dato rcl-destacado">
+            <span class="rcl-k">Superficie de parcela (catastral)</span>
+            <span class="rcl-v">{{ "%.2f"|format(preview.superficie_m2|float) }} m²</span>
+          </div>
+        {% endif %}
+        {% if preview.direccion %}
+          <div class="rcl-dato">
+            <span class="rcl-k">Dirección</span>
+            <span class="rcl-v">{{ preview.direccion }}</span>
+          </div>
+        {% endif %}
+        {% if preview.municipio or preview.provincia %}
+          <div class="rcl-dato">
+            <span class="rcl-k">Municipio</span>
+            <span class="rcl-v">{{ preview.municipio or "—" }}{% if preview.provincia %} ({{ preview.provincia }}){% endif %}</span>
+          </div>
+        {% endif %}
+        {% if preview.uso_catastral %}
+          <div class="rcl-dato">
+            <span class="rcl-k">Uso catastral</span>
+            <span class="rcl-v">{{ preview.uso_catastral }}</span>
+          </div>
+        {% endif %}
+        {% if preview.superficie_construida_total_m2 %}
+          <div class="rcl-dato">
+            <span class="rcl-k">Construida existente</span>
+            <span class="rcl-v">{{ "%.2f"|format(preview.superficie_construida_total_m2|float) }} m²</span>
+          </div>
+        {% endif %}
+        {% if preview.anio_construccion %}
+          <div class="rcl-dato">
+            <span class="rcl-k">Año de construcción</span>
+            <span class="rcl-v">{{ preview.anio_construccion }}</span>
+          </div>
+        {% endif %}
+        {% if preview.plantas_sobre_rasante is not none %}
+          <div class="rcl-dato">
+            <span class="rcl-k">Plantas s/rasante</span>
+            <span class="rcl-v">{{ preview.plantas_sobre_rasante }}{% if preview.plantas_bajo_rasante %} · {{ preview.plantas_bajo_rasante }} bajo rasante{% endif %}</span>
+          </div>
+        {% endif %}
+      </div>
+    </section>
+  {% endif %}
+
+  <p class="rcl-pregunta">¿Qué intervención vas a estudiar?</p>
+  <section class="rejilla-modulos rcl-modos">
+    {% for m in modos %}
+      <a class="tarjeta" href="/modulos/render-calculos?modo={{ m.slug }}">
+        <header>
+          <h2>{{ m.titulo }}{% if m.badge %} {% endif %}</h2>
+        </header>
+        <p>{{ m.descripcion }}</p>
+        <footer>
+          <span class="tarjeta-flecha" aria-hidden="true">→</span>
+        </footer>
+      </a>
+    {% endfor %}
+  </section>
+
+{% endif %}
+{% endblock %}

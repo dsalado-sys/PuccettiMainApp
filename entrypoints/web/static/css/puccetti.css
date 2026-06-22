@@ -209,3 +209,51 @@ button { font-family: inherit; cursor: pointer; }
   font-size: 12px;
   border-top: 1px solid var(--dorado);
 }
+
+/* ── Usuario conectado (cabecera) ───────────────────────────── */
+.sesion-usuario { display: flex; gap: 14px; align-items: center; }
+.sesion-nombre { color: var(--dorado-claro); font-weight: 600; font-size: 14px; letter-spacing: 0.02em; }
+.sesion-logout { margin: 0; }
+
+/* ── Pantalla de login ──────────────────────────────────────── */
+.login-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--negro);
+}
+.login-caja {
+  width: 100%;
+  max-width: 380px;
+  margin: 24px;
+  background: var(--blanco);
+  border-radius: var(--radio);
+  border-top: 3px solid var(--dorado);
+  box-shadow: var(--sombra);
+  padding: 36px 32px;
+}
+.login-marca { display: flex; flex-direction: column; align-items: center; margin-bottom: 26px; text-align: center; }
+.login-marca .marca-nombre { font-weight: 700; letter-spacing: 0.35em; font-size: 22px; color: var(--negro); }
+.login-marca .marca-claim { font-size: 11px; color: var(--gris-medio); letter-spacing: 0.12em; text-transform: uppercase; margin-top: 4px; }
+.login-form { display: flex; flex-direction: column; gap: 8px; }
+.login-form h1 { font-size: 20px; margin: 0 0 12px; text-align: center; }
+.login-form label { font-size: 12px; color: #555; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 6px; }
+.login-form input {
+  padding: 10px 12px;
+  font-size: 15px;
+  border: 1px solid #C9C5B5;
+  border-radius: var(--radio);
+  font-family: inherit;
+}
+.login-form input:focus { outline: 2px solid var(--dorado); outline-offset: 1px; }
+.login-form .boton-primario { justify-content: center; margin-top: 18px; padding: 11px 16px; font-size: 14px; }
+.login-error {
+  background: rgba(140, 42, 31, 0.08);
+  border: 1px solid var(--error);
+  color: var(--error);
+  padding: 10px 12px;
+  border-radius: var(--radio);
+  font-size: 13px;
+  margin: 0 0 6px;
+}

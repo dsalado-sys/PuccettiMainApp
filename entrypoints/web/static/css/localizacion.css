@@ -229,6 +229,13 @@
   outline: none;
 }
 .loc-card:active { transform: translateY(0); }
+/* Inmueble elegido dentro de la metaparcela. */
+.loc-card-elegida {
+  border-color: var(--dorado);
+  border-left: 4px solid var(--dorado);
+  background: rgba(184, 150, 12, 0.08);
+  box-shadow: 0 2px 8px rgba(184, 150, 12, 0.18);
+}
 
 .loc-card-head {
   display: flex;

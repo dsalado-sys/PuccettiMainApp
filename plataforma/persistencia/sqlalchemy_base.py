@@ -58,6 +58,7 @@ def init_db() -> None:
     from . import anexo_i_hotel_apartamento_sqlalchemy  # noqa: F401
     from . import anexo_i_hotelero_sqlalchemy  # noqa: F401
     from . import carpetas_normativa_sqlalchemy  # noqa: F401
+    from . import usuarios_sqlalchemy  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
     if _es_sqlite:
@@ -65,9 +66,11 @@ def init_db() -> None:
 
     from .callejero_seed import sembrar_callejero
     from .seed_normativa import sembrar_todo
+    from .seed_usuarios import sembrar_usuarios
     with SessionLocal() as session:
         sembrar_callejero(session)
         sembrar_todo(session)
+        sembrar_usuarios(session)
 
 
 def _migracion_sqlite_idempotente() -> None:

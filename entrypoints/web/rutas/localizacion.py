@@ -14,6 +14,7 @@ from app.contextos.localizacion.casos_uso import (
     LocalizarPorCoordenada,
     LocalizarPorDireccion,
     LocalizarPorRC,
+    SeleccionarInmueble,
     SimplificarContorno,
     asociar_a_proyecto,
     restaurar_parcela_desde_proyecto,
@@ -50,6 +51,7 @@ from ..dependencias import (
     proyecto_activo,
     repositorio_proyectos,
     rol_activo,
+    seleccionar_inmueble_uc,
     simplificar_contorno_uc,
 )
 from ..plantillas import plantillas
@@ -57,6 +59,18 @@ from ..plantillas import plantillas
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/modulos/localizacion")
+
+
+def _subref_dict(s) -> dict:
+    return {
+        "rc": s.rc,
+        "localizacion": s.localizacion,
+        "uso": s.uso,
+        "superficie_construida_m2": s.superficie_construida_m2,
+        "coeficiente_participacion": s.coeficiente_participacion,
+        "anio_construccion": s.anio_construccion,
+        "detalle_cargado": s.detalle_cargado,
+    }
 
 
 def _parcela_a_dict(p: Parcela) -> dict:
@@ -88,18 +102,10 @@ def _parcela_a_dict(p: Parcela) -> dict:
             }
             for l in p.lados
         ],
-        "subreferencias": [
-            {
-                "rc": s.rc,
-                "localizacion": s.localizacion,
-                "uso": s.uso,
-                "superficie_construida_m2": s.superficie_construida_m2,
-                "coeficiente_participacion": s.coeficiente_participacion,
-                "anio_construccion": s.anio_construccion,
-                "detalle_cargado": s.detalle_cargado,
-            }
-            for s in p.subreferencias
-        ],
+        "subreferencias": [_subref_dict(s) for s in p.subreferencias],
+        "inmueble_seleccionado": (
+            _subref_dict(p.inmueble_seleccionado) if p.inmueble_seleccionado else None
+        ),
         "agregados": (
             {
                 "num_referencias": p.agregados.num_referencias,
@@ -353,6 +359,26 @@ def detalle_subreferencia(
         "anio_construccion": subref.anio_construccion,
         "detalle_cargado": subref.detalle_cargado,
     }
+
+
+@router.post("/seleccionar-inmueble")
+def seleccionar_inmueble(
+    payload: Annotated[dict, Body(...)],
+    rol: Rol = Depends(rol_activo),
+    parcela: Parcela | None = Depends(obtener_parcela_temporal),
+    uc: SeleccionarInmueble = Depends(seleccionar_inmueble_uc),
+):
+    """Elige uno de los inmuebles de la metaparcela (escalera·planta·puerta + su
+    superficie construida). No toca el Catastro: usa la subreferencia ya cargada."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    if parcela is None:
+        raise HTTPException(status_code=409, detail="No hay parcela en sesión.")
+    rc = (payload or {}).get("rc", "")
+    try:
+        actualizada = uc.ejecutar(parcela.id, rc)
+    except ParcelaError as exc:
+        raise _mapear_error(exc)
+    return _parcela_a_dict(actualizada)
 
 
 @router.post("/guardar-como-proyecto")

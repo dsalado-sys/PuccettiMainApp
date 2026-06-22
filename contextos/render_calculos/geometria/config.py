@@ -34,6 +34,9 @@ class ParametrosDiseno:
 
     # Porcentajes. Suma ≤ 90% por planta (validado en capacidad).
     pct_muros: float = 20.0
+    # Tabiquería interior de las unidades (cálculo de unidad): se descuenta del útil
+    # destinado a viviendas, no de la huella. Default 0 = sin tabiquería reservada.
+    pct_muros_interior: float = 0.0
     pct_circulacion_pb: float = 8.0      # % circulación en planta baja
     pct_circulacion_tipo: float = 8.0    # % circulación en planta tipo / ático
     pct_nucleo: float = 5.0
