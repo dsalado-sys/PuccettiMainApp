@@ -1222,6 +1222,25 @@ def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proy
     except (TypeError, ValueError):
         pass
 
+    # Patios reales del edificio: el motor descuenta la SUMA de `urbanisticos.patios`
+    # en cada planta y el panel los muestra editables ("Patios del edificio"). En
+    # rehabilitación partimos de los patios catastrales (anillos interiores de la
+    # huella, §2.1) en lugar del patio sintético por defecto.
+    #   - patios_m2 con áreas → se usan esas (1 entrada por patio).
+    #   - n_patios == 0       → el Catastro confirma que no hay patios (lista vacía).
+    #   - n_patios None       → sin dato del Catastro: se respeta el default.
+    patios_cat = loc.get("patios_m2")
+    if isinstance(patios_cat, list) and patios_cat:
+        areas = [
+            round(float(a), 1)
+            for a in patios_cat
+            if isinstance(a, (int, float)) and float(a) > 0
+        ]
+        if areas:
+            params.urbanisticos.patios = areas
+    elif loc.get("n_patios") == 0:
+        params.urbanisticos.patios = []
+
 
 def parametros_desde_proyecto(
     proyecto: Proyecto | None,

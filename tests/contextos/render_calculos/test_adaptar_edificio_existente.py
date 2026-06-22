@@ -89,3 +89,40 @@ def test_subreferencia_bajo_rasante_no_cuenta_como_planta():
     assert params.urbanisticos.tiene_atico is True
     assert params.urbanisticos.n_plantas_max == 4
     assert params.urbanisticos.tiene_sotano is True
+
+
+# ── Patios catastrales del edificio existente ───────────────────────────────
+def _proyecto_con_patios(n_patios, patios_m2):
+    """Proyecto cuya localización trae los patios catastrales (recogidos en §2.1)."""
+    proyecto = Proyecto(nombre="test")
+    proyecto.fijar_datos(ModuloPuccetti.LOCALIZACION, {
+        "plantas_sobre_rasante": 4,
+        "n_patios": n_patios,
+        "patios_m2": patios_m2,
+    })
+    return proyecto
+
+
+def test_patios_catastrales_sustituyen_al_patio_por_defecto():
+    # La parcela tiene 2 patios reales → el motor usa esas 2 áreas, no el [12.0].
+    proyecto = _proyecto_con_patios(2, [18.5, 9.0])
+    params = ParametrosRender()
+    assert params.urbanisticos.patios == [12.0]  # default antes de adaptar
+    adaptar_params_a_edificio_existente(params, proyecto)
+    assert params.urbanisticos.patios == [18.5, 9.0]
+
+
+def test_catastro_sin_patios_deja_lista_vacia():
+    # n_patios == 0 → el Catastro confirma que no hay patios.
+    proyecto = _proyecto_con_patios(0, [])
+    params = ParametrosRender()
+    adaptar_params_a_edificio_existente(params, proyecto)
+    assert params.urbanisticos.patios == []
+
+
+def test_sin_dato_de_patios_respeta_el_default():
+    # Proyecto antiguo sin n_patios/patios_m2 → no se toca el patio por defecto.
+    proyecto = _proyecto_con(4, [])  # loc sin claves de patios
+    params = ParametrosRender()
+    adaptar_params_a_edificio_existente(params, proyecto)
+    assert params.urbanisticos.patios == [12.0]
