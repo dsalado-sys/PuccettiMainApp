@@ -76,15 +76,18 @@ def _disenos_por_categoria(params: ParametrosRender) -> dict[str, DisenoPlanta]:
     propio bucket. Permite que PB sea independiente de las plantas tipo y que ático y
     sótano tengan su propio % muros y % circulación.
     """
-    # % muros interior es unit-level (tabiquería de la unidad), igual que la
-    # circulación interior: se lee solo del bloque PB y aplica a todas las plantas.
+    # % núcleo y % muros interior son GLOBALES del edificio: se leen solo del bloque
+    # PB y aplican igual a todas las plantas. El núcleo es la caja de escaleras /
+    # ascensor, que es vertical y única para el edificio entero (no tiene sentido un
+    # núcleo distinto por planta). El % muros interior es la tabiquería de la unidad.
     _pmi = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_interior", 0.0))))
+    _nucleo = max(0.0, min(30.0, float(params.diseno.pct_nucleo)))
 
     def dp(diseno, circ_field: str) -> DisenoPlanta:
         return DisenoPlanta(
             max(0.0, min(80.0, float(diseno.pct_muros))),
             max(0.0, min(50.0, float(getattr(diseno, circ_field)))),
-            max(0.0, min(30.0, float(diseno.pct_nucleo))),
+            _nucleo,
             _pmi,
         )
 

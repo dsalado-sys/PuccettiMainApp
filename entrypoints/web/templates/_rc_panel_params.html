@@ -426,10 +426,11 @@
          En modo inmueble es el único reparto de circulación que aplica. #}
       {{ dnum("% circulación interior unidad", "pct_circulacion_interior", "diseno", d.pct_circulacion_interior, "0", "40", "1", "pb") }}
 
-      {# % núcleo del edificio — PB / tipo. No aplica a un inmueble suelto. #}
+      {# % núcleo del edificio — único (caja de escaleras/ascensor: vertical y única
+         para todo el edificio). Solo se edita en PB y aplica a todas las plantas.
+         No aplica a un inmueble suelto. #}
       {% if "nucleo" not in _ocultas %}
-      {{ dnum("% núcleo (PB)", "pct_nucleo", "diseno", d.pct_nucleo, "0", "30", "1", "pb") }}
-      {{ dnum("% núcleo (tipo)", "pct_nucleo", "diseno_tipo", d_t.pct_nucleo, "0", "30", "1", "tipo") }}
+      {{ dnum("% núcleo", "pct_nucleo", "diseno", d.pct_nucleo, "0", "30", "1", "pb") }}
       {% endif %}
     </div>
   </details>
