@@ -21,9 +21,9 @@
       Normativa municipal
     </button>
     {% endif %}
-    <button type="button" id="rc-btn-distribuir" class="boton-primario"
-            title="{% if es_inmueble %}Distribuir las estancias del inmueble{% else %}Calcular capacidad numérica (envolvente + Normativa){% endif %}">
-      {% if es_inmueble %}Calcular estancias{% else %}Calcular capacidad{% endif %}
+    <button type="button" id="rc-btn-distribuir" class="boton-primario" disabled
+            title="El cálculo se actualiza solo con cada cambio. Este botón pintará el render (próximamente).">
+      Pintar render
     </button>
     <button type="button" id="rc-btn-guardar" class="boton-secundario" title="Guardar parámetros en el proyecto">
       Guardar
