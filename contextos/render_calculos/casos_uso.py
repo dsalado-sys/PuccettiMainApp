@@ -1326,6 +1326,14 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
             f"Factor limitante: {cap.factor_limitante}.",
         ))
 
+    if getattr(cap, "patio_sin_espacio", False):
+        alertas.append(Alerta(
+            "aviso", "Normativa",
+            f"No hay espacio en la planta para el patio interior mínimo "
+            f"({cap.area_patio_min_m2:.2f} m²) tras descontar muros, circulación y "
+            f"núcleo. Reduce la ocupación de la planta o la superficie de patio.",
+        ))
+
     if cap.util_objetivo_viv_m2 > 0:
         util_total_habitable = sum(
             u for u, t in zip(cap.util_por_planta, cap.tipo_planta) if t != "sotano"

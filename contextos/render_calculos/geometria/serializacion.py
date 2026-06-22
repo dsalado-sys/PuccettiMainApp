@@ -216,6 +216,7 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
     """Tabla por planta derivada del cálculo (muros / circulación / núcleo separados)."""
     rows: list[dict[str, Any]] = []
     muros_est = list(getattr(cap, "muros_estimados_por_planta", [])) or [0.0] * len(cap.nombres_planta)
+    muros_int_pp = list(getattr(cap, "muros_interior_por_planta", [])) or [0.0] * len(cap.nombres_planta)
     patio_pp = list(getattr(cap, "patio_por_planta", [])) or [0.0] * len(cap.nombres_planta)
     local_pp = list(getattr(cap, "local_por_planta", [])) or [0.0] * len(cap.nombres_planta)
     otros_pp = list(getattr(cap, "otros_por_planta", [])) or [0.0] * len(cap.nombres_planta)
@@ -226,6 +227,7 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
         construida_i = cap.construida_por_planta[i]
         util_i = cap.util_por_planta[i]
         muros_i = cap.muros_por_planta[i]
+        muros_int_i = muros_int_pp[i] if i < len(muros_int_pp) else 0.0
         muros_est_i = muros_est[i] if i < len(muros_est) else 0.0
         circulacion_i = cap.circulacion_por_planta[i]
         nucleo_i = cap.nucleo_por_planta[i]
@@ -244,6 +246,7 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
             "construida_m2": round(construida_i, 2),
             "util_viviendas_m2": round(util_i, 2),
             "muros_m2": round(muros_i, 2),
+            "muros_interior_m2": round(muros_int_i, 2),
             "muros_estimados_m2": round(muros_est_i, 2),
             "circulacion_m2": round(circulacion_i, 2),
             "nucleo_m2": round(nucleo_i, 2),
@@ -262,9 +265,11 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
     #
     # El patio interior NO computa como construido (vacío a cielo abierto): la
     # columna `construida_m2` es la huella menos el patio, así que la identidad
-    # por planta es `construida = útil + muros + circulación + núcleo + local +
-    # otros + usos comunes` y la columna `patios_m2` queda fuera de esa suma
-    # (se reporta aparte). Otros y usos comunes solo son > 0 en planta baja.
+    # por planta es `construida = útil + muros + muros_interior + circulación +
+    # núcleo + local + otros + usos comunes` y la columna `patios_m2` queda fuera
+    # de esa suma (se reporta aparte). `muros` es solo perímetro/edificio y
+    # `muros_interior` la tabiquería de las unidades; otros y usos comunes solo
+    # son > 0 en planta baja.
     return rows
 
 
@@ -498,9 +503,12 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
     Reparto m² por unidad:
     - `util_por_unidad_m2`: útil real de la vivienda (incluye su circulación
       interior, que aparece como una estancia más en el detalle).
-    - `muros_por_unidad_m2`: muros del proyecto prorrateados al útil de la
-      unidad (los muros perimetrales SÍ pertenecen a la vivienda).
-    - `construida_por_unidad_m2` = `util + muros`.
+    - `muros_por_unidad_m2`: muros de PERÍMETRO/edificio del proyecto prorrateados
+      al útil de la unidad (fachadas/medianeras/separaciones SÍ pertenecen a la
+      vivienda).
+    - `muros_interior_por_unidad_m2`: TABIQUERÍA interior de la unidad (cálculo de
+      unidad, % del útil destinado a viviendas; 0 si pct_muros_interior = 0).
+    - `construida_por_unidad_m2` = `util + muros + muros_interior`.
     - La CIRCULACIÓN COMÚN y el NÚCLEO del edificio NO se imputan por unidad
       (son del edificio, viven solo en la tabla por planta).
 
@@ -524,6 +532,7 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
     pct_usos_comunes_pb = float(getattr(cap, "pct_usos_comunes_pb", 0.0))
     unidades_pp = list(getattr(cap, "unidades_por_planta", []))
     tipologias_pp = list(getattr(cap, "tipologias_unidad_por_planta", []))
+    muros_int_pp = list(getattr(cap, "muros_interior_por_planta", [])) or [0.0] * len(cap.nombres_planta)
 
     for i, nombre_planta in enumerate(cap.nombres_planta):
         viv_i = cap.viv_por_planta[i]
@@ -551,6 +560,7 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
                     "construida_por_unidad_m2": round(m2_reserva, 2),
                     "util_por_unidad_m2": round(m2_reserva, 2),
                     "muros_por_unidad_m2": 0.0,
+                    "muros_interior_por_unidad_m2": 0.0,
                     "circulacion_por_unidad_m2": 0.0,
                     "pct_util_destinado": round(pct_reserva, 1),
                     "adaptada": False,
@@ -562,6 +572,7 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
 
         util_i_consumido = sum(u for _, u in unidades_i) or 1.0
         muros_i = cap.muros_por_planta[i]
+        muros_int_i = muros_int_pp[i] if i < len(muros_int_pp) else 0.0
 
         for j, (n_dorms_u, util_u) in enumerate(unidades_i):
             letra = chr(ord('A') + j) if j < 26 else f"#{j+1}"
@@ -569,11 +580,13 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
             es_adapt = adaptadas_marcadas < n_adaptadas
             if es_adapt:
                 adaptadas_marcadas += 1
-            # Solo los MUROS perimetrales se prorratean a la unidad. La
+            # La unidad lleva su cuota de MUROS perimetrales del edificio
+            # (prorrateada al útil) MÁS su propia TABIQUERÍA interior. La
             # circulación común y el núcleo son del edificio (tabla por planta).
             factor = util_u / util_i_consumido
             muros_u = muros_i * factor
-            construida_u = util_u + muros_u
+            muros_int_u = muros_int_i * factor
+            construida_u = util_u + muros_u + muros_int_u
 
             estancias = _estancias_por_unidad_dorms(
                 params, n_dorms_u, util_u, programa_uso, slug_u
@@ -602,6 +615,7 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
                 "util_por_unidad_m2": round(util_u, 2),
                 "computable_turismo_por_unidad_m2": round(computable_u, 2),
                 "muros_por_unidad_m2": round(muros_u, 2),
+                "muros_interior_por_unidad_m2": round(muros_int_u, 2),
                 "circulacion_interior_por_unidad_m2": round(circ_interior_u, 2),
                 "adaptada": es_adapt,
                 "estancias": estancias,

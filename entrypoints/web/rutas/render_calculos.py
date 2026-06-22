@@ -704,11 +704,11 @@ def export_csv(
     writer = csv.writer(buf, delimiter=";")
     writer.writerow(["# Tabla de superficies por planta — Render y cálculos §2.7"])
     writer.writerow(["planta", "tipo", "viviendas", "construida_m2", "util_viviendas_m2",
-                     "muros_m2", "circulacion_m2", "nucleo_m2",
+                     "muros_m2", "muros_interior_m2", "circulacion_m2", "nucleo_m2",
                      "local_m2", "otros_m2", "usos_comunes_m2"])
     for r in resultado.get("tabla_planta", []):
         writer.writerow([r["planta"], r.get("tipo", "regular"), r["viviendas"], r["construida_m2"],
-                         r["util_viviendas_m2"], r.get("muros_m2", 0.0),
+                         r["util_viviendas_m2"], r.get("muros_m2", 0.0), r.get("muros_interior_m2", 0.0),
                          r["circulacion_m2"], r.get("nucleo_m2", 0.0),
                          r.get("local_m2", 0.0), r.get("otros_m2", 0.0), r.get("usos_comunes_m2", 0.0)])
     writer.writerow([])

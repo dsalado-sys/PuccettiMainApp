@@ -190,6 +190,7 @@ class ParametrosRender:
 
         # Sanitiza porcentajes 0..100; suma se valida en el motor.
         pct_muros = max(0.0, min(80.0, float(diseno.pct_muros)))
+        pct_muros_interior = max(0.0, min(80.0, float(getattr(diseno, "pct_muros_interior", 0.0))))
         pct_circulacion_pb = max(0.0, min(50.0, float(diseno.pct_circulacion_pb)))
         pct_circulacion_tipo = max(0.0, min(50.0, float(diseno.pct_circulacion_tipo)))
         pct_nucleo = max(0.0, min(30.0, float(diseno.pct_nucleo)))
@@ -224,6 +225,7 @@ class ParametrosRender:
                 luz_recta_patio_min=self.urbanisticos.luz_recta_patio_min_m,
                 area_patio_min=self.urbanisticos.area_patio_min_m2,
                 pct_muros=pct_muros,
+                pct_muros_interior=pct_muros_interior,
                 pct_circulacion_pb=pct_circulacion_pb,
                 pct_circulacion_tipo=pct_circulacion_tipo,
                 pct_nucleo=pct_nucleo,

@@ -271,14 +271,15 @@
     if (!tablaPlantaBody) return;
     tablaPlantaBody.innerHTML = "";
     if (!filas || !filas.length) {
-      tablaPlantaBody.innerHTML = '<tr><td colspan="12" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
+      tablaPlantaBody.innerHTML = '<tr><td colspan="13" class="rc-vacio">Sin datos. Calcula la capacidad.</td></tr>';
       return;
     }
-    const tot = { c: 0, u: 0, mur: 0, murEst: 0, circ: 0, nuc: 0, pat: 0, loc: 0, otr: 0, com: 0, viv: 0 };
+    const tot = { c: 0, u: 0, mur: 0, murInt: 0, murEst: 0, circ: 0, nuc: 0, pat: 0, loc: 0, otr: 0, com: 0, viv: 0 };
     filas.forEach(r => {
       tot.c += r.construida_m2 || 0;
       tot.u += r.util_viviendas_m2 || 0;
       tot.mur += r.muros_m2 || 0;
+      tot.murInt += r.muros_interior_m2 || 0;
       tot.murEst += r.muros_estimados_m2 || 0;
       tot.circ += r.circulacion_m2 || 0;
       tot.nuc += r.nucleo_m2 || 0;
@@ -299,6 +300,7 @@
         <td>${fmt.m2.format(r.construida_m2)}</td>
         <td>${fmt.m2.format(r.util_viviendas_m2)}</td>
         <td>${fmt.m2.format(r.muros_m2 || 0)}</td>
+        <td>${fmt.m2.format(r.muros_interior_m2 || 0)}</td>
         <td>${fmt.m2.format(r.muros_estimados_m2 || 0)}</td>
         <td>${fmt.m2.format(r.circulacion_m2 || 0)}</td>
         <td>${fmt.m2.format(r.nucleo_m2 || 0)}</td>
@@ -317,6 +319,7 @@
       <td>${fmt.m2.format(tot.c)}</td>
       <td>${fmt.m2.format(tot.u)}</td>
       <td>${fmt.m2.format(tot.mur)}</td>
+      <td>${fmt.m2.format(tot.murInt)}</td>
       <td>${fmt.m2.format(tot.murEst)}</td>
       <td>${fmt.m2.format(tot.circ)}</td>
       <td>${fmt.m2.format(tot.nuc)}</td>
@@ -358,6 +361,7 @@
       tr.dataset.util = r.util_por_unidad_m2 ?? 0;
       tr.dataset.circ = r.circulacion_interior_por_unidad_m2 ?? 0;
       tr.dataset.muros = r.muros_por_unidad_m2 ?? 0;
+      tr.dataset.murosInt = r.muros_interior_por_unidad_m2 ?? 0;
       tr.dataset.estancias = JSON.stringify(r.estancias || []);
       const utilCelda = esReserva
         ? `${fmt.m2.format(r.util_por_unidad_m2 ?? 0)} <small>(${fmt.pct.format(r.pct_util_destinado ?? 0)}% útil)</small>`
@@ -397,6 +401,7 @@
     setT("rc-mu-construida", fmt.m2.format(parseFloat(ds.construida || 0)) + " m²");
     setT("rc-mu-util", fmt.m2.format(parseFloat(ds.util || 0)) + " m²");
     setT("rc-mu-muros", fmt.m2.format(parseFloat(ds.muros || 0)) + " m²");
+    setT("rc-mu-muros-int", fmt.m2.format(parseFloat(ds.murosInt || 0)) + " m²");
 
     // La columna/fila "Computable" (útil − circulación) se muestra en vivienda y
     // en usos turísticos; en local (sin estancias) se oculta. La nota turística y
