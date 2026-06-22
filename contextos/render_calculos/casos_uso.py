@@ -9,6 +9,7 @@ parámetro (DI) y no conocen FastAPI ni SQLAlchemy.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -1160,21 +1161,60 @@ class GuardarRender:
         return self.repo_proyectos.guardar(proyecto)
 
 
+_RE_PLANTA = re.compile(r"Pl[:\s]+([^\s·]+)", re.IGNORECASE)
+
+
+def _plantas_sobre_rasante_en_referencias(loc: dict) -> int:
+    """Nº de plantas sobre rasante DISTINTAS documentadas por las referencias
+    catastrales (subreferencias) de la metaparcela.
+
+    La planta de cada inmueble vive en su cadena `localizacion` ("… · Pl 03 · …"),
+    construida en el adapter del Catastro como `f"Pl {pt}"`. Se cuentan códigos de
+    planta distintos que no sean bajo rasante (los que empiezan por "-"); el sótano
+    se trata aparte vía `plantas_bajo_rasante`. Devuelve 0 si no hay subreferencias
+    con planta legible.
+    """
+    plantas: set[str] = set()
+    for s in loc.get("subreferencias") or []:
+        if not isinstance(s, dict):
+            continue
+        m = _RE_PLANTA.search(str(s.get("localizacion") or ""))
+        if not m:
+            continue
+        codigo = m.group(1).strip().upper()
+        if codigo and not codigo.startswith("-"):
+            plantas.add(codigo)
+    return len(plantas)
+
+
 def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proyecto) -> None:
     """Ajusta los parámetros de partida al edificio catastral EXISTENTE de la parcela.
 
     Para que el modo Rehabilitación arranque encajado con lo que hay (no como una
-    obra nueva genérica): nº de plantas y existencia de sótano se toman del catastro
-    (§2.1). No se llama si el modo ya tiene parámetros propios guardados, así que
-    nunca pisa una edición del usuario.
+    obra nueva genérica): nº de plantas, ático y existencia de sótano se toman del
+    catastro (§2.1). No se llama si el modo ya tiene parámetros propios guardados,
+    así que nunca pisa una edición del usuario.
+
+    Ático: si el edificio tiene X plantas sobre rasante pero las referencias
+    catastrales solo documentan R < X plantas distintas, la superior se considera
+    ático. El motor lo genera ENCIMA de `n_plantas_max`, así que las plantas
+    regulares pasan a X-1 y el total vuelve a X. Si R == X no hay ático.
     """
     loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
     try:
         plantas_sr = loc.get("plantas_sobre_rasante")
-        if plantas_sr is not None and int(plantas_sr) >= 1:
-            params.urbanisticos.n_plantas_max = int(plantas_sr)
+        x = int(plantas_sr) if plantas_sr is not None else None
     except (TypeError, ValueError):
-        pass
+        x = None
+
+    if x is not None and x >= 1:
+        r = _plantas_sobre_rasante_en_referencias(loc)
+        if x >= 2 and 1 <= r < x:
+            params.urbanisticos.n_plantas_max = x - 1
+            params.urbanisticos.tiene_atico = True
+        else:
+            params.urbanisticos.n_plantas_max = x
+
     try:
         plantas_br = loc.get("plantas_bajo_rasante")
         if plantas_br is not None and int(plantas_br) > 0:
