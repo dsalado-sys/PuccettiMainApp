@@ -211,7 +211,6 @@
       set("nm-f-pasc", urb.ancho_min_pasillo_comun_m ?? 1.20);
       set("nm-f-pasv", urb.ancho_min_pasillo_vivienda_m ?? 1.00);
       set("nm-f-puerta", urb.ancho_min_puerta_m ?? 0.80);
-      set("nm-f-pctmuros", urb.pct_muros_normativo ?? 20);
 
       const usos = urb.usos_permitidos || ["residencial"];
       document.querySelectorAll(".nm-f-uso").forEach(cb => {
@@ -256,7 +255,6 @@
         ancho_min_pasillo_comun_m: valof("nm-f-pasc", 1.20),
         ancho_min_pasillo_vivienda_m: valof("nm-f-pasv", 1.00),
         ancho_min_puerta_m: valof("nm-f-puerta", 0.80),
-        pct_muros_normativo: valof("nm-f-pctmuros", 20),
         usos_permitidos: usos,
       },
     };
