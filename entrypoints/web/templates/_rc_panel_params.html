@@ -209,7 +209,7 @@
         <button type="button" class="boton-secundario rc-btn-pequeno" id="rc-btn-superficies">
           Ver / editar mínimos
         </button>
-        <small class="rc-hint">Mínimo de cada estancia por tipología (incluido estudio), según Normativa.</small>
+        <small class="rc-hint">Mínimo de cada estancia por tipología.</small>
       </div>
 
       {# El ático/sótano no editan tipología: heredan la de las plantas tipo. #}
@@ -322,7 +322,7 @@
          inmueble suelto no tiene sentido. #}
       {% if not es_inmueble %}
       <label class="rc-campo" data-visible-en-planta="pb">
-        <span class="rc-campo-label">% unidades adaptadas (Normativa)</span>
+        <span class="rc-campo-label">% unidades adaptadas</span>
         <input type="number" name="pct_unidades_adaptadas" min="0" max="100" step="1"
                value="{{ prog.pct_unidades_adaptadas }}" data-bloque="programa">
       </label>
