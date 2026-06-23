@@ -2,34 +2,36 @@
 {% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
 
 {% block contenido %}
+<link rel="stylesheet" href="/static/css/render_calculos.css?v={{ estaticos_version }}" />
 <style>
-  /* Pantalla de selección de modo de Render y cálculos. Estilo embebido para no
-     tocar el CSS global (evita cache-busting). Paleta corporativa Puccetti. */
+  /* Pantalla de selección de modo de Render y cálculos. Reusa la paleta corporativa
+     (variables :root de puccetti.css) y el CSS del módulo (render_calculos.css, que
+     estiliza el modal de normativa). Aquí solo viven los estilos propios .rcl-*. */
   .rcl-preview {
-    border: 1px solid #2a2a2a;
-    border-left: 4px solid #B8960C;
-    border-radius: 8px;
-    padding: 1.1rem 1.3rem;
-    margin: 1.25rem 0 1.75rem;
-    background: #111;
+    background: var(--blanco);
+    border: 1px solid #E4DFCC;
+    border-left: 4px solid var(--dorado);
+    border-radius: var(--radio);
+    padding: 16px 18px;
+    margin: 20px 0 28px;
   }
-  .rcl-preview h2 { margin: 0 0 .15rem; font-size: 1.05rem; }
-  .rcl-preview .rcl-sub { margin: 0 0 .9rem; color: #C9A84C; font-size: .9rem; }
+  .rcl-preview h2 { margin: 0 0 3px; font-size: 17px; }
+  .rcl-preview .rcl-sub { margin: 0 0 14px; color: var(--dorado); font-size: 14px; }
   .rcl-datos {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: .7rem 1.4rem;
+    gap: 12px 22px;
   }
-  .rcl-dato { display: flex; flex-direction: column; gap: .12rem; }
-  .rcl-dato .rcl-k { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #9a9a9a; }
-  .rcl-dato .rcl-v { font-size: .98rem; color: #fff; }
-  .rcl-dato.rcl-destacado .rcl-v { color: #C9A84C; font-weight: 600; font-size: 1.15rem; }
-  .rcl-pregunta { margin: 0 0 .9rem; font-size: 1.05rem; }
+  .rcl-dato { display: flex; flex-direction: column; gap: 2px; }
+  .rcl-dato .rcl-k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #555; }
+  .rcl-dato .rcl-v { font-size: 15px; color: var(--negro); }
+  .rcl-dato.rcl-destacado .rcl-v { color: var(--dorado); font-weight: 600; font-size: 18px; }
+  .rcl-pregunta { margin: 0 0 14px; font-size: 17px; }
   .rcl-modos .tarjeta { cursor: pointer; }
-  .rcl-modos .tarjeta header h2 { display: flex; align-items: center; gap: .5rem; }
+  .rcl-modos .tarjeta header h2 { display: flex; align-items: center; gap: 8px; }
   .rcl-badge {
-    font-size: .65rem; text-transform: uppercase; letter-spacing: .05em;
-    padding: .12rem .5rem; border-radius: 999px; background: #B8960C; color: #0A0A0A;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+    padding: 2px 8px; border-radius: 999px; background: var(--dorado); color: var(--negro);
   }
 </style>
 
@@ -106,7 +108,8 @@
   <p class="rcl-pregunta">¿Qué intervención vas a estudiar?</p>
   <section class="rejilla-modulos rcl-modos">
     {% for m in modos %}
-      <a class="tarjeta" href="/modulos/render-calculos?modo={{ m.slug }}">
+      <a class="tarjeta" href="/modulos/render-calculos?modo={{ m.slug }}"
+         data-destino="/modulos/render-calculos?modo={{ m.slug }}">
         <header>
           <h2>{{ m.titulo }}{% if m.badge %} {% endif %}</h2>
         </header>
@@ -119,4 +122,204 @@
   </section>
 
 {% endif %}
+
+{# Modal de selección de normativa — se muestra al entrar a Obra nueva/Rehabilitación si no hay normativa aplicada #}
+<dialog id="rcl-modal-normativa" class="rc-modal" aria-labelledby="rcl-modal-titulo">
+  <article class="rc-modal-card">
+    <header class="rc-modal-header">
+      <h2 id="rcl-modal-titulo">Selecciona la normativa del proyecto</h2>
+      <button type="button" class="rc-modal-cerrar" id="rcl-modal-cerrar" aria-label="Cancelar">×</button>
+    </header>
+    <div class="rc-modal-cuerpo">
+      <p class="rc-modal-ayuda">
+        Antes de empezar, elige la normativa municipal que se aplicará al proyecto.
+        Para crear o editar normativas, ve al módulo
+        <a href="/modulos/normativa-municipal">Normativa municipal</a>.
+      </p>
+      <section class="rc-modal-bloque">
+        <header class="rc-modal-bloque-header">
+          <h3>Normativa a aplicar</h3>
+          <label class="rc-buscador-lupa" aria-label="Buscar carpeta">
+            <span class="rc-icono-lupa" aria-hidden="true">⌕</span>
+            <input type="text" id="rcl-carpeta-buscar" placeholder="Buscar carpeta…" autocomplete="off">
+          </label>
+        </header>
+        <div id="rcl-carpetas-lista" class="rc-carpetas-lista">
+          <p class="rc-vacio">Cargando…</p>
+        </div>
+      </section>
+      <section class="rc-modal-bloque" id="rcl-norm-resumen" hidden>
+        <header class="rc-modal-bloque-header">
+          <h3>Resumen de la normativa seleccionada</h3>
+        </header>
+        <dl class="rc-norm-resumen-lista">
+          <div><dt>Nombre</dt><dd id="rcl-norm-resumen-nombre">—</dd></div>
+          <div><dt>Dirección</dt><dd id="rcl-norm-resumen-direccion">—</dd></div>
+          <div><dt>Coef. edificabilidad</dt><dd id="rcl-norm-resumen-coef">—</dd></div>
+          <div><dt>Ocupación máx.</dt><dd id="rcl-norm-resumen-ocup">—</dd></div>
+          <div><dt>Plantas máx.</dt><dd id="rcl-norm-resumen-plantas">—</dd></div>
+          <div><dt>Retranq. fachada</dt><dd id="rcl-norm-resumen-rfach">—</dd></div>
+          <div><dt>Retranq. linderos</dt><dd id="rcl-norm-resumen-rlind">—</dd></div>
+        </dl>
+        <div class="rc-modal-acciones">
+          <button type="button" id="rcl-norm-aplicar" class="boton-primario">
+            Aplicar y continuar
+          </button>
+        </div>
+      </section>
+    </div>
+  </article>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+  const normativaAplicada = {{ normativa_aplicada | tojson if normativa_aplicada else 'null' }};
+  const modal = document.getElementById("rcl-modal-normativa");
+  const API_NORM = "/modulos/normativa-municipal";
+  const ESTADO = { carpetas: [], filtro: "", seleccionada: null };
+  let pendingDestino = null;
+
+  // Interceptar clics en los modos
+  document.querySelectorAll(".rcl-modos [data-destino]").forEach(a => {
+    a.addEventListener("click", e => {
+      e.preventDefault();
+      pendingDestino = a.dataset.destino;
+      if (!normativaAplicada) {
+        abrirModal();
+      } else {
+        location.href = pendingDestino;
+      }
+    });
+  });
+
+  function abrirModal() {
+    if (!modal) return;
+    ESTADO.seleccionada = null;
+    ocultarResumen();
+    if (typeof modal.showModal === "function") modal.showModal();
+    else modal.setAttribute("open", "");
+    cargarCarpetas();
+  }
+
+  document.getElementById("rcl-modal-cerrar").addEventListener("click", () => modal.close());
+
+  document.getElementById("rcl-norm-aplicar").addEventListener("click", async () => {
+    if (!ESTADO.seleccionada) { return; }
+    await aplicarYNavegar(ESTADO.seleccionada);
+  });
+
+  const inpBuscar = document.getElementById("rcl-carpeta-buscar");
+  inpBuscar.addEventListener("input", () => {
+    ESTADO.filtro = inpBuscar.value.trim();
+    repintarCarpetas();
+  });
+
+  async function cargarCarpetas() {
+    try {
+      const r = await fetch(`${API_NORM}/carpetas`);
+      if (!r.ok) return;
+      const d = await r.json();
+      ESTADO.carpetas = d.carpetas || [];
+      repintarCarpetas();
+    } catch (e) { /* silencioso */ }
+  }
+
+  function repintarCarpetas() {
+    const cont = document.getElementById("rcl-carpetas-lista");
+    if (!cont) return;
+    const filtro = ESTADO.filtro.toLowerCase();
+    const items = filtro
+      ? ESTADO.carpetas.filter(c => c.nombre.toLowerCase().includes(filtro))
+      : ESTADO.carpetas;
+    cont.innerHTML = "";
+    if (!items.length) {
+      cont.innerHTML = filtro
+        ? '<p class="rc-vacio">Ninguna carpeta coincide.</p>'
+        : '<p class="rc-vacio">Aún no hay normativas. Créalas en el módulo «Normativa municipal».</p>';
+      return;
+    }
+    for (const c of items) {
+      const det = document.createElement("details");
+      det.className = "rc-carpeta";
+      const sum = document.createElement("summary");
+      sum.innerHTML = `<span class="rc-carpeta-nombre">${c.nombre}</span>`;
+      det.appendChild(sum);
+      const ul = document.createElement("ul");
+      ul.className = "rc-carpeta-normativas";
+      ul.innerHTML = '<li class="rc-vacio">Cargando…</li>';
+      det.appendChild(ul);
+      det.addEventListener("toggle", () => {
+        if (det.open) cargarNormativas(c.id, ul);
+      });
+      cont.appendChild(det);
+    }
+  }
+
+  async function cargarNormativas(carpetaId, ul) {
+    try {
+      const r = await fetch(`${API_NORM}/carpetas/${carpetaId}/normativas`);
+      if (!r.ok) { ul.innerHTML = '<li class="rc-vacio">Error.</li>'; return; }
+      const d = await r.json();
+      const items = d.normativas || [];
+      ul.innerHTML = "";
+      if (!items.length) { ul.innerHTML = '<li class="rc-vacio">Carpeta vacía.</li>'; return; }
+      for (const n of items) {
+        const li = document.createElement("li");
+        li.className = "rc-carpeta-normativa-item";
+        if (ESTADO.seleccionada && ESTADO.seleccionada.id === n.id) li.classList.add("rc-norm-seleccionada");
+        li.dataset.id = n.id;
+        li.innerHTML = `<button type="button" class="rc-carpeta-cargar">
+            <strong>${n.nombre}</strong><small>${n.direccion || "—"}</small>
+          </button>`;
+        li.querySelector(".rc-carpeta-cargar").addEventListener("click", () => seleccionarNormativa(n.id));
+        ul.appendChild(li);
+      }
+    } catch (e) { ul.innerHTML = '<li class="rc-vacio">Error al cargar.</li>'; }
+  }
+
+  async function seleccionarNormativa(id) {
+    try {
+      const r = await fetch(`${API_NORM}/normativas/${id}`);
+      if (!r.ok) return;
+      const data = await r.json();
+      ESTADO.seleccionada = data;
+      pintarResumen(data);
+      document.querySelectorAll(".rc-norm-seleccionada").forEach(el => el.classList.remove("rc-norm-seleccionada"));
+      const li = document.querySelector(`[data-id="${id}"]`);
+      if (li) li.classList.add("rc-norm-seleccionada");
+    } catch (e) { /* silencioso */ }
+  }
+
+  function pintarResumen(data) {
+    const urb = data.urbanisticos || {};
+    document.getElementById("rcl-norm-resumen-nombre").textContent = data.nombre || "—";
+    document.getElementById("rcl-norm-resumen-direccion").textContent = data.direccion || "—";
+    document.getElementById("rcl-norm-resumen-coef").textContent = urb.coeficiente_edificabilidad != null ? urb.coeficiente_edificabilidad : "—";
+    document.getElementById("rcl-norm-resumen-ocup").textContent = urb.ocupacion_maxima_pct != null ? urb.ocupacion_maxima_pct + " %" : "—";
+    document.getElementById("rcl-norm-resumen-plantas").textContent = urb.n_plantas_max != null ? urb.n_plantas_max : "—";
+    document.getElementById("rcl-norm-resumen-rfach").textContent = urb.retranqueo_fachada_m != null ? urb.retranqueo_fachada_m + " m" : "—";
+    document.getElementById("rcl-norm-resumen-rlind").textContent = urb.retranqueo_linderos_m != null ? urb.retranqueo_linderos_m + " m" : "—";
+    document.getElementById("rcl-norm-resumen").hidden = false;
+  }
+
+  function ocultarResumen() {
+    ESTADO.seleccionada = null;
+    const r = document.getElementById("rcl-norm-resumen");
+    if (r) r.hidden = true;
+  }
+
+  async function aplicarYNavegar(data) {
+    try {
+      await fetch("/modulos/render-calculos/aplicar-normativa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: data.id, nombre: data.nombre, urbanisticos: data.urbanisticos || {} }),
+      });
+    } catch (e) { /* continuar de todas formas */ }
+    modal.close();
+    location.href = pendingDestino;
+  }
+})();
+</script>
 {% endblock %}

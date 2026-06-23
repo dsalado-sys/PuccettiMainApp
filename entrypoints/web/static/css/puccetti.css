@@ -44,22 +44,6 @@ button { font-family: inherit; cursor: pointer; }
 .marca-nombre { font-weight: 700; letter-spacing: 0.35em; font-size: 18px; color: var(--dorado); }
 .marca-claim { font-size: 11px; color: var(--gris-medio); letter-spacing: 0.12em; text-transform: uppercase; }
 
-.contexto-sesion { display: flex; gap: 12px; align-items: center; }
-.chip {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--gris-borde);
-  font-size: 13px;
-}
-.chip-etiqueta { color: var(--gris-medio); text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
-.chip-valor { color: var(--blanco); font-weight: 600; }
-.chip-proyecto.chip-vacio { color: var(--gris-medio); font-style: italic; }
-.chip-rol .chip-valor { color: var(--dorado-claro); }
-
 /* ── Contenido ──────────────────────────────────────────────── */
 .contenido {
   max-width: 1180px;
@@ -75,29 +59,6 @@ button { font-family: inherit; cursor: pointer; }
   letter-spacing: -0.01em;
 }
 .hero p { color: #4a4a4a; margin: 0; font-size: 15px; }
-/* ── Barra de sesión (selector rol / proyecto) ──────────────── */
-.barra-sesion {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  align-items: center;
-  padding: 14px 18px;
-  background: var(--blanco);
-  border: 1px solid #E4DFCC;
-  border-radius: var(--radio);
-  margin-bottom: 32px;
-}
-.form-en-linea { display: inline-flex; gap: 8px; align-items: center; }
-.form-en-linea label { font-size: 12px; color: #555; text-transform: uppercase; letter-spacing: 0.1em; }
-.form-en-linea select {
-  font-family: inherit;
-  font-size: 14px;
-  padding: 6px 10px;
-  border: 1px solid #C9C5B5;
-  border-radius: var(--radio);
-  background: var(--blanco);
-}
-.form-en-linea select:focus { outline: 2px solid var(--dorado); outline-offset: 1px; }
 
 /* ── Rejilla de módulos ─────────────────────────────────────── */
 .rejilla-modulos {

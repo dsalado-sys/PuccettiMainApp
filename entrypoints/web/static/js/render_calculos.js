@@ -23,6 +23,7 @@
   // a partir de su construida. No hay envolvente, canvas ni tabs de planta: el cálculo
   // va a /estancias y la columna derecha es una sola tabla de estancias.
   const esInmueble = modoActivo === "inmueble";
+  const normativaAplicadaProyecto = window.__RC_NORMATIVA_APLICADA__ || null;
 
   const canvasEl = document.getElementById("rc-canvas");
   const brujulaEl = document.getElementById("rc-brujula");
@@ -793,6 +794,12 @@
   // Aquí solo se elige una normativa archivada y se inyecta al form del proyecto.
   const API_NORM = "/modulos/normativa-municipal";
   const ESTADO_NORM = { carpetas: [], filtro: "", seleccionada: null, aplicada: null };
+  let normativaObligatoria = false;
+
+  if (normativaAplicadaProyecto) {
+    ESTADO_NORM.aplicada = normativaAplicadaProyecto;
+    if (btnNormativa) btnNormativa.textContent = `Normativa: ${normativaAplicadaProyecto.nombre}`;
+  }
 
   if (btnNormativa && modal) {
     btnNormativa.addEventListener("click", () => {
@@ -815,6 +822,21 @@
       ESTADO_NORM.filtro = inpBuscar.value.trim();
       repintarCarpetasNormativa();
     });
+  }
+
+  if (!esInmueble && modal) {
+    modal.addEventListener("cancel", e => {
+      if (normativaObligatoria) e.preventDefault();
+    });
+    if (!normativaAplicadaProyecto) {
+      normativaObligatoria = true;
+      const cerrar = document.getElementById("rc-modal-cerrar");
+      if (cerrar) cerrar.hidden = true;
+      if (typeof modal.showModal === "function") modal.showModal();
+      else modal.setAttribute("open", "");
+      ocultarResumenNormativa();
+      refrescarCarpetasNormativa();
+    }
   }
 
   async function refrescarCarpetasNormativa() {
@@ -949,6 +971,18 @@
     modal.close();
     mostrarToast(`Normativa "${data.nombre}" aplicada`);
     recalcularAuto();
+    // Persistir en el proyecto (fire and forget)
+    fetch("/modulos/render-calculos/aplicar-normativa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: data.id, nombre: data.nombre, urbanisticos: urb }),
+    });
+    if (btnNormativa) btnNormativa.textContent = `Normativa: ${data.nombre}`;
+    if (normativaObligatoria) {
+      normativaObligatoria = false;
+      const cerrar = document.getElementById("rc-modal-cerrar");
+      if (cerrar) cerrar.hidden = false;
+    }
   }
 
   // ─── Modal "Combinaciones de dormitorios" (§2.5 — apartamentos) ───────

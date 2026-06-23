@@ -49,7 +49,7 @@
 }
 .vb-badge-dorado { background: rgba(184, 150, 12, 0.12); border-color: var(--dorado); color: var(--dorado); }
 .vb-badge-gris { background: var(--gris-suave); color: var(--gris-medio); border-color: #DDD8C5; }
-.vb-badge-fuente { background: rgba(184, 150, 12, 0.08); border-color: var(--dorado-claro); color: var(--negro); }
+.vb-badge-fuente { background: rgba(184, 150, 12, 0.08); border-color: var(--dorado); color: var(--negro); }
 
 /* ── Datos parcela ────────────────────────────────────────────── */
 .vb-dl {
@@ -63,7 +63,7 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #777;
+  color: #555;
   margin-bottom: 3px;
 }
 .vb-dl dd { margin: 0; font-size: 15px; font-weight: 600; color: var(--negro); }
@@ -124,7 +124,7 @@
   background: var(--blanco);
 }
 .vb-campo input:focus { outline: 2px solid var(--dorado); outline-offset: 1px; }
-.vb-hint { font-size: 11px; color: #888; }
+.vb-hint { font-size: 11px; color: #666; line-height: 1.4; }
 
 .vb-avanzado {
   margin-top: 8px;
@@ -153,14 +153,17 @@
   flex-wrap: wrap;
 }
 .vb-toast {
-  font-size: 13px;
-  color: var(--dorado);
-  font-weight: 600;
+  font-size: 12px;
+  color: #444;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--blanco);
+  border: 1px solid #E4DFCC;
   opacity: 0;
-  transition: opacity 200ms;
+  transition: opacity 200ms ease;
 }
 .vb-toast.vb-toast-on { opacity: 1; }
-.vb-toast.vb-toast-error { color: var(--error); }
+.vb-toast.vb-toast-error { color: var(--error); border-color: var(--error); }
 
 /* ── KPIs ─────────────────────────────────────────────────────── */
 .vb-kpis {
@@ -181,7 +184,7 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #777;
+  color: #555;
   font-weight: 600;
 }
 .vb-kpi-valor {

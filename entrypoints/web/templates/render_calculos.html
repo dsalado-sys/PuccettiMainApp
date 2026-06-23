@@ -11,7 +11,7 @@
 <section class="hero rc-hero">
   <div class="rc-hero-titulo">
     <h1>{% if modo %}{{ modo.titulo }}{% else %}{{ tarjeta.titulo }}{% endif %}</h1>
-    <p style="margin:.15rem 0 0;font-size:.85rem;opacity:.8;">
+    <p class="rc-hero-sub">
       {{ tarjeta.titulo }} · <a href="/modulos/render-calculos">cambiar modo</a>
     </p>
   </div>
@@ -62,6 +62,12 @@
     <span class="rc-cat-v">{{ catastro.n_patios }}</span>
   </span>
   {% endif %}
+</section>
+{% endif %}
+
+{% if aviso_atico %}
+<section class="rc-aviso-atico rc-aviso-atico--{{ aviso_atico.color }}" role="status">
+  {{ aviso_atico.texto }}
 </section>
 {% endif %}
 
@@ -245,6 +251,7 @@
 {% include "_rc_modal_superficies.html" %}
 {% include "_rc_modal_minimos.html" %}
 
+<script>window.__RC_NORMATIVA_APLICADA__ = {{ normativa_aplicada | tojson if normativa_aplicada else 'null' }};</script>
 <script src="/static/js/rc_brujula.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_canvas.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/render_calculos.js?v={{ estaticos_version }}" defer></script>
