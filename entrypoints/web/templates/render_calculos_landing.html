@@ -2,34 +2,36 @@
 {% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
 
 {% block contenido %}
+<link rel="stylesheet" href="/static/css/render_calculos.css?v={{ estaticos_version }}" />
 <style>
-  /* Pantalla de selección de modo de Render y cálculos. Estilo embebido para no
-     tocar el CSS global (evita cache-busting). Paleta corporativa Puccetti. */
+  /* Pantalla de selección de modo de Render y cálculos. Reusa la paleta corporativa
+     (variables :root de puccetti.css) y el CSS del módulo (render_calculos.css, que
+     estiliza el modal de normativa). Aquí solo viven los estilos propios .rcl-*. */
   .rcl-preview {
-    border: 1px solid #2a2a2a;
-    border-left: 4px solid #B8960C;
-    border-radius: 8px;
-    padding: 1.1rem 1.3rem;
-    margin: 1.25rem 0 1.75rem;
-    background: #111;
+    background: var(--blanco);
+    border: 1px solid #E4DFCC;
+    border-left: 4px solid var(--dorado);
+    border-radius: var(--radio);
+    padding: 16px 18px;
+    margin: 20px 0 28px;
   }
-  .rcl-preview h2 { margin: 0 0 .15rem; font-size: 1.05rem; }
-  .rcl-preview .rcl-sub { margin: 0 0 .9rem; color: #C9A84C; font-size: .9rem; }
+  .rcl-preview h2 { margin: 0 0 3px; font-size: 17px; }
+  .rcl-preview .rcl-sub { margin: 0 0 14px; color: var(--dorado); font-size: 14px; }
   .rcl-datos {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: .7rem 1.4rem;
+    gap: 12px 22px;
   }
-  .rcl-dato { display: flex; flex-direction: column; gap: .12rem; }
-  .rcl-dato .rcl-k { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #9a9a9a; }
-  .rcl-dato .rcl-v { font-size: .98rem; color: #fff; }
-  .rcl-dato.rcl-destacado .rcl-v { color: #C9A84C; font-weight: 600; font-size: 1.15rem; }
-  .rcl-pregunta { margin: 0 0 .9rem; font-size: 1.05rem; }
+  .rcl-dato { display: flex; flex-direction: column; gap: 2px; }
+  .rcl-dato .rcl-k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #555; }
+  .rcl-dato .rcl-v { font-size: 15px; color: var(--negro); }
+  .rcl-dato.rcl-destacado .rcl-v { color: var(--dorado); font-weight: 600; font-size: 18px; }
+  .rcl-pregunta { margin: 0 0 14px; font-size: 17px; }
   .rcl-modos .tarjeta { cursor: pointer; }
-  .rcl-modos .tarjeta header h2 { display: flex; align-items: center; gap: .5rem; }
+  .rcl-modos .tarjeta header h2 { display: flex; align-items: center; gap: 8px; }
   .rcl-badge {
-    font-size: .65rem; text-transform: uppercase; letter-spacing: .05em;
-    padding: .12rem .5rem; border-radius: 999px; background: #B8960C; color: #0A0A0A;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+    padding: 2px 8px; border-radius: 999px; background: var(--dorado); color: var(--negro);
   }
 </style>
 

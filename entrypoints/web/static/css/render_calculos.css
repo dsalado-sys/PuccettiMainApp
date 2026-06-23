@@ -380,14 +380,14 @@
 /* Buscador con lupa */
 .rc-buscador-lupa {
   display: flex; align-items: center; gap: 4px;
-  border: 1px solid #C9C5B0; border-radius: 4px;
+  border: 1px solid #C9C5B5; border-radius: 4px;
   padding: 2px 6px; background: var(--blanco);
 }
 .rc-buscador-lupa:focus-within { border-color: var(--dorado); }
 .rc-icono-lupa { color: var(--dorado); font-size: 14px; line-height: 1; }
 .rc-buscador-lupa input[type="text"] {
   font-size: 12px; padding: 4px 6px; border: none; outline: none;
-  background: transparent; min-width: 160px;
+  background: transparent; min-width: 140px;
 }
 
 .rc-carpetas-lista { display: flex; flex-direction: column; gap: 6px; }
@@ -431,6 +431,19 @@
 .rc-carpeta-norm-borrar {
   background: var(--blanco); border: 1px solid var(--error); color: var(--error);
   border-radius: 3px; padding: 0 8px; cursor: pointer;
+}
+
+/* Resumen de la normativa seleccionada (modal) — par clave/valor con el mismo
+   tratamiento que .rc-inmueble-datos para coherencia entre fichas de datos. */
+.rc-norm-resumen-lista { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin: 0; }
+.rc-norm-resumen-lista > div { display: flex; flex-direction: column; }
+.rc-norm-resumen-lista dt { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; }
+.rc-norm-resumen-lista dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; color: var(--negro); }
+
+/* Item de normativa seleccionado en el modal — mismo realce dorado que
+   .nm-normativa-activa en el módulo Normativa municipal. */
+.rc-carpeta-normativa-item.rc-norm-seleccionada .rc-carpeta-cargar {
+  border-color: var(--dorado); background: rgba(184,150,12,0.16);
 }
 
 /* ── Toast ───────────────────────────────────────────────────────── */
@@ -495,7 +508,7 @@
 .rc-sup-tabla th:last-child, .rc-sup-tabla td:last-child { text-align: right; width: 120px; }
 .rc-sup-input {
   width: 90px; text-align: right; padding: 4px 8px;
-  border: 1px solid #DDD; border-radius: var(--radio); font-size: 13px;
+  border: 1px solid #C9C5B5; border-radius: var(--radio); font-size: 13px;
 }
 .rc-sup-input:focus { outline: 2px solid var(--dorado); outline-offset: 1px; }
 .rc-sup-input:disabled { background: var(--gris-suave); color: var(--gris-medio); }
@@ -544,7 +557,7 @@
   font-size: 12px;
   color: var(--gris-medio, #6e6a60);
   background: rgba(184, 150, 12, 0.08);
-  border-left: 3px solid #B8960C;
+  border-left: 3px solid var(--dorado);
   border-radius: 2px;
   font-style: italic;
 }
@@ -603,13 +616,13 @@
 .rc-mu-est-tabla td { padding: 4px 8px; }
 .rc-mu-est-tabla .rc-num { text-align: right; font-weight: 600; white-space: nowrap; }
 .rc-mu-est-tabla tbody tr { background: var(--gris-suave, #f4f2ec); }
-.rc-mu-est-tabla tbody tr + tr { border-top: 2px solid #fff; }
+.rc-mu-est-tabla tbody tr + tr { border-top: 2px solid var(--blanco); }
 .rc-mu-est-tabla tbody td:first-child { border-left: 3px solid #ccc; }
-.rc-mu-estancia-publica td:first-child { border-left-color: #B8960C; }
+.rc-mu-estancia-publica td:first-child { border-left-color: var(--dorado); }
 .rc-mu-estancia-privada td:first-child { border-left-color: #6e6a60; }
 .rc-mu-estancia-servicio td:first-child { border-left-color: #9b9b9b; }
 .rc-mu-estancia-circulacion { font-style: italic; }
-.rc-mu-estancia-circulacion td:first-child { border-left-color: #c9a84c; }
+.rc-mu-estancia-circulacion td:first-child { border-left-color: var(--dorado-claro); }
 .rc-mu-est-nombre { font-weight: 600; }
 .rc-mu-est-cat { font-size: 11px; color: #6e6a60; text-transform: uppercase; }
 .rc-mu-nocomp { color: #9b9b9b; font-style: italic; font-weight: 400; }
