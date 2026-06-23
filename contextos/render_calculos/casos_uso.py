@@ -9,6 +9,7 @@ parámetro (DI) y no conocen FastAPI ni SQLAlchemy.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -1160,27 +1161,144 @@ class GuardarRender:
         return self.repo_proyectos.guardar(proyecto)
 
 
-def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proyecto) -> None:
-    """Ajusta los parámetros de partida al edificio catastral EXISTENTE de la parcela.
+_RE_PLANTA = re.compile(r"Pl[:\s]+([^\s·]+)", re.IGNORECASE)
 
-    Para que el modo Rehabilitación arranque encajado con lo que hay (no como una
-    obra nueva genérica): nº de plantas y existencia de sótano se toman del catastro
-    (§2.1). No se llama si el modo ya tiene parámetros propios guardados, así que
-    nunca pisa una edición del usuario.
+
+def _hay_referencia_en_atico(loc: dict) -> bool:
+    """True si alguna subreferencia catastral está en planta ático.
+
+    El Catastro entrega el código de planta de cada inmueble en `loint.pt`, que el
+    adapter guarda en la cadena `localizacion` como `f"Pl {pt}"` ("… · Pl AT · …").
+    El código de ático es `AT`; basta detectarlo (lectura directa del dato, sin
+    heurísticas de conteo). El sótano se trata aparte vía `plantas_bajo_rasante`.
+    """
+    for s in loc.get("subreferencias") or []:
+        if not isinstance(s, dict):
+            continue
+        m = _RE_PLANTA.search(str(s.get("localizacion") or ""))
+        if m and m.group(1).strip().upper() == "AT":
+            return True
+    return False
+
+
+def _plantas_documentadas_sobre_rasante(loc: dict) -> int:
+    """Nº de códigos de planta sobre rasante DISTINTOS en las subreferencias
+    (excluye sótanos: códigos que empiezan por '-'). 0 si no hay subreferencias."""
+    plantas: set[str] = set()
+    for s in loc.get("subreferencias") or []:
+        if not isinstance(s, dict):
+            continue
+        m = _RE_PLANTA.search(str(s.get("localizacion") or ""))
+        if m:
+            codigo = m.group(1).strip().upper()
+            if codigo and not codigo.startswith("-"):
+                plantas.add(codigo)
+    return len(plantas)
+
+
+def _clasificar_atico(loc: dict, x: int | None) -> tuple[bool, str]:
+    """Decide si el edificio existente tiene ático y CÓMO se determinó.
+
+    Retorna `(tiene_atico, fuente)` con fuente ∈
+    {"catastro", "calculado", "documentado", "indeterminado"}:
+      - catastro:     alguna subreferencia está en planta `AT` (dato directo, fiable).
+      - calculado:    sin `AT` pero las plantas sobre rasante (X) superan a las
+                      documentadas (R): la planta extra no referenciada se asume ático.
+      - documentado:  sin `AT` y X = R (todas las plantas documentadas, sin ático).
+      - indeterminado: sin `AT` ni datos de planta utilizables (X None o R 0).
+    """
+    if _hay_referencia_en_atico(loc):
+        return True, "catastro"
+    r = _plantas_documentadas_sobre_rasante(loc)
+    if x is None or r == 0:
+        return False, "indeterminado"
+    if x >= 2 and x > r:
+        return True, "calculado"
+    return False, "documentado"
+
+
+def aviso_atico_catastral(proyecto: Proyecto) -> dict | None:
+    """Aviso para la UI sobre la procedencia del ático en rehabilitación.
+
+    Devuelve `None` cuando el dato es fiable (código `AT` directo) o cuando todas
+    las plantas están documentadas y no hay ático. En caso contrario:
+      - "calculado"    → aviso amarillo (el ático se infirió del nº de plantas).
+      - "indeterminado" → aviso naranja (faltan datos: comprobar manualmente).
     """
     loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
     try:
         plantas_sr = loc.get("plantas_sobre_rasante")
-        if plantas_sr is not None and int(plantas_sr) >= 1:
-            params.urbanisticos.n_plantas_max = int(plantas_sr)
+        x = int(plantas_sr) if plantas_sr is not None else None
     except (TypeError, ValueError):
-        pass
+        x = None
+    _, fuente = _clasificar_atico(loc, x)
+    if fuente == "calculado":
+        return {
+            "color": "amarillo",
+            "texto": (
+                "El ático se ha calculado a partir del número de plantas (no consta "
+                "una referencia catastral propia del ático). Verifíquelo."
+            ),
+        }
+    if fuente == "indeterminado":
+        return {"color": "naranja", "texto": "Comprobar información sobre el ático."}
+    return None
+
+
+def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proyecto) -> None:
+    """Ajusta los parámetros de partida al edificio catastral EXISTENTE de la parcela.
+
+    Para que el modo Rehabilitación arranque encajado con lo que hay (no como una
+    obra nueva genérica): nº de plantas, ático y existencia de sótano se toman del
+    catastro (§2.1). No se llama si el modo ya tiene parámetros propios guardados,
+    así que nunca pisa una edición del usuario.
+
+    Ático (ver `_clasificar_atico`): primero por código `AT` directo del Catastro;
+    si no consta, por nº de plantas (X plantas sobre rasante > R documentadas ⇒ la
+    planta extra se asume ático). El motor lo genera ENCIMA de `n_plantas_max`, así
+    que con ático las plantas regulares pasan a X-1 y el total vuelve a X. Cuando el
+    ático se calcula por planta, `aviso_atico_catastral` lo señala para verificación.
+    """
+    loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    try:
+        plantas_sr = loc.get("plantas_sobre_rasante")
+        x = int(plantas_sr) if plantas_sr is not None else None
+    except (TypeError, ValueError):
+        x = None
+
+    if x is not None and x >= 1:
+        tiene_atico, _ = _clasificar_atico(loc, x)
+        if x >= 2 and tiene_atico:
+            params.urbanisticos.n_plantas_max = x - 1
+            params.urbanisticos.tiene_atico = True
+        else:
+            params.urbanisticos.n_plantas_max = x
+
     try:
         plantas_br = loc.get("plantas_bajo_rasante")
         if plantas_br is not None and int(plantas_br) > 0:
             params.urbanisticos.tiene_sotano = True
     except (TypeError, ValueError):
         pass
+
+    # Patios reales del edificio: el motor descuenta la SUMA de `urbanisticos.patios`
+    # en cada planta y el panel los muestra editables ("Patios del edificio"). En
+    # rehabilitación partimos de los patios catastrales (anillos interiores de la
+    # huella, §2.1) en lugar del patio sintético por defecto.
+    #   - patios_m2 con áreas → se usan esas (1 entrada por patio).
+    #   - n_patios == 0       → el Catastro confirma que no hay patios (lista vacía).
+    #   - n_patios None       → sin dato del Catastro: se respeta el default.
+    patios_cat = loc.get("patios_m2")
+    if isinstance(patios_cat, list) and patios_cat:
+        areas = [
+            round(float(a), 1)
+            for a in patios_cat
+            if isinstance(a, (int, float)) and float(a) > 0
+        ]
+        if areas:
+            params.urbanisticos.patios = areas
+    elif loc.get("n_patios") == 0:
+        params.urbanisticos.patios = []
 
 
 def parametros_desde_proyecto(
@@ -1332,10 +1450,25 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
     if getattr(cap, "patio_sin_espacio", False):
         alertas.append(Alerta(
             "aviso", "Normativa",
-            f"No hay espacio en la planta para el patio interior mínimo "
+            f"No hay espacio en la planta para los patios definidos "
             f"({cap.area_patio_min_m2:.2f} m²) tras descontar muros, circulación y "
             f"núcleo. Reduce la ocupación de la planta o la superficie de patio.",
         ))
+
+    # Cada patio definido debe alcanzar el área mínima exigida (`area_patio_min_m2`).
+    area_patio_min = float(params.urbanisticos.area_patio_min_m2 or 0.0)
+    if area_patio_min > 0:
+        pequenos = [
+            float(a) for a in params.urbanisticos.patios
+            if 0 < float(a) < area_patio_min - 1e-6
+        ]
+        if pequenos:
+            listado = ", ".join(f"{a:.2f}" for a in pequenos)
+            alertas.append(Alerta(
+                "aviso", "Normativa",
+                f"{len(pequenos)} patio(s) por debajo del área mínima "
+                f"({area_patio_min:.2f} m²): {listado} m². Aumenta su superficie.",
+            ))
 
     if cap.util_objetivo_viv_m2 > 0:
         util_total_habitable = sum(

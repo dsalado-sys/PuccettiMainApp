@@ -23,6 +23,7 @@
   // a partir de su construida. No hay envolvente, canvas ni tabs de planta: el cálculo
   // va a /estancias y la columna derecha es una sola tabla de estancias.
   const esInmueble = modoActivo === "inmueble";
+  const normativaAplicadaProyecto = window.__RC_NORMATIVA_APLICADA__ || null;
 
   const canvasEl = document.getElementById("rc-canvas");
   const brujulaEl = document.getElementById("rc-brujula");
@@ -114,6 +115,10 @@
         } else {
           bloques[bloque][nombre] = inp.value;
         }
+      } else if (nombre === "patios") {
+        // Lista de superficies de patio (una por input). Vacíos se saltan.
+        if (!Array.isArray(bloques[bloque].patios)) bloques[bloque].patios = [];
+        if (inp.value !== "") bloques[bloque].patios.push(Number(inp.value));
       } else {
         const valor = inp.value === "" ? null : (inp.type === "number" ? Number(inp.value) : inp.value);
         bloques[bloque][nombre] = valor;
@@ -121,6 +126,7 @@
     });
     // Aseguramos que los arrays existan aunque ninguna casilla esté marcada
     if (!bloques.urbanisticos.usos_permitidos) bloques.urbanisticos.usos_permitidos = [];
+    if (!bloques.urbanisticos.patios) bloques.urbanisticos.patios = [];
     if (!bloques.programa.tipologias_extra) bloques.programa.tipologias_extra = [];
     if (!bloques.programa_tipo.tipologias_extra) bloques.programa_tipo.tipologias_extra = [];
     return bloques;
@@ -788,6 +794,12 @@
   // Aquí solo se elige una normativa archivada y se inyecta al form del proyecto.
   const API_NORM = "/modulos/normativa-municipal";
   const ESTADO_NORM = { carpetas: [], filtro: "", seleccionada: null, aplicada: null };
+  let normativaObligatoria = false;
+
+  if (normativaAplicadaProyecto) {
+    ESTADO_NORM.aplicada = normativaAplicadaProyecto;
+    if (btnNormativa) btnNormativa.textContent = `Normativa: ${normativaAplicadaProyecto.nombre}`;
+  }
 
   if (btnNormativa && modal) {
     btnNormativa.addEventListener("click", () => {
@@ -810,6 +822,21 @@
       ESTADO_NORM.filtro = inpBuscar.value.trim();
       repintarCarpetasNormativa();
     });
+  }
+
+  if (!esInmueble && modal) {
+    modal.addEventListener("cancel", e => {
+      if (normativaObligatoria) e.preventDefault();
+    });
+    if (!normativaAplicadaProyecto) {
+      normativaObligatoria = true;
+      const cerrar = document.getElementById("rc-modal-cerrar");
+      if (cerrar) cerrar.hidden = true;
+      if (typeof modal.showModal === "function") modal.showModal();
+      else modal.setAttribute("open", "");
+      ocultarResumenNormativa();
+      refrescarCarpetasNormativa();
+    }
   }
 
   async function refrescarCarpetasNormativa() {
@@ -944,6 +971,18 @@
     modal.close();
     mostrarToast(`Normativa "${data.nombre}" aplicada`);
     recalcularAuto();
+    // Persistir en el proyecto (fire and forget)
+    fetch("/modulos/render-calculos/aplicar-normativa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: data.id, nombre: data.nombre, urbanisticos: urb }),
+    });
+    if (btnNormativa) btnNormativa.textContent = `Normativa: ${data.nombre}`;
+    if (normativaObligatoria) {
+      normativaObligatoria = false;
+      const cerrar = document.getElementById("rc-modal-cerrar");
+      if (cerrar) cerrar.hidden = false;
+    }
   }
 
   // ─── Modal "Combinaciones de dormitorios" (§2.5 — apartamentos) ───────
@@ -1503,6 +1542,31 @@
     if (!btn) return;
     const wrap = btn.closest(".rc-tipologia-extra");
     if (wrap) wrap.remove();
+    calcularConDebounce();
+  });
+
+  // "+ Añadir patio": inserta una fila de patio vacía en la lista.
+  const btnPatioAdd = document.getElementById("rc-patio-add");
+  const listaPatios = document.getElementById("rc-patios-lista");
+  if (btnPatioAdd && listaPatios) {
+    btnPatioAdd.addEventListener("click", () => {
+      const fila = document.createElement("div");
+      fila.className = "rc-patio-fila";
+      fila.innerHTML =
+        '<input type="number" name="patios" min="0" step="0.5" placeholder="m²"' +
+        ' data-bloque="urbanisticos" aria-label="Área del patio (m²)">' +
+        '<button type="button" class="rc-patio-quitar" aria-label="Quitar patio">×</button>';
+      listaPatios.appendChild(fila);
+      fila.querySelector("input").focus();
+    });
+  }
+
+  // Delegación global: click en × elimina la fila de patio.
+  form.addEventListener("click", ev => {
+    const btn = ev.target.closest(".rc-patio-quitar");
+    if (!btn) return;
+    const fila = btn.closest(".rc-patio-fila");
+    if (fila) fila.remove();
     calcularConDebounce();
   });
 

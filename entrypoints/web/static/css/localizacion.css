@@ -229,6 +229,8 @@
   outline: none;
 }
 .loc-card:active { transform: translateY(0); }
+/* Anillo de foco accesible al navegar por teclado (coherente con inputs/botones). */
+.loc-card:focus-visible { outline: 2px solid var(--dorado); outline-offset: 2px; }
 /* Inmueble elegido dentro de la metaparcela. */
 .loc-card-elegida {
   border-color: var(--dorado);
@@ -297,7 +299,7 @@
 }
 .loc-tabla-lados th { text-transform: uppercase; font-size: 10px; color: #666; letter-spacing: 0.1em; }
 .loc-tabla-lados select {
-  padding: 4px 6px; font-size: 12px; border-radius: 4px; border: 1px solid #C9C5B5; background: var(--blanco);
+  padding: 4px 6px; font-size: 12px; border-radius: var(--radio); border: 1px solid #C9C5B5; background: var(--blanco);
 }
 .loc-tabla-lados tr.activo { background: rgba(184, 150, 12, 0.12); }
 .loc-tabla-lados tr.deshabilitada select { pointer-events: none; opacity: 0.6; }
