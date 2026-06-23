@@ -27,6 +27,10 @@ class ParcelaRaw:
     superficie_construida_total_m2: float | None = None
     plantas_sobre_rasante: int | None = None
     plantas_bajo_rasante: int | None = None
+    # Patios del edificio existente: nº de patios (anillos interiores de la huella
+    # catastral) y su superficie en m². n_patios=None → el Catastro no dio el dato.
+    n_patios: int | None = None
+    patios_m2: tuple[float, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

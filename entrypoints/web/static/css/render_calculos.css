@@ -115,6 +115,24 @@
 .rc-tip-quitar:hover { background: rgba(140,42,31,0.08); }
 .rc-btn-pequeno { font-size: 12px; padding: 4px 10px; }
 
+/* ─── Patios del edificio (lista editable) ───────────────────────── */
+.rc-patios { border: 1px solid #E4DFCC; border-radius: var(--radio); padding: 10px 12px; }
+.rc-patios legend { font-size: 11px; color: #555; padding: 0 6px; text-transform: uppercase; letter-spacing: 0.1em; }
+.rc-patios-lista { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.rc-patio-fila { display: flex; align-items: center; gap: 6px; }
+.rc-patio-fila input { flex: 1; }
+.rc-patio-quitar {
+  background: var(--blanco); border: 1px solid var(--error); color: var(--error);
+  border-radius: 3px; width: 28px; height: 28px; cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0;
+}
+.rc-patio-quitar:hover { background: rgba(140,42,31,0.08); }
+.rc-patio-add {
+  background: var(--blanco); border: 1px solid var(--dorado); color: #555;
+  border-radius: 3px; font-size: 12px; padding: 4px 10px; cursor: pointer;
+}
+.rc-patio-add:hover { background: rgba(184,150,12,0.08); }
+
 /* ─── Apartamentos turísticos: nº de dormitorios + combinación (§2.5) ── */
 .rc-ndorms { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .rc-ndorms input[type="number"] { width: 72px; }

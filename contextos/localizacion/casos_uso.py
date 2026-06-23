@@ -90,6 +90,8 @@ def _construir_parcela(
         superficie_construida_total_m2=raw.superficie_construida_total_m2,
         plantas_sobre_rasante=raw.plantas_sobre_rasante,
         plantas_bajo_rasante=raw.plantas_bajo_rasante,
+        n_patios=raw.n_patios,
+        patios_m2=tuple(raw.patios_m2),
     )
 
 
@@ -394,6 +396,15 @@ def restaurar_parcela_desde_proyecto(datos: dict) -> Parcela | None:
             except (TypeError, ValueError):
                 return None
 
+        def _tupla_flotantes(v):
+            salida: list[float] = []
+            for x in (v or []):
+                try:
+                    salida.append(float(x))
+                except (TypeError, ValueError):
+                    continue
+            return tuple(salida)
+
         return Parcela(
             referencia_catastral=str(datos["referencia_catastral"]),
             direccion=str(datos.get("direccion") or ""),
@@ -416,6 +427,8 @@ def restaurar_parcela_desde_proyecto(datos: dict) -> Parcela | None:
             ),
             plantas_sobre_rasante=_entero_o_none(datos.get("plantas_sobre_rasante")),
             plantas_bajo_rasante=_entero_o_none(datos.get("plantas_bajo_rasante")),
+            n_patios=_entero_o_none(datos.get("n_patios")),
+            patios_m2=_tupla_flotantes(datos.get("patios_m2")),
         )
     except Exception:
         return None
@@ -461,6 +474,8 @@ def asociar_a_proyecto(parcela: Parcela, proyecto: Proyecto) -> None:
             "superficie_construida_total_m2": parcela.superficie_construida_total_m2,
             "plantas_sobre_rasante": parcela.plantas_sobre_rasante,
             "plantas_bajo_rasante": parcela.plantas_bajo_rasante,
+            "n_patios": parcela.n_patios,
+            "patios_m2": list(parcela.patios_m2),
             "centroide_lonlat": list(parcela.centroide_lonlat),
             "contorno_wgs84": [list(p) for p in parcela.contorno_wgs84],
             "contorno_simplificado_wgs84": [

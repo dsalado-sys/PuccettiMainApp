@@ -16,6 +16,8 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 import requests
+from shapely.geometry import Polygon
+from shapely.ops import unary_union
 from ESCatastroLib import MetaParcela, ParcelaCatastral
 from ESCatastroLib.utils import listar_calles as escl_listar_calles
 from ESCatastroLib.utils.exceptions import ErrorServidorCatastro
@@ -44,6 +46,9 @@ CATASTRO_DNPRC = (
 URL_INSPIRE_WFS = (
     "https://ovc.catastro.meh.es/INSPIRE/wfsCP.aspx"
 )
+# WFS de edificios (Buildings) INSPIRE. Stored query GetBuildingByParcel: huella
+# del edificio de una parcela, con sus patios como anillos interiores (gml:interior).
+URL_INSPIRE_WFS_BU = "https://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx"
 
 UA = "Puccetti/0.1"
 TIMEOUT = 30.0
@@ -343,6 +348,12 @@ def _parcela_a_raw(
     except Exception as exc:  # noqa: BLE001 — endpoint WFS opcional
         log.warning("No se pudo obtener nº plantas para %s: %s", rc14, exc)
 
+    # Patios del edificio: anillos interiores de la huella catastral (WFS BU). Una
+    # llamada extra best-effort; se persiste con la parcela y se muestra en el modo
+    # Rehabilitación ("Patios del edificio"). Nunca bloquea la localización.
+    res_patios = _patios_por_rc(rc14)
+    n_patios, patios_m2 = res_patios if res_patios is not None else (None, ())
+
     return ParcelaRaw(
         referencia_catastral=rc14,
         direccion=direccion,
@@ -357,6 +368,8 @@ def _parcela_a_raw(
         superficie_construida_total_m2=sup_construida,
         plantas_sobre_rasante=plantas_sup,
         plantas_bajo_rasante=plantas_inf,
+        n_patios=n_patios,
+        patios_m2=patios_m2,
     )
 
 
@@ -396,6 +409,160 @@ def _parsear_polygons_gml(xml_text: str) -> list[list[tuple[float, float]]]:
             pares.append(pares[0])
         contornos.append(pares)
     return contornos
+
+
+# ── Patios del edificio (WFS BU)  ────────────────────────────────────────────
+# Detección de patios ABIERTOS (entrantes del contorno, no huecos) por cierre
+# morfológico de la huella: `buffer(+r).buffer(-r)` rellena las bocas de hasta
+# ~2·r. Con r=2.5 m se captan patios de luces abiertos (boca ≤ ~5 m) y se dejan
+# fuera las concavidades anchas (esquinas en L, retranqueos), que NO son patio.
+_PATIO_ABIERTO_RADIO_M = 2.5
+_PATIO_AREA_MIN_M2 = 4.0  # área mínima de un patio abierto (descarta slivers)
+
+
+def _area_anillo_m2(coords: list[tuple[float, float]]) -> float:
+    """Área (fórmula del agrimensor / shoelace) de un anillo cerrado expresado en
+    un CRS métrico (EPSG:25830) → m². El sentido del anillo es indiferente: se
+    devuelve el valor absoluto. 0.0 si el anillo es degenerado."""
+    n = len(coords)
+    if n < 4:  # un anillo cerrado tiene mínimo 4 vértices (3 + el repetido)
+        return 0.0
+    acum = 0.0
+    for i in range(n - 1):
+        x1, y1 = coords[i]
+        x2, y2 = coords[i + 1]
+        acum += x1 * y2 - x2 * y1
+    return abs(acum) / 2.0
+
+
+def _coords_de_poslist(poslist: ET.Element | None) -> list[tuple[float, float]]:
+    """(x, y) de un ``gml:posList`` respetando ``srsDimension`` (2D, o 3D → se
+    descarta la Z). Lista vacía si no hay texto o no parsea."""
+    if poslist is None or not (poslist.text or "").strip():
+        return []
+    try:
+        dim = int(poslist.get("srsDimension") or "2")
+    except ValueError:
+        dim = 2
+    if dim not in (2, 3):
+        dim = 2
+    valores = re.split(r"\s+", poslist.text.strip())
+    try:
+        return [
+            (float(valores[i]), float(valores[i + 1]))
+            for i in range(0, len(valores) - (dim - 1), dim)
+        ]
+    except (ValueError, IndexError):
+        return []
+
+
+def _poslist_en(elem: ET.Element) -> ET.Element | None:
+    for ns_uri in _GML_NS.values():
+        pl = elem.find(f".//{{{ns_uri}}}posList")
+        if pl is not None:
+            return pl
+    return None
+
+
+def _patios_abiertos_m2(exteriores: list[list[tuple[float, float]]]) -> list[float]:
+    """Patios ABIERTOS: entrantes de boca estrecha en la huella (recortes del
+    contorno, no huecos). El Catastro no los marca como ``gml:interior``, así que
+    se detectan por cierre morfológico (ver constantes arriba). Devuelve el área
+    (m²) de cada uno por encima del mínimo."""
+    poligonos = []
+    for coords in exteriores:
+        if len(coords) >= 4:
+            poly = Polygon(coords)
+            if poly.is_valid and not poly.is_empty:
+                poligonos.append(poly)
+    if not poligonos:
+        return []
+    try:
+        huella = unary_union(poligonos)
+        r = _PATIO_ABIERTO_RADIO_M
+        cierre = huella.buffer(r, join_style=2).buffer(-r, join_style=2)
+        dif = cierre.difference(huella)
+    except Exception:  # noqa: BLE001 — geometría degenerada → sin patios abiertos
+        return []
+    geoms = getattr(dif, "geoms", [dif])
+    return [
+        g.area for g in geoms
+        if getattr(g, "geom_type", "") == "Polygon" and g.area >= _PATIO_AREA_MIN_M2
+    ]
+
+
+def _parsear_patios_gml(xml_text: str) -> tuple[int, tuple[float, ...]] | None:
+    """Patios del edificio en la huella catastral (WFS BU), de dos tipos:
+
+    - **Cerrados**: anillos interiores (``gml:interior``) = huecos de la huella.
+    - **Abiertos**: entrantes de boca estrecha en el contorno (patios de luces
+      abiertos a lindero/fachada). El Catastro NO los marca como hueco, así que se
+      detectan por cierre morfológico de la huella.
+
+    Con la respuesta en EPSG:25830 (metros) las áreas salen en m². Devuelve
+    ``(n_patios, areas)`` (cerrados seguidos de abiertos) o ``None`` si el XML no
+    es parseable o es un ``ExceptionReport`` del servidor.
+    """
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return None
+    if root.tag.rsplit("}", 1)[-1].lower() == "exceptionreport":
+        return None
+
+    exteriores: list[list[tuple[float, float]]] = []
+    interiores: list[list[tuple[float, float]]] = []
+    for ns_uri in _GML_NS.values():
+        for ext in root.findall(f".//{{{ns_uri}}}exterior"):
+            exteriores.append(_coords_de_poslist(_poslist_en(ext)))
+        for inter in root.findall(f".//{{{ns_uri}}}interior"):
+            interiores.append(_coords_de_poslist(_poslist_en(inter)))
+
+    areas: list[float] = []
+    # Patios cerrados (huecos): área por shoelace, cualquier tamaño > 0.
+    for coords in interiores:
+        area = _area_anillo_m2(coords)
+        if area > 0:
+            areas.append(area)
+    # Patios abiertos (entrantes de boca estrecha).
+    areas.extend(_patios_abiertos_m2(exteriores))
+
+    return len(areas), tuple(round(a, 1) for a in areas)
+
+
+def _patios_por_rc(rc14: str) -> tuple[int, tuple[float, ...]] | None:
+    """Nº de patios del edificio de la parcela y su superficie (m²), vía WFS BU
+    INSPIRE (stored query ``GetBuildingByParcel``). UNA sola petición, en EPSG:25830
+    para que las áreas salgan ya en metros.
+
+    *Best-effort*: devuelve ``None`` ante cualquier fallo (red, rate limit, parseo).
+    Los patios NO son críticos para localizar la parcela —el caller sigue sin
+    ellos—, así que el rate limit se traga aquí a propósito: lo señalan las
+    llamadas principales, no este extra (ver feedback_no_quemar_api_catastro).
+    """
+    rc14 = (rc14 or "")[:14]
+    if len(rc14) != 14:
+        return None
+    # URL cruda: el Catastro acepta `STOREDQUERIE_ID` (la usa él mismo) y NO debe
+    # encodearse el ':' del srsName (el WFS de stored queries lo trata literal, igual
+    # que `fetch_parcela_por_rc` del módulo). Por eso no se pasa por `params=`.
+    url = (
+        f"{URL_INSPIRE_WFS_BU}"
+        f"?service=WFS&version=2.0.0&request=GetFeature"
+        f"&STOREDQUERIE_ID=GetBuildingByParcel&refcat={rc14}"
+        f"&srsName=urn:ogc:def:crs:EPSG::25830"
+    )
+    try:
+        resp = requests.get(url, headers={"User-Agent": UA}, timeout=TIMEOUT)
+        _detectar_rate_limit(resp)
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001 — patios opcionales, nunca bloqueantes
+        log.warning("WFS BU patios falló para %s: %s", rc14, exc)
+        return None
+    patios = _parsear_patios_gml(resp.text)
+    if patios is not None:
+        log.info("Patios catastrales de %s: %s", rc14, patios)
+    return patios
 
 
 # ── Adapter ────────────────────────────────────────────────────────────────

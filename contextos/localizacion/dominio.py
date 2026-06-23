@@ -76,6 +76,11 @@ class Parcela:
     superficie_construida_total_m2: float | None = None
     plantas_sobre_rasante: int | None = None
     plantas_bajo_rasante: int | None = None
+    # Patios del edificio existente (anillos interiores de la huella catastral).
+    # n_patios=None → sin dato del Catastro; 0 → sin patios; >0 → nº de patios.
+    # patios_m2: superficie de cada patio en m².
+    n_patios: int | None = None
+    patios_m2: tuple[float, ...] = field(default_factory=tuple)
 
 
 class ParcelaError(Exception):
