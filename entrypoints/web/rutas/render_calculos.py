@@ -29,6 +29,7 @@ from app.contextos.render_calculos.casos_uso import (
     GuardarRender,
     ValidarCumplimiento,
     adaptar_params_a_edificio_existente,
+    aviso_atico_catastral,
     construir_parcela_metrica,
     parametros_desde_proyecto,
 )
@@ -226,6 +227,8 @@ def pantalla(
         # si llega por URL sin inmueble, se ignora y se cae a la pantalla de selección.
         if modo_cfg is not None and modo_cfg.es_inmueble:
             modo_cfg = None
+    datos_rc_proyecto = (proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}) if proyecto else {}
+    normativa_aplicada = datos_rc_proyecto.get("normativa_aplicada")
     if modo_cfg is None:
         return plantillas.TemplateResponse(
             request,
@@ -242,6 +245,7 @@ def pantalla(
                 "puede_editar": puede_acceder(
                     rol, ModuloPuccetti.RENDER_CALCULOS.value, PermisoModulo.EDITAR
                 ),
+                "normativa_aplicada": normativa_aplicada,
             },
         )
 
@@ -261,6 +265,7 @@ def pantalla(
     # Si la parcela tiene municipio conocido, intentamos cargar su PGOU como
     # base de los parámetros urbanísticos.
     pgou_municipio: dict[str, Any] | None = None
+    aviso_atico: dict[str, Any] | None = None
     if proyecto is not None:
         datos_loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
         mun, prov = datos_loc.get("municipio"), datos_loc.get("provincia")
@@ -271,10 +276,12 @@ def pantalla(
                 # Solo aplicamos como defaults si el MODO aún no tiene params guardados.
                 if not tiene_params:
                     params.urbanisticos = normativa
-                    # En rehabilitación, el edificio existente manda sobre el PGOU
-                    # genérico en nº de plantas / sótano.
-                    if es_rehabilitacion:
-                        adaptar_params_a_edificio_existente(params, proyecto)
+        # En rehabilitación sin params propios, el edificio existente manda sobre el
+        # PGOU genérico en nº de plantas / sótano. Se aplica fuera del bloque de
+        # normativa para que funcione aunque no haya PGOU del municipio.
+        if es_rehabilitacion and not tiene_params:
+            adaptar_params_a_edificio_existente(params, proyecto)
+            aviso_atico = aviso_atico_catastral(proyecto)
 
     usos_catalogo = [
         {"value": "vivienda", "label": "Vivienda", "habilitado": True},
@@ -304,6 +311,9 @@ def pantalla(
             "usos_edificio": usos_catalogo,
             # Datos catastrales para la barra siempre visible del módulo.
             "catastro": _preview_parcela(proyecto),
+            # Aviso sobre la procedencia del ático en rehabilitación (o None).
+            "aviso_atico": aviso_atico,
+            "normativa_aplicada": normativa_aplicada,
         },
     )
 
@@ -477,6 +487,28 @@ def guardar(
         proyecto, params, resumen, modo_key=modo_key
     )
     return JSONResponse({"ok": True, "modo": modo_key, "actualizado_en": actualizado.actualizado_en.isoformat()})
+
+
+# ─── Persistir normativa elegida en el aggregate ─────────────────────────────
+@router.post("/aplicar-normativa")
+def aplicar_normativa(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+    repo_proy: ProyectoRepositorio = Depends(repositorio_proyectos),
+):
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    datos_rc = dict(proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {})
+    datos_rc["normativa_aplicada"] = {
+        "id": payload.get("id"),
+        "nombre": payload.get("nombre"),
+        "urbanisticos": payload.get("urbanisticos") or {},
+    }
+    proyecto.fijar_datos(ModuloPuccetti.RENDER_CALCULOS, datos_rc)
+    repo_proy.guardar(proyecto)
+    return JSONResponse({"ok": True})
 
 
 # ─── Normativa municipal: listado + lectura + escritura ─────────────────────

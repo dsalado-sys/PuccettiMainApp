@@ -1164,27 +1164,85 @@ class GuardarRender:
 _RE_PLANTA = re.compile(r"Pl[:\s]+([^\s·]+)", re.IGNORECASE)
 
 
-def _plantas_sobre_rasante_en_referencias(loc: dict) -> int:
-    """Nº de plantas sobre rasante DISTINTAS documentadas por las referencias
-    catastrales (subreferencias) de la metaparcela.
+def _hay_referencia_en_atico(loc: dict) -> bool:
+    """True si alguna subreferencia catastral está en planta ático.
 
-    La planta de cada inmueble vive en su cadena `localizacion` ("… · Pl 03 · …"),
-    construida en el adapter del Catastro como `f"Pl {pt}"`. Se cuentan códigos de
-    planta distintos que no sean bajo rasante (los que empiezan por "-"); el sótano
-    se trata aparte vía `plantas_bajo_rasante`. Devuelve 0 si no hay subreferencias
-    con planta legible.
+    El Catastro entrega el código de planta de cada inmueble en `loint.pt`, que el
+    adapter guarda en la cadena `localizacion` como `f"Pl {pt}"` ("… · Pl AT · …").
+    El código de ático es `AT`; basta detectarlo (lectura directa del dato, sin
+    heurísticas de conteo). El sótano se trata aparte vía `plantas_bajo_rasante`.
     """
+    for s in loc.get("subreferencias") or []:
+        if not isinstance(s, dict):
+            continue
+        m = _RE_PLANTA.search(str(s.get("localizacion") or ""))
+        if m and m.group(1).strip().upper() == "AT":
+            return True
+    return False
+
+
+def _plantas_documentadas_sobre_rasante(loc: dict) -> int:
+    """Nº de códigos de planta sobre rasante DISTINTOS en las subreferencias
+    (excluye sótanos: códigos que empiezan por '-'). 0 si no hay subreferencias."""
     plantas: set[str] = set()
     for s in loc.get("subreferencias") or []:
         if not isinstance(s, dict):
             continue
         m = _RE_PLANTA.search(str(s.get("localizacion") or ""))
-        if not m:
-            continue
-        codigo = m.group(1).strip().upper()
-        if codigo and not codigo.startswith("-"):
-            plantas.add(codigo)
+        if m:
+            codigo = m.group(1).strip().upper()
+            if codigo and not codigo.startswith("-"):
+                plantas.add(codigo)
     return len(plantas)
+
+
+def _clasificar_atico(loc: dict, x: int | None) -> tuple[bool, str]:
+    """Decide si el edificio existente tiene ático y CÓMO se determinó.
+
+    Retorna `(tiene_atico, fuente)` con fuente ∈
+    {"catastro", "calculado", "documentado", "indeterminado"}:
+      - catastro:     alguna subreferencia está en planta `AT` (dato directo, fiable).
+      - calculado:    sin `AT` pero las plantas sobre rasante (X) superan a las
+                      documentadas (R): la planta extra no referenciada se asume ático.
+      - documentado:  sin `AT` y X = R (todas las plantas documentadas, sin ático).
+      - indeterminado: sin `AT` ni datos de planta utilizables (X None o R 0).
+    """
+    if _hay_referencia_en_atico(loc):
+        return True, "catastro"
+    r = _plantas_documentadas_sobre_rasante(loc)
+    if x is None or r == 0:
+        return False, "indeterminado"
+    if x >= 2 and x > r:
+        return True, "calculado"
+    return False, "documentado"
+
+
+def aviso_atico_catastral(proyecto: Proyecto) -> dict | None:
+    """Aviso para la UI sobre la procedencia del ático en rehabilitación.
+
+    Devuelve `None` cuando el dato es fiable (código `AT` directo) o cuando todas
+    las plantas están documentadas y no hay ático. En caso contrario:
+      - "calculado"    → aviso amarillo (el ático se infirió del nº de plantas).
+      - "indeterminado" → aviso naranja (faltan datos: comprobar manualmente).
+    """
+    loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    try:
+        plantas_sr = loc.get("plantas_sobre_rasante")
+        x = int(plantas_sr) if plantas_sr is not None else None
+    except (TypeError, ValueError):
+        x = None
+    _, fuente = _clasificar_atico(loc, x)
+    if fuente == "calculado":
+        return {
+            "color": "amarillo",
+            "texto": (
+                "El ático se ha calculado a partir del número de plantas (no consta "
+                "una referencia catastral propia del ático). Verifíquelo."
+            ),
+        }
+    if fuente == "indeterminado":
+        return {"color": "naranja", "texto": "Comprobar información sobre el ático."}
+    return None
 
 
 def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proyecto) -> None:
@@ -1195,10 +1253,11 @@ def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proy
     catastro (§2.1). No se llama si el modo ya tiene parámetros propios guardados,
     así que nunca pisa una edición del usuario.
 
-    Ático: si el edificio tiene X plantas sobre rasante pero las referencias
-    catastrales solo documentan R < X plantas distintas, la superior se considera
-    ático. El motor lo genera ENCIMA de `n_plantas_max`, así que las plantas
-    regulares pasan a X-1 y el total vuelve a X. Si R == X no hay ático.
+    Ático (ver `_clasificar_atico`): primero por código `AT` directo del Catastro;
+    si no consta, por nº de plantas (X plantas sobre rasante > R documentadas ⇒ la
+    planta extra se asume ático). El motor lo genera ENCIMA de `n_plantas_max`, así
+    que con ático las plantas regulares pasan a X-1 y el total vuelve a X. Cuando el
+    ático se calcula por planta, `aviso_atico_catastral` lo señala para verificación.
     """
     loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
     try:
@@ -1208,8 +1267,8 @@ def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proy
         x = None
 
     if x is not None and x >= 1:
-        r = _plantas_sobre_rasante_en_referencias(loc)
-        if x >= 2 and 1 <= r < x:
+        tiene_atico, _ = _clasificar_atico(loc, x)
+        if x >= 2 and tiene_atico:
             params.urbanisticos.n_plantas_max = x - 1
             params.urbanisticos.tiene_atico = True
         else:
