@@ -56,6 +56,12 @@
     <span class="rc-cat-k">Año construcción</span>
     <span class="rc-cat-v">{{ catastro.anio_construccion if catastro.anio_construccion else "—" }}</span>
   </span>
+  {% if catastro.n_patios is not none %}
+  <span class="rc-cat-item">
+    <span class="rc-cat-k">Patios (Catastro)</span>
+    <span class="rc-cat-v">{{ catastro.n_patios }}</span>
+  </span>
+  {% endif %}
 </section>
 {% endif %}
 

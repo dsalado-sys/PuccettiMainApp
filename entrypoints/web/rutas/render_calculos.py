@@ -150,6 +150,9 @@ def _preview_parcela(proyecto: Proyecto | None) -> dict[str, Any] | None:
         "superficie_construida_total_m2": construida,
         "plantas_sobre_rasante": loc.get("plantas_sobre_rasante"),
         "plantas_bajo_rasante": loc.get("plantas_bajo_rasante"),
+        # Patios del edificio existente (recogidos del Catastro en §2.1).
+        "n_patios": loc.get("n_patios"),
+        "patios_m2": loc.get("patios_m2") or [],
         # Inmueble elegido (escalera·planta·puerta) o "" si no se eligió ninguno.
         "inmueble_localizacion": inm_loc,
         "inmueble_rc": (inm or {}).get("rc") or "",

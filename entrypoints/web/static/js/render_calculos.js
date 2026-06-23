@@ -114,6 +114,10 @@
         } else {
           bloques[bloque][nombre] = inp.value;
         }
+      } else if (nombre === "patios") {
+        // Lista de superficies de patio (una por input). Vacíos se saltan.
+        if (!Array.isArray(bloques[bloque].patios)) bloques[bloque].patios = [];
+        if (inp.value !== "") bloques[bloque].patios.push(Number(inp.value));
       } else {
         const valor = inp.value === "" ? null : (inp.type === "number" ? Number(inp.value) : inp.value);
         bloques[bloque][nombre] = valor;
@@ -121,6 +125,7 @@
     });
     // Aseguramos que los arrays existan aunque ninguna casilla esté marcada
     if (!bloques.urbanisticos.usos_permitidos) bloques.urbanisticos.usos_permitidos = [];
+    if (!bloques.urbanisticos.patios) bloques.urbanisticos.patios = [];
     if (!bloques.programa.tipologias_extra) bloques.programa.tipologias_extra = [];
     if (!bloques.programa_tipo.tipologias_extra) bloques.programa_tipo.tipologias_extra = [];
     return bloques;
@@ -1503,6 +1508,31 @@
     if (!btn) return;
     const wrap = btn.closest(".rc-tipologia-extra");
     if (wrap) wrap.remove();
+    calcularConDebounce();
+  });
+
+  // "+ Añadir patio": inserta una fila de patio vacía en la lista.
+  const btnPatioAdd = document.getElementById("rc-patio-add");
+  const listaPatios = document.getElementById("rc-patios-lista");
+  if (btnPatioAdd && listaPatios) {
+    btnPatioAdd.addEventListener("click", () => {
+      const fila = document.createElement("div");
+      fila.className = "rc-patio-fila";
+      fila.innerHTML =
+        '<input type="number" name="patios" min="0" step="0.5" placeholder="m²"' +
+        ' data-bloque="urbanisticos" aria-label="Área del patio (m²)">' +
+        '<button type="button" class="rc-patio-quitar" aria-label="Quitar patio">×</button>';
+      listaPatios.appendChild(fila);
+      fila.querySelector("input").focus();
+    });
+  }
+
+  // Delegación global: click en × elimina la fila de patio.
+  form.addEventListener("click", ev => {
+    const btn = ev.target.closest(".rc-patio-quitar");
+    if (!btn) return;
+    const fila = btn.closest(".rc-patio-fila");
+    if (fila) fila.remove();
     calcularConDebounce();
   });
 

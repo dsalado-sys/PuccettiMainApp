@@ -136,6 +136,24 @@
         </label>
       </div>
 
+      {# Patios reales del edificio: una superficie por patio. El cálculo descuenta
+         su suma en cada planta; «Luz/Área mín.» de arriba son solo referencia
+         normativa. Inputs con name="patios" → el JS los recoge como array. #}
+      <fieldset class="rc-patios">
+        <legend>Patios del edificio</legend>
+        <div class="rc-patios-lista" id="rc-patios-lista">
+          {% for area in urb.patios %}
+          <div class="rc-patio-fila">
+            <input type="number" name="patios" min="0" step="0.5"
+                   value="{{ area }}" data-bloque="urbanisticos"
+                   aria-label="Área del patio (m²)">
+            <button type="button" class="rc-patio-quitar" aria-label="Quitar patio">×</button>
+          </div>
+          {% endfor %}
+        </div>
+        <button type="button" class="rc-patio-add" id="rc-patio-add">+ Añadir patio</button>
+      </fieldset>
+
       {# Los parámetros de ático y sótano viven ahora en su propio grupo
          (visible en PB + en las pestañas Ático/Sótano). Ver más abajo. #}
     </div>

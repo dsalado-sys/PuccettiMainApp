@@ -9,8 +9,16 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.contextos.render_calculos.geometria.capacidad import calcular_capacidad
-from app.contextos.render_calculos.parametros import ParametrosRender
+from app.contextos.render_calculos.casos_uso import _alertas_capacidad
+from app.contextos.render_calculos.geometria.capacidad import (
+    calcular_capacidad,
+    capacidad_a_dict,
+)
+from app.contextos.render_calculos.parametros import (
+    ParametrosRender,
+    parametros_a_dict,
+    parametros_desde_dict,
+)
 
 
 def _env(huella_m2: float, n_plantas: int = 1) -> SimpleNamespace:
@@ -47,10 +55,63 @@ def test_patio_avisa_cuando_no_cabe_el_minimo():
     assert cap.util_por_planta[0] >= 0.0
 
 
-def test_patio_cero_desactiva_patio_y_aviso():
-    """Con superficie de patio 0 no hay patio ni aviso (el patio es opcional)."""
+def test_sin_patios_desactiva_patio_y_aviso():
+    """Sin patios definidos (lista vacía) no hay patio ni aviso (es opcional).
+
+    El cálculo lo dirige la lista `patios`, no el mínimo normativo
+    `area_patio_min_m2` (que queda solo como referencia de cumplimiento)."""
     params = ParametrosRender()
-    params.urbanisticos.area_patio_min_m2 = 0.0
+    params.urbanisticos.patios = []
     cap = calcular_capacidad(_env(14.0), params.a_parametros_motor())
     assert cap.patio_por_planta[0] == 0.0
     assert cap.patio_sin_espacio is False
+
+
+def test_patio_total_es_la_suma_de_los_patios_definidos():
+    """Con varios patios, cada planta descuenta la SUMA de sus áreas (patinejos
+    que atraviesan todas las plantas). Huella amplia → caben íntegros."""
+    params = ParametrosRender()
+    params.urbanisticos.patios = [10.0, 8.0]
+    cap = calcular_capacidad(_env(400.0, n_plantas=2), params.a_parametros_motor())
+    assert cap.patio_por_planta[0] == 18.0
+    assert cap.patio_por_planta[1] == 18.0
+    d = capacidad_a_dict(cap)
+    assert d["patio_total_m2"] == 36.0          # 18 por planta × 2 plantas
+    assert d["patio_por_planta"] == [18.0, 18.0]
+
+
+def test_parametros_patios_round_trip():
+    """`patios` sobrevive a serializar y volver a parsear; `[]` explícito se respeta."""
+    p = ParametrosRender()
+    p.urbanisticos.patios = [10.0, 8.0]
+    p2 = parametros_desde_dict(parametros_a_dict(p))
+    assert p2.urbanisticos.patios == [10.0, 8.0]
+    p3 = parametros_desde_dict({"urbanisticos": {"patios": []}})
+    assert p3.urbanisticos.patios == []
+
+
+def test_parametros_patios_migracion_legado():
+    """JSON anterior a esta feature (sin clave `patios`) conserva su patio único:
+    se siembra `[area_patio_min_m2]`."""
+    legado = {"urbanisticos": {"area_patio_min_m2": 12.0}}  # sin "patios"
+    p = parametros_desde_dict(legado)
+    assert p.urbanisticos.patios == [12.0]
+
+
+def test_aviso_cuando_un_patio_no_alcanza_el_area_minima():
+    """Si algún patio definido es menor que el área mínima (12), salta el aviso."""
+    params = ParametrosRender()
+    params.urbanisticos.area_patio_min_m2 = 12.0
+    params.urbanisticos.patios = [10.0, 8.0]   # ambos < 12
+    cap = calcular_capacidad(_env(400.0), params.a_parametros_motor())
+    alertas = _alertas_capacidad(cap, params, None)
+    assert any("área mínima" in a.mensaje for a in alertas)
+
+
+def test_sin_aviso_cuando_los_patios_cumplen_el_area_minima():
+    params = ParametrosRender()
+    params.urbanisticos.area_patio_min_m2 = 12.0
+    params.urbanisticos.patios = [12.0, 15.0]  # ambos ≥ 12
+    cap = calcular_capacidad(_env(400.0), params.a_parametros_motor())
+    alertas = _alertas_capacidad(cap, params, None)
+    assert not any("área mínima" in a.mensaje for a in alertas)
