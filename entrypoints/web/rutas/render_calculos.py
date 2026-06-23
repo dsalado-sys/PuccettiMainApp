@@ -29,6 +29,7 @@ from app.contextos.render_calculos.casos_uso import (
     GuardarRender,
     ValidarCumplimiento,
     adaptar_params_a_edificio_existente,
+    aviso_atico_catastral,
     construir_parcela_metrica,
     parametros_desde_proyecto,
 )
@@ -261,6 +262,7 @@ def pantalla(
     # Si la parcela tiene municipio conocido, intentamos cargar su PGOU como
     # base de los parámetros urbanísticos.
     pgou_municipio: dict[str, Any] | None = None
+    aviso_atico: dict[str, Any] | None = None
     if proyecto is not None:
         datos_loc = proyecto.datos_por_modulo.get(ModuloPuccetti.LOCALIZACION.value) or {}
         mun, prov = datos_loc.get("municipio"), datos_loc.get("provincia")
@@ -271,10 +273,12 @@ def pantalla(
                 # Solo aplicamos como defaults si el MODO aún no tiene params guardados.
                 if not tiene_params:
                     params.urbanisticos = normativa
-                    # En rehabilitación, el edificio existente manda sobre el PGOU
-                    # genérico en nº de plantas / sótano.
-                    if es_rehabilitacion:
-                        adaptar_params_a_edificio_existente(params, proyecto)
+        # En rehabilitación sin params propios, el edificio existente manda sobre el
+        # PGOU genérico en nº de plantas / sótano. Se aplica fuera del bloque de
+        # normativa para que funcione aunque no haya PGOU del municipio.
+        if es_rehabilitacion and not tiene_params:
+            adaptar_params_a_edificio_existente(params, proyecto)
+            aviso_atico = aviso_atico_catastral(proyecto)
 
     usos_catalogo = [
         {"value": "vivienda", "label": "Vivienda", "habilitado": True},
@@ -304,6 +308,8 @@ def pantalla(
             "usos_edificio": usos_catalogo,
             # Datos catastrales para la barra siempre visible del módulo.
             "catastro": _preview_parcela(proyecto),
+            # Aviso sobre la procedencia del ático en rehabilitación (o None).
+            "aviso_atico": aviso_atico,
         },
     )
 

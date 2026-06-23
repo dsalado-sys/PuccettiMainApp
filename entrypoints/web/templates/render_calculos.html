@@ -65,6 +65,12 @@
 </section>
 {% endif %}
 
+{% if aviso_atico %}
+<section class="rc-aviso-atico rc-aviso-atico--{{ aviso_atico.color }}" role="status">
+  {{ aviso_atico.texto }}
+</section>
+{% endif %}
+
 {% if estado == "sin_proyecto" %}
   <section class="aviso aviso-info">
     <h2>No hay proyecto activo</h2>

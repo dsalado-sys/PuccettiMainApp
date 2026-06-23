@@ -660,6 +660,17 @@
 .rc-aviso-exceso strong { color: #5e4600; }
 .rc-aviso-exceso-icono { font-size: 18px; line-height: 1; }
 
+/* ── Aviso de procedencia del ático (rehabilitación) ───────────────────
+   Amarillo = ático calculado por nº de plantas (verificar).
+   Naranja  = sin datos: comprobar manualmente. */
+.rc-aviso-atico {
+  border-radius: var(--radio);
+  padding: 10px 16px; margin: 0 0 16px;
+  font-size: 13px; line-height: 1.4; border-left: 4px solid;
+}
+.rc-aviso-atico--amarillo { background: #FFF8E1; border-color: #E5B800; color: #5C4A00; }
+.rc-aviso-atico--naranja  { background: #FFF1E0; border-color: #E8730C; color: #7A3B00; }
+
 /* ── Modal de exceso ────────────────────────────────────────────────── */
 .rc-modal-exceso-card { max-width: 520px; width: 92vw; }
 .rc-exceso-sub { font-size: 13px; color: #555; line-height: 1.5; margin: 8px 0 0; }
