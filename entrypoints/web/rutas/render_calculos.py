@@ -227,6 +227,8 @@ def pantalla(
         # si llega por URL sin inmueble, se ignora y se cae a la pantalla de selección.
         if modo_cfg is not None and modo_cfg.es_inmueble:
             modo_cfg = None
+    datos_rc_proyecto = (proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}) if proyecto else {}
+    normativa_aplicada = datos_rc_proyecto.get("normativa_aplicada")
     if modo_cfg is None:
         return plantillas.TemplateResponse(
             request,
@@ -243,6 +245,7 @@ def pantalla(
                 "puede_editar": puede_acceder(
                     rol, ModuloPuccetti.RENDER_CALCULOS.value, PermisoModulo.EDITAR
                 ),
+                "normativa_aplicada": normativa_aplicada,
             },
         )
 
@@ -310,6 +313,7 @@ def pantalla(
             "catastro": _preview_parcela(proyecto),
             # Aviso sobre la procedencia del ático en rehabilitación (o None).
             "aviso_atico": aviso_atico,
+            "normativa_aplicada": normativa_aplicada,
         },
     )
 
@@ -483,6 +487,28 @@ def guardar(
         proyecto, params, resumen, modo_key=modo_key
     )
     return JSONResponse({"ok": True, "modo": modo_key, "actualizado_en": actualizado.actualizado_en.isoformat()})
+
+
+# ─── Persistir normativa elegida en el aggregate ─────────────────────────────
+@router.post("/aplicar-normativa")
+def aplicar_normativa(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+    repo_proy: ProyectoRepositorio = Depends(repositorio_proyectos),
+):
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    datos_rc = dict(proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {})
+    datos_rc["normativa_aplicada"] = {
+        "id": payload.get("id"),
+        "nombre": payload.get("nombre"),
+        "urbanisticos": payload.get("urbanisticos") or {},
+    }
+    proyecto.fijar_datos(ModuloPuccetti.RENDER_CALCULOS, datos_rc)
+    repo_proy.guardar(proyecto)
+    return JSONResponse({"ok": True})
 
 
 # ─── Normativa municipal: listado + lectura + escritura ─────────────────────

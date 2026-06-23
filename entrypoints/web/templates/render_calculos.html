@@ -251,6 +251,7 @@
 {% include "_rc_modal_superficies.html" %}
 {% include "_rc_modal_minimos.html" %}
 
+<script>window.__RC_NORMATIVA_APLICADA__ = {{ normativa_aplicada | tojson if normativa_aplicada else 'null' }};</script>
 <script src="/static/js/rc_brujula.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_canvas.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/render_calculos.js?v={{ estaticos_version }}" defer></script>
