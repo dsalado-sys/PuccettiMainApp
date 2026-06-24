@@ -111,6 +111,41 @@ def _normativa_de_referencia(
     return None
 
 
+# Campos urbanísticos que controla cada sección del panel. Cuando un modo OCULTA una
+# sección (`render_modos.secciones_ocultas`), esos campos no se renderizan y por tanto
+# no viajan en el payload; `parametros_desde_dict` los dejaría en el default del motor.
+# Para esos campos ocultos la fuente de verdad es la NORMATIVA, no el default.
+_URB_POR_SECCION: dict[str, tuple[str, ...]] = {
+    "edificabilidad": ("usar_coeficiente_edificabilidad", "coeficiente_edificabilidad"),
+    "ocupacion": ("ocupacion_maxima_pct",),
+    "retranqueos": ("retranqueo_fachada_m", "retranqueo_linderos_m"),
+}
+
+
+def _aplicar_normativa_secciones_ocultas(
+    params,
+    payload: dict[str, Any],
+    normativa,
+) -> None:
+    """Rellena desde la NORMATIVA los parámetros urbanísticos que el modo oculta.
+
+    Rehabilitación oculta del panel la edificabilidad, la ocupación y los retranqueos
+    (`render_modos`: los fija el PGOU y no se editan en este modo). Al no aparecer en el
+    panel no llegan en el payload, así que `parametros_desde_dict` caería a los defaults
+    del motor (p. ej. coeficiente 2.5), ignorando el planeamiento del municipio. Aquí se
+    sustituyen por los de la normativa de referencia (PGOU del municipio o la aplicada al
+    proyecto). Los campos VISIBLES en el modo (nº de plantas, ático/sótano, patios) se
+    siguen tomando del panel / edificio existente. Sin normativa se respeta lo de partida.
+    """
+    modo_cfg = modo_o_none(payload.get("modo"))
+    if modo_cfg is None or normativa is None:
+        return
+    for seccion in modo_cfg.secciones_ocultas:
+        for attr in _URB_POR_SECCION.get(seccion, ()):
+            if hasattr(normativa, attr):
+                setattr(params.urbanisticos, attr, getattr(normativa, attr))
+
+
 def _estado_pantalla(proyecto: Proyecto | None) -> str:
     if proyecto is None:
         return "sin_proyecto"
@@ -338,9 +373,10 @@ def preview(
         raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
 
     params = parametros_desde_dict(payload)
+    normativa = _normativa_de_referencia(payload, parcela, repo_norm)
+    _aplicar_normativa_secciones_ocultas(params, payload, normativa)
     resultado = CalcularEnvolvente().ejecutar(parcela, params)
 
-    normativa = _normativa_de_referencia(payload, parcela, repo_norm)
     env = resultado.get("envolvente") or {}
     parc = resultado.get("parcela") or {}
     alertas_extra = ValidarCumplimiento().ejecutar(
@@ -375,6 +411,8 @@ def calcular(
         raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
 
     params = parametros_desde_dict(payload)
+    normativa = _normativa_de_referencia(payload, parcela, repo_norm)
+    _aplicar_normativa_secciones_ocultas(params, payload, normativa)
     # §2.5 — selección temporal de combinación de dormitorios (apartamentos). El
     # slug no se persiste: solo recalcula esta respuesta con esa combinación.
     combo_override = payload.get("combo_dormitorios") or None
@@ -388,7 +426,6 @@ def calcular(
     )
     resultado = caso_uso.ejecutar(parcela, params, combo_override=combo_override)
 
-    normativa = _normativa_de_referencia(payload, parcela, repo_norm)
     env = resultado.get("envolvente") or {}
     parc = resultado.get("parcela") or {}
     alertas_extra = ValidarCumplimiento().ejecutar(

@@ -47,11 +47,12 @@ class CatalogoHotelApartamentoSQLAlchemy:
         return out
 
     def util_objetivo(self, categoria: str, tipologia: str) -> float | None:
-        """m² útiles objetivo por unidad (Σ mínimos de las estancias × 1.15).
+        """m² útiles objetivo por unidad (Σ mínimos de la unidad × 1.15).
 
-        Suma el `min_m2` editable de cada estancia de la unidad, de modo que un
-        mínimo editado se refleja en el objetivo (antes leía `max_m2_util` de una
-        fila al azar, que no se actualizaba al editar). None si no hay filas.
+        Suma el `min_m2` editable de las estancias propias de la tipología
+        (dormitorio + baño, o estudio + baño) y, para las unidades con dormitorio,
+        el salón-comedor común de la categoría (fila única, A1.2). Un mínimo
+        editado se refleja en el objetivo. None si no hay filas para la tipología.
         """
         filas = self._session.scalars(
             select(AnexoIHotelApartamentoORM)
@@ -61,15 +62,21 @@ class CatalogoHotelApartamentoSQLAlchemy:
         if not filas:
             return None
         base = sum(float(f.min_m2) for f in filas)
+        if tipologia in ("individual", "doble", "triple", "cuadruple"):
+            salon = self._session.get(
+                AnexoIHotelApartamentoORM, (categoria, "salon_comedor", "salon_comedor"))
+            if salon is not None:
+                base += float(salon.min_m2)
         return round(base * 1.15, 2)
 
     def consolidadas_hotel_apartamento(self) -> dict:
         """Mínimos editables de BBDD en la forma de las constantes del motor (A1.2).
 
         `programa_hotel_apartamento.config_desde_repo` lo empaqueta en su config.
-        Mapeo (excluye `comunes_*`): `dormitorio_1` → `MIN_DORMITORIO_HAP[tip][cat]`;
-        `salon_comedor` del estudio → `MIN_ESTUDIO_HAP[cat]`; `salon_comedor` de la
-        doble → `MIN_SALON_COMEDOR_HAP[cat]`; `bano` → `MIN_BANO_HAP[cat]`.
+        Filas atomizadas (excluye `comunes_*`): `dormitorio` →
+        `MIN_DORMITORIO_HAP[tip][cat]`; `estudio` → `MIN_ESTUDIO_HAP[cat]`; la fila
+        única `salon_comedor` → `MIN_SALON_COMEDOR_HAP[cat]`; `bano` →
+        `MIN_BANO_HAP[cat]`.
         """
         filas = self._session.scalars(select(AnexoIHotelApartamentoORM)).all()
         if not filas:
@@ -82,15 +89,14 @@ class CatalogoHotelApartamentoSQLAlchemy:
             if str(f.categoria).startswith("comunes"):
                 continue
             cat, tip, est = f.categoria, f.tipologia, f.estancia
-            if est == "dormitorio_1" and tip in ("individual", "doble", "triple", "cuadruple"):
+            if est == "dormitorio" and tip in ("individual", "doble", "triple", "cuadruple"):
                 dorm.setdefault(tip, {})[cat] = float(f.min_m2)
+            elif est == "estudio":
+                estudio[cat] = float(f.min_m2)
+            elif est == "salon_comedor":
+                salon[cat] = float(f.min_m2)
             elif est == "bano":
                 bano[cat] = float(f.min_m2)
-            elif est == "salon_comedor":
-                if tip == "estudio":
-                    estudio[cat] = float(f.min_m2)
-                elif tip == "doble":
-                    salon[cat] = float(f.min_m2)
         out: dict = {}
         if dorm:
             out["MIN_DORMITORIO_HAP"] = dorm

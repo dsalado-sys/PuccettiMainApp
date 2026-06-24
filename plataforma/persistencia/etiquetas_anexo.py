@@ -38,6 +38,9 @@ _ORDEN_TIPOLOGIA: dict[str, int] = {
     "3d": 3, "triple": 3,
     "4d": 4, "cuadruple": 4,
     "multiple": 5,
+    # Salón-comedor común de la unidad (hotel-apartamento, A1.2): tras las
+    # ocupaciones y antes de las áreas comunes del establecimiento.
+    "salon_comedor": 6,
 }
 
 
@@ -54,7 +57,7 @@ def etiqueta_estancia(nombre: str) -> str:
 
 def _orden_estancia(nombre: str) -> tuple[int, int]:
     fijo = {"salon_comedor": 0, "salon": 0, "salon_cocina": 1, "espacio_principal": 2,
-            "habitacion": 0, "cocina": 3, "aseo": 4}
+            "habitacion": 0, "dormitorio": 0, "estudio": 0, "cocina": 3, "aseo": 4}
     if nombre in fijo:
         return (fijo[nombre], 0)
     if nombre.startswith("dormitorio_"):

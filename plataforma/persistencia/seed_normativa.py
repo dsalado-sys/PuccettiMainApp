@@ -285,25 +285,47 @@ def sembrar_anexo_i_apartamentos_conjuntos(session: Session, forzar: bool = Fals
 
 # ─── Anexo I.2 — hoteles-apartamento (categorías por estrellas) ────────────
 def _filas_anexo_i_hotel_apartamento() -> list[tuple[str, str, str, float, float]]:
+    """Filas del Anexo I.2, atomizadas como el Anexo I.1 del hotel: una entrada
+    por tipo de espacio tabulado en A1.2 (4 dormitorios por ocupación + estudio +
+    el salón-comedor común a la unidad), más el baño DERIVADO por unidad (réplica
+    de la Habitación + Baño del hotel). El **salón-comedor es una sola fila** por
+    categoría (común a todas las ocupaciones); no se repite por tipología, así que
+    editarlo una vez basta. El útil máximo de cada fila es el apartamento completo
+    (salón + dormitorio + baño), que da holgura al editar sin romper el invariante.
+    """
     from app.contextos.render_calculos.geometria.programa_hotel_apartamento import (
-        programa_hotel_apartamento,
-        areas_sociales_obligatorias_hap,
         ESTRELLAS,
-        TIPOLOGIAS,
+        MIN_DORMITORIO_HAP,
+        MIN_ESTUDIO_HAP,
+        MIN_SALON_COMEDOR_HAP,
+        MIN_BANO_HAP,
+        AREA_SOCIAL_POR_UA_HAP,
     )
 
     filas: list[tuple[str, str, str, float, float]] = []
     for star in ESTRELLAS:
-        for tip in TIPOLOGIAS:
-            estancias = programa_hotel_apartamento(tip, star, 0.0)
-            base = round(sum(e.area_min_m2 for e in estancias), 2)
-            for e in estancias:
-                filas.append((star, tip, e.nombre, e.area_min_m2, base))
+        salon = MIN_SALON_COMEDOR_HAP[star]
+        bano = MIN_BANO_HAP[star]
+        # Dormitorios por ocupación: cada unidad = Dormitorio + Baño.
+        for tip in ("individual", "doble", "triple", "cuadruple"):
+            dorm = MIN_DORMITORIO_HAP[tip][star]
+            apt = round(salon + dorm + bano, 2)
+            filas.append((star, tip, "dormitorio", dorm, apt))
+            filas.append((star, tip, "bano", bano, apt))
+        # Estudio: espacio único (salón-dormitorio) + baño.
+        estudio = MIN_ESTUDIO_HAP[star]
+        apt_est = round(estudio + bano, 2)
+        filas.append((star, "estudio", "estudio", estudio, apt_est))
+        filas.append((star, "estudio", "bano", bano, apt_est))
+        # Salón-comedor (hasta 4 personas): UNA fila común de la unidad (A1.2).
+        apt_max = round(salon + MIN_DORMITORIO_HAP["cuadruple"][star] + bano, 2)
+        filas.append((star, "salon_comedor", "salon_comedor", salon, apt_max))
 
-    # Áreas sociales por u.a. (= Hotel del mismo nº de estrellas).
+    # Áreas sociales por u.a. (= Hotel del mismo nº de estrellas, A1.1).
     for star in ESTRELLAS:
-        for servicio, m2 in areas_sociales_obligatorias_hap(5, star).items():
-            filas.append((f"comunes_{star}", "comunes", servicio, m2, m2))
+        por_ua = AREA_SOCIAL_POR_UA_HAP[star]
+        if por_ua > 0:
+            filas.append((f"comunes_{star}", "comunes", "area_social_por_ua", por_ua, por_ua))
     return filas
 
 

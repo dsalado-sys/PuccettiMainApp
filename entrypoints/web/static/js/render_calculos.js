@@ -561,6 +561,10 @@
   // ─── Payload con normativa de referencia ──────────────────────────────
   function payloadConNormativa(bloques) {
     const p = { ...bloques };
+    // El modo permite al backend aplicar reglas propias del modo: en rehabilitación,
+    // los parámetros urbanísticos ocultos del panel (edificabilidad, ocupación,
+    // retranqueos) se toman de la normativa en vez de los defaults del motor.
+    p.modo = modoActivo;
     if (ESTADO_NORM.aplicada && ESTADO_NORM.aplicada.urbanisticos) {
       p.normativa_referencia = { urbanisticos: ESTADO_NORM.aplicada.urbanisticos };
     }
@@ -1353,7 +1357,8 @@
     estudio: "Estudio", "1d": "1 dormitorio", "2d": "2 dormitorios",
     "3d": "3 dormitorios", "4d": "4 o más dormitorios",
     individual: "Individual", doble: "Doble", triple: "Triple",
-    cuadruple: "Cuádruple", multiple: "Múltiple (albergue)", comunes: "Áreas comunes",
+    cuadruple: "Cuádruple", multiple: "Múltiple (albergue)",
+    salon_comedor: "Salón-comedor (común de la unidad)", comunes: "Áreas comunes",
   };
   const SELECT_CATEGORIA_MIN = {
     apartamentos_turisticos: "categoria_apartamentos",
