@@ -825,6 +825,7 @@
       if (typeof modal.showModal === "function") modal.showModal();
       else modal.setAttribute("open", "");
       ocultarResumenNormativa();
+      pintarNormativaActual();
       refrescarCarpetasNormativa();
     });
     document.getElementById("rc-modal-cerrar").addEventListener("click", () => modal.close());
@@ -960,6 +961,64 @@
     ESTADO_NORM.seleccionada = null;
     const r = document.getElementById("rc-norm-resumen");
     if (r) r.hidden = true;
+  }
+
+  // Etiqueta + unidad de cada parámetro urbanístico de una normativa, en orden de
+  // lectura. Cubre todos los campos que captura el editor de Normativa municipal.
+  const NORM_CAMPOS = [
+    ["coeficiente_edificabilidad", "Coef. edificabilidad", " m²t/m²s"],
+    ["ocupacion_maxima_pct", "Ocupación máx.", " %"],
+    ["n_plantas_max", "Plantas máx.", ""],
+    ["retranqueo_fachada_m", "Retranq. fachada", " m"],
+    ["retranqueo_linderos_m", "Retranq. linderos", " m"],
+    ["retranqueo_atico_m", "Retranq. ático", " m"],
+    ["ancho_min_fachada_m", "Fachada mín.", " m"],
+    ["pct_unidades_adaptadas_min", "% adaptadas mín.", " %"],
+    ["luz_recta_patio_min_m", "Luz mín. patio", " m"],
+    ["area_patio_min_m2", "Área mín. patio", " m²"],
+    ["diametro_max_vestibulo_m", "Ø máx. vestíbulo", " m"],
+    ["espesor_muro_medianero_max_m", "Muro medianero máx.", " m"],
+    ["espesor_separacion_unidades_max_m", "Separación uds. máx.", " m"],
+    ["espesor_tabique_min_m", "Tabique mín.", " m"],
+    ["ancho_min_pasillo_comun_m", "Pasillo común mín.", " m"],
+    ["ancho_min_pasillo_vivienda_m", "Pasillo vivienda mín.", " m"],
+    ["ancho_min_puerta_m", "Puerta mín.", " m"],
+  ];
+
+  // Pinta (solo lectura) la normativa que el proyecto ya tiene aplicada al abrir
+  // el modal, para ver de un vistazo cuál está aplicada y con TODOS sus parámetros.
+  // Es informativo: muestra todo lo que define la normativa, sin filtrar por modo
+  // (a diferencia del panel de cálculo). Si no hay ninguna aplicada, oculta el bloque.
+  function pintarNormativaActual() {
+    const box = document.getElementById("rc-norm-actual");
+    if (!box) return;
+    const a = ESTADO_NORM.aplicada;
+    if (!a) { box.hidden = true; return; }
+    const urb = a.urbanisticos || {};
+    const nombreEl = document.getElementById("rc-norm-actual-nombre");
+    if (nombreEl) nombreEl.textContent = a.nombre || "—";
+    const cont = document.getElementById("rc-norm-actual-lista");
+    if (cont) {
+      cont.innerHTML = "";
+      for (const [clave, label, unidad] of NORM_CAMPOS) {
+        const v = urb[clave];
+        if (v == null || v === "") continue;
+        const div = document.createElement("div");
+        div.innerHTML = `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(v))}${escapeHtml(unidad)}</dd>`;
+        cont.appendChild(div);
+      }
+      const usos = urb.usos_permitidos;
+      if (Array.isArray(usos) && usos.length) {
+        const div = document.createElement("div");
+        div.className = "rc-norm-actual-usos";
+        div.innerHTML = `<dt>Usos permitidos</dt><dd>${escapeHtml(usos.join(", "))}</dd>`;
+        cont.appendChild(div);
+      }
+      if (!cont.children.length) {
+        cont.innerHTML = '<div class="rc-norm-actual-usos"><dd class="rc-vacio">Sin parámetros registrados.</dd></div>';
+      }
+    }
+    box.hidden = false;
   }
 
   function aplicarNormativaAlProyecto(data) {

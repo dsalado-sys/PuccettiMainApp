@@ -443,6 +443,25 @@
 .rc-norm-resumen-lista dt { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; }
 .rc-norm-resumen-lista dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; color: var(--negro); }
 
+/* Bloque "Normativa aplicada actualmente" (modal) — realce dorado para
+   distinguir la normativa vigente del selector y del resumen de selección.
+   Compacto: muestra TODOS los parámetros en una rejilla densa y tipografía
+   reducida para que ocupen poco. */
+.rc-norm-actual { border-color: var(--dorado); background: rgba(184,150,12,0.06); padding: 10px 12px; gap: 8px; }
+.rc-norm-actual .rc-modal-bloque-header { padding-bottom: 6px; }
+.rc-norm-actual-nombre { font-size: 13px; font-weight: 700; color: var(--negro); text-align: right; }
+.rc-norm-actual-lista {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 6px 14px; margin: 0;
+}
+.rc-norm-actual-lista > div { display: flex; flex-direction: column; min-width: 0; }
+.rc-norm-actual-lista dt {
+  font-size: 9px; color: #6a6a6a; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.rc-norm-actual-lista dd { margin: 1px 0 0; font-size: 12px; font-weight: 600; color: var(--negro); }
+.rc-norm-actual-lista .rc-norm-actual-usos { grid-column: 1 / -1; }
+.rc-norm-actual-lista .rc-norm-actual-usos dd { text-transform: capitalize; }
+
 /* Item de normativa seleccionado en el modal — mismo realce dorado que
    .nm-normativa-activa en el módulo Normativa municipal. */
 .rc-carpeta-normativa-item.rc-norm-seleccionada .rc-carpeta-cargar {
