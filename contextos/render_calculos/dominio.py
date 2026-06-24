@@ -135,7 +135,14 @@ TIPOLOGIA_HABITACION_A_PLAZAS = {
 TIPOLOGIA_HAP_A_NUM_DORMS = TIPOLOGIA_APT_A_NUM_DORMS
 
 
-NivelAlerta = Literal["info", "aviso", "incumplimiento"]
+# Severidad de mayor a menor:
+#   "error"         → fallo técnico o dato ausente: NO se pudo calcular (arregla la entrada).
+#   "incumplimiento"→ norma de obligado cumplimiento violada (el diseño no cumple).
+#   "aviso"         → por debajo de un mínimo / valor inferior a la normativa.
+#   "info"          → informativo.
+# El orden y el color en el frontend deben respetar esta jerarquía (ver NIVEL_PESO
+# en render_calculos.js, que debe contener EXACTAMENTE estos cuatro literales).
+NivelAlerta = Literal["error", "incumplimiento", "aviso", "info"]
 
 
 @dataclass(frozen=True)

@@ -378,6 +378,7 @@ def _slug_principal(params, tipo_unidad: str) -> str:
 
 def _estancias_por_unidad_dorms(
     params, n_dorms: int, util_por_unidad: float, programa_uso, slug: str | None = None,
+    cfg=None,
 ) -> list[dict[str, Any]]:
     """Estancias programadas para una unidad concreta.
 
@@ -389,12 +390,22 @@ def _estancias_por_unidad_dorms(
 
     `slug` es la tipología REAL de esta unidad (mezcla multi-tipología); si falta,
     se usa la tipología principal del proyecto.
+
+    `cfg` (§3.8) son los mínimos/política EDITADOS del uso activo (un `Programa*Config`
+    construido desde BBDD por `_sincronizar_minimos`); su tipo concuerda con
+    `tipo_unidad`. Si es `None`, cada rama usa el default inmutable del Anexo.
     """
     from .combinador_tipologias import es_slug_combo, slug_a_combo
-    from .programa import programa_vivienda, programa_vivienda_combo
-    from .programa_apartamentos import programa_apartamentos, programa_apartamentos_combo
-    from .programa_hotel_apartamento import programa_hotel_apartamento
-    from .programa_hotelero import programa_habitacion
+    from .programa import (
+        CONFIG_DEFAULT as CFG_VIV, programa_vivienda, programa_vivienda_combo,
+    )
+    from .programa_apartamentos import (
+        CONFIG_DEFAULT as CFG_APT, programa_apartamentos, programa_apartamentos_combo,
+    )
+    from .programa_hotel_apartamento import (
+        CONFIG_DEFAULT as CFG_HAP, programa_hotel_apartamento,
+    )
+    from .programa_hotelero import CONFIG_DEFAULT as CFG_HOT, programa_habitacion
 
     if util_por_unidad <= 0:
         return []
@@ -412,6 +423,7 @@ def _estancias_por_unidad_dorms(
         util_computable = util_por_unidad
 
     if tipo_unidad == "apartamento":
+        cfg_apt = cfg if cfg is not None else CFG_APT
         cat = getattr(params.programa, "categoria_apartamentos", None)
         cat_v = cat.value if cat is not None else "2L"
         grupo = getattr(params.programa, "grupo_apartamentos", None)
@@ -421,28 +433,31 @@ def _estancias_por_unidad_dorms(
         # ("doble*1+individual*1"), el programa lo genera por composición; un slug
         # de ocupación heredado ("doble") sigue la vía monodormitorio.
         if es_slug_combo(tip_v):
-            estancias = programa_apartamentos_combo(slug_a_combo(tip_v), cat_v, util_computable, grupo_v)
+            estancias = programa_apartamentos_combo(slug_a_combo(tip_v), cat_v, util_computable, grupo_v, cfg_apt)
         else:
-            estancias = programa_apartamentos(tip_v, cat_v, util_computable, grupo_v)
+            estancias = programa_apartamentos(tip_v, cat_v, util_computable, grupo_v, cfg_apt)
     elif tipo_unidad == "hotel_apartamento":
+        cfg_hap = cfg if cfg is not None else CFG_HAP
         cat = getattr(params.programa, "categoria_hotel_apartamento", None)
         cat_v = cat.value if cat is not None else "3E"
         tip_v = slug or _slug_principal(params, "hotel_apartamento")
-        estancias = programa_hotel_apartamento(tip_v, cat_v, util_computable)
+        estancias = programa_hotel_apartamento(tip_v, cat_v, util_computable, cfg_hap)
     elif tipo_unidad == "habitacion":
+        cfg_hot = cfg if cfg is not None else CFG_HOT
         cat = getattr(params.programa, "categoria_hotelero", None)
         cat_v = cat.value if cat is not None else "hotel_3"
         tip_v = slug or _slug_principal(params, "habitacion")
-        estancias = programa_habitacion(tip_v, cat_v, util_computable)
+        estancias = programa_habitacion(tip_v, cat_v, util_computable, cfg_hot)
     else:
+        cfg_viv = cfg if cfg is not None else CFG_VIV
         salon_open = bool(getattr(params.programa, "salon_cocina_open", False))
         # §2.5 paradigma nuevo: si el slug codifica una combinación de dormitorios,
         # la vivienda se genera por composición (individual/doble); un slug
         # heredado (n_dorms como "2") sigue la vía int-based.
         if slug and es_slug_combo(slug):
-            estancias = programa_vivienda_combo(slug_a_combo(slug), util_por_unidad, salon_open)
+            estancias = programa_vivienda_combo(slug_a_combo(slug), util_por_unidad, salon_open, cfg_viv)
         else:
-            estancias = programa_vivienda(n_dorms, util_por_unidad, salon_open)
+            estancias = programa_vivienda(n_dorms, util_por_unidad, salon_open, cfg_viv)
 
     salida: list[dict[str, Any]] = []
     for e in estancias:
@@ -483,16 +498,16 @@ def _estancias_por_unidad_dorms(
     return salida
 
 
-def _estancias_por_unidad(params, util_por_unidad: float, programa_uso) -> list[dict[str, Any]]:
+def _estancias_por_unidad(params, util_por_unidad: float, programa_uso, cfg=None) -> list[dict[str, Any]]:
     """Wrapper legacy — deriva n_dorms del programa principal."""
     n_dorms = getattr(params.programa, "n_dormitorios", None)
     if n_dorms is None:
         from ..dominio import CATEGORIA_A_NUM_DORMS
         n_dorms = CATEGORIA_A_NUM_DORMS.get(params.programa.categoria_vivienda, 2)
-    return _estancias_por_unidad_dorms(params, n_dorms, util_por_unidad, programa_uso)
+    return _estancias_por_unidad_dorms(params, n_dorms, util_por_unidad, programa_uso, cfg=cfg)
 
 
-def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[str, Any]]:
+def tabla_unidad_desde_capacidad(cap, params, programa_uso=None, cfg=None) -> list[dict[str, Any]]:
     """Una fila por unidad — n_dorms y útil REAL por unidad (no promediados).
 
     Cada unidad se lee de `cap.unidades_por_planta[i]` (lista de (n_dorms, util_m2)
@@ -589,7 +604,7 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None) -> list[dict[st
             construida_u = util_u + muros_u + muros_int_u
 
             estancias = _estancias_por_unidad_dorms(
-                params, n_dorms_u, util_u, programa_uso, slug_u
+                params, n_dorms_u, util_u, programa_uso, slug_u, cfg
             )
 
             # Circulación interior (intrínseca) de la unidad = útil de la unidad

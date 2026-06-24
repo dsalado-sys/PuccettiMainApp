@@ -55,7 +55,7 @@
               </form>
               {% if puede_editar %}
                 <form method="post" action="/proyectos/{{ p.id }}/eliminar"
-                      onsubmit="return confirm('¿Eliminar el proyecto «{{ p.nombre }}»?');">
+                      class="form-eliminar-proyecto" data-nombre="{{ p.nombre }}">
                   <button type="submit" class="boton-peligro">Eliminar</button>
                 </form>
               {% endif %}
@@ -68,4 +68,16 @@
     <p class="vacio">Aún no hay proyectos. Crea el primero para empezar.</p>
   {% endif %}
 </section>
+
+<script>
+  // Confirmación de borrado sin onsubmit inline: el nombre llega por data-nombre
+  // (escapado por Jinja en contexto de atributo) y se lee como texto plano vía
+  // dataset, nunca se reinterpreta como HTML/JS → sin XSS.
+  document.querySelectorAll(".form-eliminar-proyecto").forEach((f) => {
+    f.addEventListener("submit", (e) => {
+      const nombre = f.dataset.nombre || "";
+      if (!confirm("¿Eliminar el proyecto «" + nombre + "»?")) e.preventDefault();
+    });
+  });
+</script>
 {% endblock %}

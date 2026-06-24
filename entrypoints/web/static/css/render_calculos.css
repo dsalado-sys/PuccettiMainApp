@@ -335,7 +335,10 @@
   background: var(--negro); color: var(--dorado); border-radius: 2px;
   letter-spacing: 0.05em; margin-right: 8px; font-weight: 600;
 }
-.rc-alerta-error { background: rgba(140,42,31,0.08); border-color: var(--error); color: var(--error); }
+/* "error" = fallo técnico / dato ausente (no se pudo calcular): se distingue del
+   incumplimiento normativo (rojo) con un tono neutro oscuro corporativo, para no
+   connotar "violación de norma" donde lo que falla es la entrada o el cálculo. */
+.rc-alerta-error { background: rgba(10,10,10,0.07); border-color: var(--negro); color: var(--negro); }
 .rc-alerta-detalles summary {
   cursor: pointer; list-style: none;
   display: flex; align-items: center; gap: 8px;

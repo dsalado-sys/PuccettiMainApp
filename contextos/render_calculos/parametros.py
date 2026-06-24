@@ -347,6 +347,12 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
     }
 
 
+# Cota dura de plantas: el motor recorre `range(n_plantas)` construyendo geometría
+# con Shapely, así que un POST con un valor enorme colgaría el worker (DoS). 60
+# plantas cubre cualquier edificio real con margen.
+N_PLANTAS_LIMITE = 60
+
+
 def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
     """Parser tolerante: campos faltantes / inválidos caen a los defaults.
 
@@ -505,7 +511,7 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         coeficiente_edificabilidad=coef,
         usar_coeficiente_edificabilidad=_b(urb_in, "usar_coeficiente_edificabilidad", base.urbanisticos.usar_coeficiente_edificabilidad),
         ocupacion_maxima_pct=_f(urb_in, "ocupacion_maxima_pct", base.urbanisticos.ocupacion_maxima_pct),
-        n_plantas_max=_i(urb_in, "n_plantas_max", base.urbanisticos.n_plantas_max),
+        n_plantas_max=max(1, min(_i(urb_in, "n_plantas_max", base.urbanisticos.n_plantas_max), N_PLANTAS_LIMITE)),
         retranqueo_fachada_m=retr_fachada,
         retranqueo_linderos_m=retr_linderos,
         usos_permitidos=usos_validos,

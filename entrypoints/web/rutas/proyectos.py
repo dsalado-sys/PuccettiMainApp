@@ -1,7 +1,7 @@
 """Rutas de gestión de proyectos (§2.11)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.contextos.proyectos.casos_uso import (
@@ -56,12 +56,16 @@ def crear(
 ):
     if not puede_acceder(rol, "proyectos", PermisoModulo.EDITAR):
         return RedirectResponse(url="/proyectos", status_code=303)
-    proyecto = uc.ejecutar(
-        nombre=nombre,
-        referencia_catastral=referencia_catastral or None,
-        direccion=direccion or None,
-        creado_por=rol.value,
-    )
+    try:
+        proyecto = uc.ejecutar(
+            nombre=nombre,
+            referencia_catastral=referencia_catastral or None,
+            direccion=direccion or None,
+            creado_por=rol.value,
+        )
+    except ValueError as exc:
+        # Nombre vacío/ inválido: error de validación del cliente, no 500.
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     respuesta = RedirectResponse(url="/", status_code=303)
     respuesta.set_cookie(COOKIE_PROYECTO, proyecto.id, httponly=True, samesite="lax")
     return respuesta

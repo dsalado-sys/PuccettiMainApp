@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
 
-{% block contenido %}
+{% block head %}
 <link rel="stylesheet" href="/static/css/render_calculos.css?v={{ estaticos_version }}" />
+{% endblock %}
+
+{% block contenido %}
 <style>
   /* Pantalla de selección de modo de Render y cálculos. Reusa la paleta corporativa
      (variables :root de puccetti.css) y el CSS del módulo (render_calculos.css, que

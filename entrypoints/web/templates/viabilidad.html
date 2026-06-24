@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
 
-{% block contenido %}
+{% block head %}
 <link rel="stylesheet" href="/static/css/viabilidad.css?v={{ estaticos_version }}" />
+{% endblock %}
+
+{% block contenido %}
 
 <section class="hero">
   <h1>{{ tarjeta.titulo }}</h1>

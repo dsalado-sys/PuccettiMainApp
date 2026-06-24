@@ -5,6 +5,15 @@
 (function () {
   "use strict";
 
+  // Escapa texto antes de interpolarlo en innerHTML. Los nombres de carpeta y
+  // normativa son entrada libre del usuario: sin esto, un nombre con
+  // `<img src=x onerror=...>` se ejecutaría al pintar la lista (XSS almacenado).
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
   const layout = document.querySelector(".nm-layout");
   if (!layout) return;
   const puedeEditar = layout.dataset.puedeEditar === "true";
@@ -25,6 +34,14 @@
     toast.classList.toggle("nm-toast-error", esError);
     toast.classList.add("nm-toast-on");
     setTimeout(() => toast.classList.remove("nm-toast-on"), 2200);
+  }
+
+  // fetch que nunca lanza: ante un error de red (servidor caído, sin conexión)
+  // devuelve un objeto con `ok:false` para que los chequeos `resp.ok` de los
+  // mutadores muestren su toast de error en vez de un rechazo sin capturar.
+  async function fetchSeguro(url, opts) {
+    try { return await fetch(url, opts); }
+    catch (e) { return { ok: false, redError: true }; }
   }
 
   // ─── Submodales ──────────────────────────────────────────────────────
@@ -61,11 +78,11 @@
   async function cargarCarpetas() {
     try {
       const resp = await fetch(`${API}/carpetas`);
-      if (!resp.ok) return;
+      if (!resp.ok) { mostrarToast("No se pudieron cargar las carpetas", true); return; }
       const data = await resp.json();
       STATE.carpetas = data.carpetas || [];
       repintarCarpetas();
-    } catch (e) { /* silencioso */ }
+    } catch (e) { mostrarToast("Error de red al cargar las carpetas", true); }
   }
 
   async function cargarNormativasDeCarpeta(carpetaId, ul) {
@@ -99,7 +116,7 @@
       det.dataset.id = c.id;
       const sum = document.createElement("summary");
       sum.className = "nm-carpeta-summary";
-      sum.innerHTML = `<span class="nm-carpeta-nombre">${c.nombre}</span>
+      sum.innerHTML = `<span class="nm-carpeta-nombre">${escapeHtml(c.nombre)}</span>
         <span class="nm-carpeta-acciones">
           ${puedeEditar ? '<button type="button" class="nm-btn-nueva-norma" title="Crear normativa">+</button>' : ''}
           ${puedeEditar ? '<button type="button" class="nm-btn-borrar-carpeta" title="Eliminar carpeta">×</button>' : ''}
@@ -122,7 +139,8 @@
       if (btnDel) btnDel.addEventListener("click", ev => {
         ev.preventDefault(); ev.stopPropagation();
         pedirConfirmacion(`¿Eliminar la carpeta "${c.nombre}" y todas sus normativas?`, async () => {
-          await fetch(`${API}/carpetas/${c.id}`, { method: "DELETE" });
+          const resp = await fetchSeguro(`${API}/carpetas/${c.id}`, { method: "DELETE" });
+          if (!resp.ok) { mostrarToast("No se pudo eliminar", true); return; }
           mostrarToast("Carpeta eliminada");
           cargarCarpetas();
           if (STATE.seleccionada) limpiarDetalle();
@@ -145,8 +163,8 @@
       if (STATE.seleccionada === n.id) li.classList.add("nm-normativa-activa");
       li.dataset.id = n.id;
       li.innerHTML = `<button type="button" class="nm-norma-cargar">
-          <strong>${n.nombre}</strong>
-          <small>${n.direccion || "—"}</small>
+          <strong>${escapeHtml(n.nombre)}</strong>
+          <small>${escapeHtml(n.direccion || "—")}</small>
         </button>
         ${puedeEditar ? '<button type="button" class="nm-norma-borrar" title="Eliminar">×</button>' : ''}`;
       li.querySelector(".nm-norma-cargar").addEventListener("click", () => {
@@ -155,7 +173,8 @@
       const btn = li.querySelector(".nm-norma-borrar");
       if (btn) btn.addEventListener("click", () => {
         pedirConfirmacion(`¿Eliminar "${n.nombre}"?`, async () => {
-          await fetch(`${API}/normativas/${n.id}`, { method: "DELETE" });
+          const resp = await fetchSeguro(`${API}/normativas/${n.id}`, { method: "DELETE" });
+          if (!resp.ok) { mostrarToast("No se pudo eliminar", true); return; }
           mostrarToast("Normativa eliminada");
           cargarNormativasDeCarpeta(carpetaId, ul);
           if (STATE.seleccionada === n.id) limpiarDetalle();
@@ -264,7 +283,7 @@
     if (!STATE.seleccionada) return;
     const datos = leerDetalle();
     if (!datos.nombre) { mostrarToast("Falta el nombre", true); return; }
-    const resp = await fetch(`${API}/normativas/${STATE.seleccionada}`, {
+    const resp = await fetchSeguro(`${API}/normativas/${STATE.seleccionada}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(datos),
@@ -296,7 +315,7 @@
     const inp = document.getElementById("nm-submodal-carpeta-nombre");
     const nombre = inp ? inp.value.trim() : "";
     if (!nombre) { mostrarToast("Pon un nombre", true); return; }
-    const resp = await fetch(`${API}/carpetas`, {
+    const resp = await fetchSeguro(`${API}/carpetas`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nombre }),
@@ -324,7 +343,7 @@
     const nombre = document.getElementById("nm-submodal-nueva-nombre").value.trim();
     const direccion = document.getElementById("nm-submodal-nueva-direccion").value.trim();
     if (!nombre) { mostrarToast("Pon un nombre", true); return; }
-    const resp = await fetch(`${API}/carpetas/${carpetaIdParaNuevaNorma}/normativas`, {
+    const resp = await fetchSeguro(`${API}/carpetas/${carpetaIdParaNuevaNorma}/normativas`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nombre, direccion, urbanisticos: {} }),

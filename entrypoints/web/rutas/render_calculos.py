@@ -14,7 +14,12 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from typing import Annotated, Any
+
+# Tope de tamaño del "resumen" persistido en el aggregate: evita que un POST
+# guarde un blob arbitrariamente grande en el JSON del proyecto.
+_RESUMEN_MAX_BYTES = 100_000
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -34,7 +39,6 @@ from app.contextos.render_calculos.casos_uso import (
     parametros_desde_proyecto,
 )
 from app.contextos.render_calculos.dominio import UsoEdificio
-from app.contextos.render_calculos.geometria import programa
 from app.contextos.render_calculos.parametros import (
     ParametrosUrbanisticos,
     parametros_a_dict,
@@ -331,13 +335,19 @@ def preview(
         raise HTTPException(409, "No hay proyecto activo.")
     parcela = construir_parcela_metrica(proyecto)
     if parcela is None:
-        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en §2.1.")
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
 
     params = parametros_desde_dict(payload)
     resultado = CalcularEnvolvente().ejecutar(parcela, params)
 
     normativa = _normativa_de_referencia(payload, parcela, repo_norm)
-    alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
+    env = resultado.get("envolvente") or {}
+    parc = resultado.get("parcela") or {}
+    alertas_extra = ValidarCumplimiento().ejecutar(
+        parcela, params, normativa,
+        edificabilidad_consumida_m2=env.get("edificabilidad_consumida_m2"),
+        superficie_referencia_m2=parc.get("area_m2"),
+    )
     resultado["alertas"] = list(resultado.get("alertas", [])) + [
         {"nivel": a.nivel, "regla": a.regla, "mensaje": a.mensaje, "elemento": a.elemento}
         for a in alertas_extra
@@ -362,7 +372,7 @@ def calcular(
         raise HTTPException(409, "No hay proyecto activo.")
     parcela = construir_parcela_metrica(proyecto)
     if parcela is None:
-        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en §2.1.")
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
 
     params = parametros_desde_dict(payload)
     # §2.5 — selección temporal de combinación de dormitorios (apartamentos). El
@@ -379,7 +389,13 @@ def calcular(
     resultado = caso_uso.ejecutar(parcela, params, combo_override=combo_override)
 
     normativa = _normativa_de_referencia(payload, parcela, repo_norm)
-    alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
+    env = resultado.get("envolvente") or {}
+    parc = resultado.get("parcela") or {}
+    alertas_extra = ValidarCumplimiento().ejecutar(
+        parcela, params, normativa,
+        edificabilidad_consumida_m2=env.get("edificabilidad_consumida_m2"),
+        superficie_referencia_m2=parc.get("area_m2"),
+    )
     resultado["alertas"] = list(resultado.get("alertas", [])) + [
         {"nivel": a.nivel, "regla": a.regla, "mensaje": a.mensaje, "elemento": a.elemento}
         for a in alertas_extra
@@ -408,7 +424,7 @@ def estancias_inmueble(
         raise HTTPException(409, "No hay proyecto activo.")
     construida = _construida_inmueble_m2(proyecto)
     if construida <= 0:
-        raise HTTPException(409, "El inmueble no tiene superficie construida. Elígelo en §2.1.")
+        raise HTTPException(409, "El inmueble no tiene superficie construida. Elígelo en «Buscar parcela».")
 
     params = parametros_desde_dict(payload)
     n_dorms_raw = payload.get("n_dormitorios")
@@ -446,7 +462,7 @@ def tipologias_dormitorios(
         raise HTTPException(409, "No hay proyecto activo.")
     parcela = construir_parcela_metrica(proyecto)
     if parcela is None:
-        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en §2.1.")
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
 
     params = parametros_desde_dict(payload)
     try:
@@ -477,6 +493,11 @@ def guardar(
 
     params_payload = payload.get("parametros") or payload
     resumen = payload.get("resumen") or {}
+    try:
+        if len(json.dumps(resumen).encode("utf-8")) > _RESUMEN_MAX_BYTES:
+            raise HTTPException(413, "El resumen a guardar es demasiado grande.")
+    except (TypeError, ValueError):
+        raise HTTPException(422, "El resumen a guardar no es válido.")
     params = parametros_desde_dict(params_payload)
 
     # Cada modo guarda su propio bloque. Modo inválido → modo por defecto.
@@ -578,11 +599,12 @@ def guardar_superficies_vivienda(
     catalogo_viv=Depends(catalogo_superficies_adapter),
 ):
     """Persiste los mínimos editados. `payload = {"cambios": [{n_dormitorios,
-    estancia, valor}, ...]}`. Tras guardar, recarga las constantes vivas del
-    motor para que el siguiente cálculo use los nuevos mínimos sin reiniciar."""
+    estancia, valor}, ...]}`. §3.8: ya no hay que recargar constantes del motor;
+    cada cálculo lee los mínimos vivos de BBDD vía `_sincronizar_minimos`."""
     _exige_permiso(rol, PermisoModulo.EDITAR)
     cambios = payload.get("cambios") or []
     aplicados = 0
+    rechazados: list[str] = []
     for c in cambios:
         if not isinstance(c, dict):
             continue
@@ -596,11 +618,15 @@ def guardar_superficies_vivienda(
             continue
         if valor < 0:
             continue
-        catalogo_viv.actualizar("vivienda", str(n_dorms), estancia, valor)
+        # El adapter rechaza romper el invariante min ≤ útil máximo: se omite
+        # ese cambio (como los negativos) y se informa, sin abortar el lote.
+        try:
+            catalogo_viv.actualizar("vivienda", str(n_dorms), estancia, valor)
+        except ValueError as exc:
+            rechazados.append(str(exc))
+            continue
         aplicados += 1
-    if aplicados:
-        programa.cargar_desde_repo(catalogo_viv)
-    return JSONResponse({"ok": True, "aplicados": aplicados})
+    return JSONResponse({"ok": True, "aplicados": aplicados, "rechazados": rechazados})
 
 
 @router.post("/superficies-vivienda/reset")
@@ -611,7 +637,6 @@ def reset_superficies_vivienda(
     """Restablece los mínimos a los valores sembrados (defaults del motor)."""
     _exige_permiso(rol, PermisoModulo.EDITAR)
     catalogo_viv.reset()
-    programa.cargar_desde_repo(catalogo_viv)
     return JSONResponse({"ok": True})
 
 
@@ -673,6 +698,7 @@ def guardar_minimos(
         raise HTTPException(422, "Falta la categoría.")
     cambios = payload.get("cambios") or []
     aplicados = 0
+    rechazados: list[str] = []
     for c in cambios:
         if not isinstance(c, dict):
             continue
@@ -686,12 +712,18 @@ def guardar_minimos(
             continue
         if valor < 0:
             continue
-        if uso == "apartamentos_turisticos":
-            adapter.actualizar(categoria, tipologia, estancia, valor, grupo=grupo)
-        else:
-            adapter.actualizar(categoria, tipologia, estancia, valor)
+        # El adapter rechaza romper el invariante min ≤ útil máximo: se omite ese
+        # cambio y se informa, sin abortar el lote.
+        try:
+            if uso == "apartamentos_turisticos":
+                adapter.actualizar(categoria, tipologia, estancia, valor, grupo=grupo)
+            else:
+                adapter.actualizar(categoria, tipologia, estancia, valor)
+        except ValueError as exc:
+            rechazados.append(str(exc))
+            continue
         aplicados += 1
-    return JSONResponse({"ok": True, "aplicados": aplicados})
+    return JSONResponse({"ok": True, "aplicados": aplicados, "rechazados": rechazados})
 
 
 @router.post("/minimos/{uso}/reset")
@@ -735,26 +767,31 @@ def export_csv(
     )
     resultado = caso_uso.ejecutar(parcela, params)
 
+    def _es(v):
+        # Formato es-ES para el CSV (delimitador ';'): coma decimal en los
+        # valores con decimales. Enteros, cadenas y booleanos pasan tal cual.
+        return f"{v:.2f}".replace(".", ",") if isinstance(v, float) else v
+
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
-    writer.writerow(["# Tabla de superficies por planta — Render y cálculos §2.7"])
+    writer.writerow(["# Tabla de superficies por planta — Render y cálculos"])
     writer.writerow(["planta", "tipo", "viviendas", "construida_m2", "util_viviendas_m2",
                      "muros_m2", "muros_interior_m2", "circulacion_m2", "nucleo_m2",
                      "local_m2", "otros_m2", "usos_comunes_m2"])
     for r in resultado.get("tabla_planta", []):
-        writer.writerow([r["planta"], r.get("tipo", "regular"), r["viviendas"], r["construida_m2"],
+        writer.writerow([_es(v) for v in [r["planta"], r.get("tipo", "regular"), r["viviendas"], r["construida_m2"],
                          r["util_viviendas_m2"], r.get("muros_m2", 0.0), r.get("muros_interior_m2", 0.0),
                          r["circulacion_m2"], r.get("nucleo_m2", 0.0),
-                         r.get("local_m2", 0.0), r.get("otros_m2", 0.0), r.get("usos_comunes_m2", 0.0)])
+                         r.get("local_m2", 0.0), r.get("otros_m2", 0.0), r.get("usos_comunes_m2", 0.0)]])
     writer.writerow([])
     writer.writerow(["# Tabla por unidad (iter. 3 — sintética desde cálculo)"])
     writer.writerow(["planta", "vivienda", "dorms", "tipo", "util_m2_objetivo",
                      "util_total_m2", "computable_turismo_m2", "circulacion_acceso_m2", "adaptada"])
     for r in resultado.get("tabla_unidad", []):
-        writer.writerow([r["planta"], r["vivienda"], r["dorms"], r.get("tipo", "vivienda"),
+        writer.writerow([_es(v) for v in [r["planta"], r["vivienda"], r["dorms"], r.get("tipo", "vivienda"),
                          r["util_m2_objetivo"], r.get("util_por_unidad_m2", 0.0),
                          r.get("computable_turismo_por_unidad_m2", 0.0),
-                         r.get("circulacion_interior_por_unidad_m2", 0.0), r["adaptada"]])
+                         r.get("circulacion_interior_por_unidad_m2", 0.0), r["adaptada"]]])
     return Response(
         content=buf.getvalue().encode("utf-8-sig"),
         media_type="text/csv; charset=utf-8",

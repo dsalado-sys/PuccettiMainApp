@@ -145,7 +145,10 @@ def _mapear_error(exc: ParcelaError) -> HTTPException:
         return HTTPException(status_code=422, detail=str(exc) or "El punto no cae sobre ninguna parcela.")
     if isinstance(exc, ParcelaNoEncontrada):
         return HTTPException(status_code=404, detail=str(exc) or "Parcela no encontrada.")
-    return HTTPException(status_code=500, detail=str(exc) or "Error de localización.")
+    # No filtrar el texto interno de la excepción al cliente (puede revelar rutas
+    # o datos internos); registrarlo completo y devolver un mensaje genérico.
+    log.exception("Error inesperado de localización: %s", exc)
+    return HTTPException(status_code=500, detail="Error interno de localización. Inténtalo de nuevo.")
 
 
 # ── Pantalla principal ─────────────────────────────────────────────────────
@@ -343,7 +346,9 @@ def detalle_subreferencia(
     parcela: Parcela | None = Depends(obtener_parcela_temporal),
     uc: CargarDetalleSubreferencia = Depends(cargar_detalle_subref_uc),
 ):
-    _exige_permiso(rol, PermisoModulo.VER)
+    # Consume el Catastro (1 petición) y muta la caché de la parcela: es una
+    # acción de edición, no de simple lectura.
+    _exige_permiso(rol, PermisoModulo.EDITAR)
     if parcela is None:
         raise HTTPException(status_code=409, detail="No hay parcela en sesión.")
     try:

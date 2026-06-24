@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
 
-{% block contenido %}
+{% block head %}
 <link rel="stylesheet" href="/static/css/render_calculos.css?v={{ estaticos_version }}" />
+{% endblock %}
+
+{% block contenido %}
 
 {# Modo «inmueble»: se trabaja sobre un inmueble concreto de la parcela. Sin
    urbanismo ni canvas de plantas; una sola tabla de estancias a la derecha. #}
@@ -126,7 +129,8 @@
     </nav>
 
     <div class="rc-canvas-wrap">
-      <canvas id="rc-canvas" width="800" height="600"></canvas>
+      <canvas id="rc-canvas" width="800" height="600" role="img"
+              aria-label="Plano de planta en 2D con la distribución de unidades y las orientaciones de fachada"></canvas>
       <div class="rc-brujula" id="rc-brujula" aria-label="Brújula y orientaciones cardinales"></div>
       <div class="rc-spinner" id="rc-spinner" hidden>
         <span class="rc-spinner-circ"></span>

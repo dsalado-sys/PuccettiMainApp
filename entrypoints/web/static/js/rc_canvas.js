@@ -184,7 +184,8 @@
       ctx.fillText(unidad.id, this._x(cx), this._y(cy) - 6);
       ctx.font = "10px Helvetica Neue, Inter, sans-serif";
       ctx.fillStyle = unidad.cumple_minimos ? "#2a2a2a" : COLOR.error;
-      ctx.fillText(unidad.area_util_m2.toFixed(1) + " m²", this._x(cx), this._y(cy) + 7);
+      // es-ES: coma decimal en la etiqueta de superficie del canvas.
+      ctx.fillText(unidad.area_util_m2.toFixed(1).replace(".", ",") + " m²", this._x(cx), this._y(cy) + 7);
       if (unidad.es_adaptada) {
         ctx.fillStyle = COLOR.dorado;
         ctx.font = "9px Helvetica Neue, Inter, sans-serif";

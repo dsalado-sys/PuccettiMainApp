@@ -8,7 +8,7 @@ también vía constantes para que la capa de persistencia pueda sembrarlos en la
 BBDD de normativa.
 """
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from .combinador_tipologias import ComboDormitorios
@@ -65,9 +65,9 @@ class Estancia:
 
 
 # Anexo I.5 — superficies mínimas vivienda VPO Junta de Andalucía.
-# Estos valores son DEFAULTS sembrados en BBDD (ver seed_normativa.py); al arranque
-# de la app, `cargar_desde_repo()` los reescribe con los de BBDD para reflejar
-# cualquier edición persistida por el usuario.
+# Estos valores son DEFAULTS INMUTABLES sembrados en BBDD (ver seed_normativa.py) y
+# empaquetados en `CONFIG_DEFAULT`. En cada cálculo, `config_desde_repo()` construye
+# una config con los valores editados de BBDD (§3.8); estas constantes no se mutan.
 # Mínimos GLOBALES de habitación (Anexo I.5 VPO): no varían por nº de
 # dormitorios. El editor los presenta una sola vez ("comunes a todas las
 # tipologías") y al editarlos se propagan a todas las tipologías (resuelve el
@@ -103,50 +103,82 @@ PCT_CIRCULACION_INTERIOR_VIVIENDA: float = 15.0
 UMBRAL_MINIMO_ESTUDIO_M2: float = 25.0
 
 
-def set_pct_circulacion_interior(pct: float) -> None:
-    """Fija el % de circulación interior de la unidad (panel de diseño → motor).
+# ─── Configuración inmutable del programa (§3.8 — sin globals mutables) ──────
+# Los mínimos/política editables del Anexo I.5 viven en una instancia FROZEN que se
+# construye por cálculo (desde BBDD) y se pasa como argumento a las funciones de
+# este módulo. Antes se volcaban a globals de módulo (`cargar_desde_repo` /
+# `set_pct_circulacion_interior`), lo que cruzaba ediciones entre requests
+# concurrentes y entre tests (Pendiente 3.8). Las constantes de arriba quedan como
+# DEFAULTS inmutables; `CONFIG_DEFAULT` las empaqueta y es el valor por defecto de
+# `cfg`, de modo que los llamadores que no editan (seed, tests, preview) ven el
+# Anexo I.5 tal cual, sin estado compartido.
+@dataclass(frozen=True)
+class ProgramaViviendaConfig:
+    min_dorm_individual: float = MIN_DORM_INDIVIDUAL
+    min_dorm_doble: float = MIN_DORM_DOBLE
+    min_cocina: float = MIN_COCINA
+    min_bano: float = MIN_BANO
+    min_aseo: float = MIN_ASEO
+    min_espacio_principal: float = MIN_ESPACIO_PRINCIPAL
+    salon_min: dict[int, float] = field(default_factory=lambda: dict(SALON_MIN))
+    salon_mas_cocina_min: dict[int, float] = field(default_factory=lambda: dict(SALON_MAS_COCINA_MIN))
+    util_max: dict[int, float] = field(default_factory=lambda: dict(UTIL_MAX))
+    # Vacío = la política de targets cae al fallback `_targets_default_para` (igual
+    # que cuando la BBDD aún no estaba sembrada en el diseño anterior).
+    area_target: dict[int, dict[str, float | None]] = field(default_factory=dict)
+    pct_circulacion_interior: float = PCT_CIRCULACION_INTERIOR_VIVIENDA
+    umbral_minimo_estudio_m2: float = UMBRAL_MINIMO_ESTUDIO_M2
 
-    Compartido conceptualmente con los demás usos (apartamentos/hotel/hotel-apt),
-    que tienen su propia constante homónima. Sustituye al 1.15 antes hardcodeado.
+
+# Config por defecto (Anexo I.5 sin ediciones). Inmutable y compartible entre hilos.
+CONFIG_DEFAULT = ProgramaViviendaConfig()
+
+
+def config_desde_repo(catalogo=None, pct_circulacion_interior: float | None = None) -> ProgramaViviendaConfig:
+    """Construye un `ProgramaViviendaConfig` desde el catálogo de BBDD (Anexo I.5).
+
+    Sustituye al antiguo `cargar_desde_repo`, que mutaba globals de módulo. Cualquier
+    clave ausente conserva el default del Anexo. `pct_circulacion_interior`, si se
+    indica (valor del panel de diseño), prevalece sobre el persistido. Devuelve
+    `CONFIG_DEFAULT` si no hay catálogo o la BBDD está vacía.
     """
-    global PCT_CIRCULACION_INTERIOR_VIVIENDA
-    PCT_CIRCULACION_INTERIOR_VIVIENDA = max(0.0, float(pct))
-
-
-def cargar_desde_repo(catalogo) -> bool:
-    """Vuelca los valores del catálogo de BBDD a las constantes module-level.
-
-    Esto permite que el usuario modifique los mínimos del Anexo I.5 desde
-    persistencia y que `programa_vivienda()` los respete sin tener que pasar
-    el repo por toda la cadena de llamadas. Devuelve True si se aplicó algún
-    override; False si la BBDD estaba vacía o el catálogo no expone el método.
-    """
-    obtener = getattr(catalogo, "consolidadas_vivienda", None)
-    if obtener is None:
-        return False
-    datos = obtener() or {}
-    if not datos:
-        return False
-    g = globals()
-    for clave in ("MIN_DORM_INDIVIDUAL", "MIN_DORM_DOBLE", "MIN_COCINA", "MIN_BANO",
-                  "MIN_ASEO", "MIN_ESPACIO_PRINCIPAL"):
+    valores: dict = {}
+    obtener = getattr(catalogo, "consolidadas_vivienda", None) if catalogo is not None else None
+    try:
+        datos = (obtener() or {}) if obtener is not None else {}
+    except Exception:
+        datos = {}
+    mapa_escalar = {
+        "MIN_DORM_INDIVIDUAL": "min_dorm_individual",
+        "MIN_DORM_DOBLE": "min_dorm_doble",
+        "MIN_COCINA": "min_cocina",
+        "MIN_BANO": "min_bano",
+        "MIN_ASEO": "min_aseo",
+        "MIN_ESPACIO_PRINCIPAL": "min_espacio_principal",
+    }
+    for clave, campo in mapa_escalar.items():
         if clave in datos:
-            g[clave] = float(datos[clave])
-    for clave in ("SALON_MIN", "SALON_MAS_COCINA_MIN", "UTIL_MAX"):
+            valores[campo] = float(datos[clave])
+    mapa_dict = {
+        "SALON_MIN": "salon_min",
+        "SALON_MAS_COCINA_MIN": "salon_mas_cocina_min",
+        "UTIL_MAX": "util_max",
+    }
+    for clave, campo in mapa_dict.items():
         if clave in datos and isinstance(datos[clave], dict):
-            g[clave].clear()
-            g[clave].update({int(k): float(v) for k, v in datos[clave].items()})
-
+            valores[campo] = {int(k): float(v) for k, v in datos[clave].items()}
     if "AREA_TARGET_VIVIENDA" in datos and isinstance(datos["AREA_TARGET_VIVIENDA"], dict):
-        g["AREA_TARGET_VIVIENDA"] = {
+        valores["area_target"] = {
             int(n): {str(est): (None if t is None else float(t)) for est, t in mp.items()}
             for n, mp in datos["AREA_TARGET_VIVIENDA"].items()
         }
     if "PCT_CIRCULACION_INTERIOR_VIVIENDA" in datos:
-        g["PCT_CIRCULACION_INTERIOR_VIVIENDA"] = float(datos["PCT_CIRCULACION_INTERIOR_VIVIENDA"])
+        valores["pct_circulacion_interior"] = float(datos["PCT_CIRCULACION_INTERIOR_VIVIENDA"])
     if "UMBRAL_MINIMO_ESTUDIO_M2" in datos:
-        g["UMBRAL_MINIMO_ESTUDIO_M2"] = float(datos["UMBRAL_MINIMO_ESTUDIO_M2"])
-    return True
+        valores["umbral_minimo_estudio_m2"] = float(datos["UMBRAL_MINIMO_ESTUDIO_M2"])
+    if pct_circulacion_interior is not None:
+        valores["pct_circulacion_interior"] = max(0.0, float(pct_circulacion_interior))
+    return replace(CONFIG_DEFAULT, **valores) if valores else CONFIG_DEFAULT
 
 
 _CATEGORIA_ESTANCIA: dict[str, Categoria] = {
@@ -169,7 +201,7 @@ _CATEGORIA_ESTANCIA: dict[str, Categoria] = {
 }
 
 
-def _salon_min_para(n_dorms: int) -> float:
+def _salon_min_para(n_dorms: int, cfg: ProgramaViviendaConfig = CONFIG_DEFAULT) -> float:
     """Salón (estancia E) mínimo del Anexo I.5 por nº de dormitorios.
 
     Tabla VPO Junta de Andalucía: 1d=14, 2d=16, 3d=18, 4d=20 y "más de 4
@@ -177,18 +209,18 @@ def _salon_min_para(n_dorms: int) -> float:
     N≥5; para esos casos (o cualquier n fuera de tabla) se aplica el tramo
     ">4 dormitorios".
     """
-    if n_dorms in SALON_MIN:
-        return float(SALON_MIN[n_dorms])
+    if n_dorms in cfg.salon_min:
+        return float(cfg.salon_min[n_dorms])
     return 24.0 if n_dorms >= 5 else 20.0
 
 
-def _salon_cocina_min_para(n_dorms: int) -> float:
+def _salon_cocina_min_para(n_dorms: int, cfg: ProgramaViviendaConfig = CONFIG_DEFAULT) -> float:
     """Salón-cocina (E+Comedor+Cocina) mínimo del Anexo I.5 por nº de dormitorios.
 
     Tabla VPO: 1d=20, 2d=20, 3d=24, 4d=24 y "más de 4 dormitorios"=28 m².
     """
-    if n_dorms in SALON_MAS_COCINA_MIN:
-        return float(SALON_MAS_COCINA_MIN[n_dorms])
+    if n_dorms in cfg.salon_mas_cocina_min:
+        return float(cfg.salon_mas_cocina_min[n_dorms])
     return 28.0 if n_dorms >= 5 else 24.0
 
 
@@ -230,6 +262,7 @@ def programa_vivienda(
     n_dorms: int,
     util_disponible: float,
     salon_cocina_open: bool = False,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
 ) -> list[Estancia]:
     """§2.5 + Anexo I.5 — lista de estancias para una vivienda.
 
@@ -254,16 +287,16 @@ def programa_vivienda(
         return []
 
     if n_dorms == 0:
-        return _programa_estudio(util_disponible)
+        return _programa_estudio(util_disponible, cfg)
 
-    targets_n = AREA_TARGET_VIVIENDA.get(n_dorms, {})
+    targets_n = cfg.area_target.get(n_dorms, {})
     # Fallback si la BBDD aún no se ha cargado: usa la política por defecto
     # (cocina=min+1, banos=min+2, aseo=min+1, salón/dormitorios escalan).
     if not targets_n:
-        targets_n = _targets_default_para(n_dorms)
+        targets_n = _targets_default_para(n_dorms, cfg)
 
     # 1. Circulación interior fija (% del útil).
-    pct_circ = PCT_CIRCULACION_INTERIOR_VIVIENDA / 100.0
+    pct_circ = cfg.pct_circulacion_interior / 100.0
     circ_target = util_disponible * pct_circ
 
     # 2. Selección de estancias según salon_cocina_open y n_dorms.
@@ -273,7 +306,7 @@ def programa_vivienda(
     fijas: list[tuple[str, float, float]] = []      # (nombre, min_m2, target)
     escalantes: list[tuple[str, float]] = []        # (nombre, min_m2)
     for est in nombres:
-        min_est = _area_min_estancia(est, n_dorms, salon_cocina_open)
+        min_est = _area_min_estancia(est, n_dorms, salon_cocina_open, cfg)
         tgt = targets_n.get(est)
         if tgt is None:
             escalantes.append((est, min_est))
@@ -295,7 +328,7 @@ def programa_vivienda(
     targets_por_nombre.update(_repartir_con_suelo(escalantes, util_principal))
 
     for est in nombres:
-        min_est = _area_min_estancia(est, n_dorms, salon_cocina_open)
+        min_est = _area_min_estancia(est, n_dorms, salon_cocina_open, cfg)
         # Suelo duro: ninguna estancia se emite por debajo de su mínimo del Anexo
         # (protege también el reparto degradado de unidades infradimensionadas).
         target = max(targets_por_nombre[est], min_est)
@@ -309,7 +342,9 @@ def programa_vivienda(
     return estancias
 
 
-def _programa_estudio(util_disponible: float) -> list[Estancia]:
+def _programa_estudio(
+    util_disponible: float, cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
+) -> list[Estancia]:
     """Estancias del estudio (n_dorms=0) escaladas a `util_disponible`.
 
     Anexo I.5: el estudio tiene cocina y baño independientes; su estancia única
@@ -319,12 +354,12 @@ def _programa_estudio(util_disponible: float) -> list[Estancia]:
     objetivo del estudio = la suma de targets —ver `util_minimo_vivienda`—, así
     que en el reparto el factor es ≥ 1 y la cocina nunca baja de su mínimo).
     """
-    targets = AREA_TARGET_VIVIENDA.get(0, {})
+    targets = cfg.area_target.get(0, {})
     if not targets:
         # Fallback si la BBDD aún no se ha cargado.
         targets = {
-            "espacio_principal": MIN_ESPACIO_PRINCIPAL + 4.0,
-            "cocina": MIN_COCINA + 1.0,
+            "espacio_principal": cfg.min_espacio_principal + 4.0,
+            "cocina": cfg.min_cocina + 1.0,
             "bano": 4.0,
             "circulacion_interior": 3.0,
         }
@@ -334,9 +369,9 @@ def _programa_estudio(util_disponible: float) -> list[Estancia]:
     factor = (util_disponible / suma_baseline) if suma_baseline > 0 else 1.0
 
     mins = {
-        "espacio_principal": MIN_ESPACIO_PRINCIPAL,
-        "cocina": MIN_COCINA,
-        "bano": MIN_BANO,
+        "espacio_principal": cfg.min_espacio_principal,
+        "cocina": cfg.min_cocina,
+        "bano": cfg.min_bano,
         "circulacion_interior": 0.0,
     }
     estancias: list[Estancia] = []
@@ -372,23 +407,28 @@ def _nombres_estancias_vivienda(
     return nombres
 
 
-def _area_min_estancia(est: str, n_dorms: int, salon_cocina_open: bool) -> float:
+def _area_min_estancia(
+    est: str, n_dorms: int, salon_cocina_open: bool,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
+) -> float:
     if est == "salon":
-        return _salon_min_para(n_dorms)
+        return _salon_min_para(n_dorms, cfg)
     if est == "salon_cocina":
-        return _salon_cocina_min_para(n_dorms)
+        return _salon_cocina_min_para(n_dorms, cfg)
     if est == "cocina":
-        return float(MIN_COCINA)
+        return float(cfg.min_cocina)
     if est == "dormitorio_1":
-        return float(MIN_DORM_DOBLE)
+        return float(cfg.min_dorm_doble)
     if est.startswith("dormitorio_"):
-        return float(MIN_DORM_INDIVIDUAL)
+        return float(cfg.min_dorm_individual)
     if est == "bano" or est.startswith("bano_"):
-        return float(MIN_BANO)
+        return float(cfg.min_bano)
     return 0.0
 
 
-def _targets_default_para(n_dorms: int) -> dict[str, float | None]:
+def _targets_default_para(
+    n_dorms: int, cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
+) -> dict[str, float | None]:
     """Política por defecto cuando la BBDD aún no se ha cargado.
 
     Replica los targets que sembraría `seed_normativa._filas_anexo_i_vivienda`.
@@ -396,57 +436,61 @@ def _targets_default_para(n_dorms: int) -> dict[str, float | None]:
     out: dict[str, float | None] = {
         "salon": None,
         "salon_cocina": None,
-        "cocina": MIN_COCINA + 1.0,
+        "cocina": cfg.min_cocina + 1.0,
         "dormitorio_1": None,
     }
     for i in range(2, n_dorms + 1):
         out[f"dormitorio_{i}"] = None
     # Baños completos (Anexo I.5): 1 hasta 2 dorms, 2 desde 3 dorms.
     for nombre in nombres_banos(banos_vivienda(n_dorms)):
-        out[nombre] = MIN_BANO + 2.0
+        out[nombre] = cfg.min_bano + 2.0
     return out
 
 
-def util_maximo(n_dorms: int) -> float:
-    return UTIL_MAX.get(n_dorms, UTIL_MAX[4])
+def util_maximo(n_dorms: int, cfg: ProgramaViviendaConfig = CONFIG_DEFAULT) -> float:
+    return cfg.util_max.get(n_dorms, cfg.util_max[4])
 
 
-def util_minimo_vivienda(n_dorms: int, salon_cocina_open: bool = False) -> float:
+def util_minimo_vivienda(
+    n_dorms: int, salon_cocina_open: bool = False,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
+) -> float:
     """Mínimo viable de una vivienda.
 
     - Estudio: la suma de los targets del programa (estancia única + cocina +
       baño + circulación interior, Anexo I.5), con piso en
-      `UMBRAL_MINIMO_ESTUDIO_M2` (25 m² excluyendo servicios comunes, VPO). Es
+      `umbral_minimo_estudio_m2` (25 m² excluyendo servicios comunes, VPO). Es
       también el útil objetivo, de modo que en el reparto el estudio se escala
       con factor ≥ 1 y la cocina respeta su mínimo independiente (7 m²).
     - 1d+: suma de mínimos × (1 + %circulación/100) — el % es editable (panel
       de diseño) y compartido con los demás usos; antes era un 1.15 fijo.
     """
     if n_dorms == 0:
-        targets = AREA_TARGET_VIVIENDA.get(0) or {
-            "espacio_principal": MIN_ESPACIO_PRINCIPAL + 4.0,
-            "cocina": MIN_COCINA + 1.0,
+        targets = cfg.area_target.get(0) or {
+            "espacio_principal": cfg.min_espacio_principal + 4.0,
+            "cocina": cfg.min_cocina + 1.0,
             "bano": 4.0,
             "circulacion_interior": 3.0,
         }
         suma_target = sum(float(t) for t in targets.values() if t is not None)
-        return round(max(UMBRAL_MINIMO_ESTUDIO_M2, suma_target), 2)
-    prog = programa_vivienda(n_dorms, util_disponible=util_maximo(n_dorms),
-                             salon_cocina_open=salon_cocina_open)
-    factor = 1.0 + PCT_CIRCULACION_INTERIOR_VIVIENDA / 100.0
+        return round(max(cfg.umbral_minimo_estudio_m2, suma_target), 2)
+    prog = programa_vivienda(n_dorms, util_disponible=util_maximo(n_dorms, cfg),
+                             salon_cocina_open=salon_cocina_open, cfg=cfg)
+    factor = 1.0 + cfg.pct_circulacion_interior / 100.0
     return round(sum(e.area_min_m2 for e in prog) * factor, 2)
 
 
 def descriptor_tipologia_vivienda(
     n_dorms: int,
     salon_cocina_open: bool = False,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
 ) -> TipologiaUnidadDescriptor:
     """Descriptor de una tipología de vivienda para el reparto genérico."""
     return TipologiaUnidadDescriptor(
         slug=str(n_dorms),
-        util_objetivo=util_maximo(n_dorms),
-        util_minimo=util_minimo_vivienda(n_dorms, salon_cocina_open),
-        util_maximo=util_maximo(n_dorms),
+        util_objetivo=util_maximo(n_dorms, cfg),
+        util_minimo=util_minimo_vivienda(n_dorms, salon_cocina_open, cfg),
+        util_maximo=util_maximo(n_dorms, cfg),
         n_dorms_label=n_dorms,
         tipo_unidad="vivienda",
         plazas=max(1, n_dorms) + 1,
@@ -459,13 +503,15 @@ def descriptor_tipologia_vivienda(
 # composición concreta (p. ej. 1 individual + 1 doble). El estudio (N=0) reusa el
 # programa de estudio. El resto compone: salón (+cocina) + N dormitorios + baño(s)
 # + circulación interior (15 %).
-def _dorms_de_combo_vivienda(combo: ComboDormitorios) -> list[tuple[str, float]]:
+def _dorms_de_combo_vivienda(
+    combo: ComboDormitorios, cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
+) -> list[tuple[str, float]]:
     """[(tamaño, min_m2)] de los dormitorios de la combinación, orden canónico."""
-    tam_min = {"individual": MIN_DORM_INDIVIDUAL, "doble": MIN_DORM_DOBLE}
+    tam_min = {"individual": cfg.min_dorm_individual, "doble": cfg.min_dorm_doble}
     dorms: list[tuple[str, float]] = []
     for tam in sorted(combo.composicion):
         for _ in range(combo.composicion[tam]):
-            dorms.append((tam, float(tam_min.get(tam, MIN_DORM_INDIVIDUAL))))
+            dorms.append((tam, float(tam_min.get(tam, cfg.min_dorm_individual))))
     return dorms
 
 
@@ -473,6 +519,7 @@ def programa_vivienda_combo(
     combo: ComboDormitorios,
     util_disponible: float,
     salon_cocina_open: bool = False,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
 ) -> list[Estancia]:
     """Estancias de una vivienda de N dormitorios (combinación de tamaños).
 
@@ -483,17 +530,17 @@ def programa_vivienda_combo(
     if util_disponible <= 0:
         return []
     if combo.es_estudio:
-        return _programa_estudio(util_disponible)
+        return _programa_estudio(util_disponible, cfg)
 
     n_dorms = combo.n_dorms
-    dorms = _dorms_de_combo_vivienda(combo)
+    dorms = _dorms_de_combo_vivienda(combo, cfg)
     dorm_min_total = sum(m for _, m in dorms)
 
-    circ_target = util_disponible * (PCT_CIRCULACION_INTERIOR_VIVIENDA / 100.0)
+    circ_target = util_disponible * (cfg.pct_circulacion_interior / 100.0)
 
     salon_min = (
-        _salon_cocina_min_para(n_dorms) if salon_cocina_open
-        else _salon_min_para(n_dorms)
+        _salon_cocina_min_para(n_dorms, cfg) if salon_cocina_open
+        else _salon_min_para(n_dorms, cfg)
     )
     # Nº de baños por nº de dormitorios (Anexo I.5): 1 hasta 2 dorms, 2 desde 3.
     banos_unidad = nombres_banos(banos_vivienda(n_dorms))
@@ -505,12 +552,12 @@ def programa_vivienda_combo(
         escalantes.append(("salon_cocina", salon_min))
     else:
         escalantes.append(("salon", salon_min))
-        fijas.append(("cocina", float(MIN_COCINA), float(MIN_COCINA + 1.0)))
+        fijas.append(("cocina", float(cfg.min_cocina), float(cfg.min_cocina + 1.0)))
     for i, (_tam, dmin) in enumerate(dorms, start=1):
         escalantes.append((f"dormitorio_{i}", dmin))
-    # Todos los baños son completos (MIN_BANO + 2 de target).
+    # Todos los baños son completos (min_bano + 2 de target).
     for nombre in banos_unidad:
-        fijas.append((nombre, float(MIN_BANO), float(MIN_BANO + 2.0)))
+        fijas.append((nombre, float(cfg.min_bano), float(cfg.min_bano + 2.0)))
 
     suma_fijas = sum(t for _, _, t in fijas)
     util_principal = max(0.0, util_disponible - circ_target - suma_fijas)
@@ -539,6 +586,7 @@ def programa_vivienda_combo(
 
 def _presupuesto_base_vivienda_combo(
     combo: ComboDormitorios, salon_cocina_open: bool,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
 ) -> tuple[float, float]:
     """`(Σ mínimos escalantes, Σ target fijas)` de la combinación (Anexo I.5).
 
@@ -549,18 +597,21 @@ def _presupuesto_base_vivienda_combo(
       consume `programa_vivienda_combo`.
     """
     n_dorms = combo.n_dorms
-    dorm_min_total = sum(m for _, m in _dorms_de_combo_vivienda(combo))
+    dorm_min_total = sum(m for _, m in _dorms_de_combo_vivienda(combo, cfg))
     if salon_cocina_open:
-        escalante_min = _salon_cocina_min_para(n_dorms) + dorm_min_total
+        escalante_min = _salon_cocina_min_para(n_dorms, cfg) + dorm_min_total
         fijas_target = 0.0
     else:
-        escalante_min = _salon_min_para(n_dorms) + dorm_min_total
-        fijas_target = float(MIN_COCINA + 1.0)
-    fijas_target += float(MIN_BANO + 2.0) * banos_vivienda(n_dorms)
+        escalante_min = _salon_min_para(n_dorms, cfg) + dorm_min_total
+        fijas_target = float(cfg.min_cocina + 1.0)
+    fijas_target += float(cfg.min_bano + 2.0) * banos_vivienda(n_dorms)
     return escalante_min, fijas_target
 
 
-def util_minimo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool = False) -> float:
+def util_minimo_vivienda_combo(
+    combo: ComboDormitorios, salon_cocina_open: bool = False,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
+) -> float:
     """Útil VIABLE mínimo de la combinación (Anexo I.5).
 
     Es el menor útil en que TODAS las estancias alcanzan su mínimo del Anexo I.5
@@ -580,14 +631,17 @@ def util_minimo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool 
     bloquea con error si se incumple (R3).
     """
     if combo.es_estudio:
-        return util_minimo_vivienda(0, salon_cocina_open)
-    escalante_min, fijas_target = _presupuesto_base_vivienda_combo(combo, salon_cocina_open)
-    pct = PCT_CIRCULACION_INTERIOR_VIVIENDA / 100.0
+        return util_minimo_vivienda(0, salon_cocina_open, cfg)
+    escalante_min, fijas_target = _presupuesto_base_vivienda_combo(combo, salon_cocina_open, cfg)
+    pct = cfg.pct_circulacion_interior / 100.0
     minimo = (escalante_min + fijas_target) / max(1e-6, 1.0 - pct)
     return round(minimo, 2)
 
 
-def util_objetivo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: bool = False) -> float:
+def util_objetivo_vivienda_combo(
+    combo: ComboDormitorios, salon_cocina_open: bool = False,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
+) -> float:
     """Objetivo de m² útil de la combinación = útil viable mínimo del Anexo I.5.
 
     Apunta al menor útil que cumple los mínimos (salón incluido), para que el
@@ -595,16 +649,17 @@ def util_objetivo_vivienda_combo(combo: ComboDormitorios, salon_cocina_open: boo
     A1.5 y crece con cualquier holgura adicional de la planta.
     """
     if combo.es_estudio:
-        return util_minimo_vivienda(0, salon_cocina_open)
-    return util_minimo_vivienda_combo(combo, salon_cocina_open)
+        return util_minimo_vivienda(0, salon_cocina_open, cfg)
+    return util_minimo_vivienda_combo(combo, salon_cocina_open, cfg)
 
 
 def descriptor_tipologia_vivienda_combo(
     combo: ComboDormitorios, salon_cocina_open: bool = False,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
 ) -> TipologiaUnidadDescriptor:
     """Descriptor para el reparto a partir de una combinación de vivienda."""
-    util_obj = util_objetivo_vivienda_combo(combo, salon_cocina_open)
-    util_min = util_obj if combo.es_estudio else util_minimo_vivienda_combo(combo, salon_cocina_open)
+    util_obj = util_objetivo_vivienda_combo(combo, salon_cocina_open, cfg)
+    util_min = util_obj if combo.es_estudio else util_minimo_vivienda_combo(combo, salon_cocina_open, cfg)
     return TipologiaUnidadDescriptor(
         slug=combo.slug,
         util_objetivo=util_obj,
@@ -620,6 +675,7 @@ def reparto_multi_tipologia(
     util_disponible: float,
     tipologias: list[int],
     salon_cocina_open: bool = False,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
 ) -> list[tuple[int, float]]:
     """Reparte el útil disponible entre varias tipologías de vivienda.
 
@@ -630,13 +686,16 @@ def reparto_multi_tipologia(
     if not tipologias or util_disponible <= 0:
         return []
     descriptores = [
-        descriptor_tipologia_vivienda(n, salon_cocina_open) for n in tipologias
+        descriptor_tipologia_vivienda(n, salon_cocina_open, cfg) for n in tipologias
     ]
     seleccion = reparto_multi_tipologia_generico(util_disponible, descriptores)
     return [(d.n_dorms_label, util) for d, util in seleccion]
 
 
-def programa_uso_vivienda(n_dorms: int, salon_cocina_open: bool = False):
+def programa_uso_vivienda(
+    n_dorms: int, salon_cocina_open: bool = False,
+    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
+):
     """Constructor del descriptor `ProgramaUso` para vivienda.
 
     Import perezoso para evitar ciclos: `programa_uso.py` no importa nada de
@@ -644,9 +703,9 @@ def programa_uso_vivienda(n_dorms: int, salon_cocina_open: bool = False):
     """
     from .programa_uso import ProgramaUso
     return ProgramaUso(
-        util_objetivo_unidad_m2=util_maximo(n_dorms),
-        area_min_unidad_m2=util_minimo_vivienda(n_dorms, salon_cocina_open),
-        util_max_unidad_m2=util_maximo(n_dorms) * 1.25,
+        util_objetivo_unidad_m2=util_maximo(n_dorms, cfg),
+        area_min_unidad_m2=util_minimo_vivienda(n_dorms, salon_cocina_open, cfg),
+        util_max_unidad_m2=util_maximo(n_dorms, cfg) * 1.25,
         n_dormitorios=n_dorms,
         tipo_unidad="vivienda",
         area_servicios_obligatorios_m2=0.0,

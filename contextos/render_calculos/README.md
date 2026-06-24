@@ -291,14 +291,16 @@ son tablas planas con mínimos por (categoría, tipología, estancia).
 - `anexo_i_hotelero` (PK: `categoria, tipologia, estancia`)
   — Anexo I.1; modelo "habitación" (sin cocina por unidad).
 
-### Carga en arranque
+### Lectura por cálculo (§3.8)
 
-[`aplicacion.py`](../../entrypoints/web/aplicacion.py) llama a
-`programa.cargar_desde_repo(catalogo)` (y a las funciones análogas de
-los otros programas) después de `init_db()`. Cada catálogo expone un
-método tipo `consolidadas_*()` que devuelve un dict con todos los
-valores; las funciones rellenan las constantes module-level del
-programa correspondiente.
+No hay volcado a constantes de módulo al arrancar. En cada cálculo,
+`CalcularLayout._sincronizar_minimos` construye un `Programa*Config`
+inmutable con `programa*.config_desde_repo(catalogo, …)` para el uso
+activo y lo pasa como argumento por toda la cadena de cálculo. Cada
+catálogo expone un método `consolidadas_*()` que devuelve un dict con
+los mínimos editados; las constantes de módulo son solo DEFAULTS
+inmutables (`CONFIG_DEFAULT`). Así no hay estado global compartido:
+los cálculos concurrentes y los tests quedan aislados.
 
 ### Migración SQLite
 
@@ -413,6 +415,5 @@ y el módulo de Normativa Municipal ya tiene CRUD para los parámetros
 urbanísticos. Falta exponer las tablas de superficies mínimas en una
 pantalla específica.
 
-`cargar_desde_repo()` se invoca al arrancar; si más adelante se
-necesita recargar en caliente tras edición, basta llamarla de nuevo
-con la sesión vigente.
+Las ediciones surten efecto en caliente sin recargar nada: el siguiente
+cálculo lee los mínimos vivos de BBDD vía `config_desde_repo` (§3.8).

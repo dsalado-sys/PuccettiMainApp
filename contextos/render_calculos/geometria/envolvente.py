@@ -17,6 +17,32 @@ from shapely.ops import unary_union
 from .config import Parametros
 
 
+def _normalizar(g) -> Polygon:
+    """Devuelve un Polygon válido y no vacío a partir de cualquier salida de offset.
+
+    Los offsets de Shapely (`buffer`, `difference`) pueden devolver geometrías
+    inválidas (auto-intersección en vértices cóncavos), MultiPolygon (la operación
+    partió la huella) o GeometryCollection (restos de líneas/puntos). Aquí se
+    reparan (`buffer(0)`), se descartan las piezas no poligonales y se conserva la
+    pieza poligonal de mayor área. Si no queda ninguna, devuelve un Polygon vacío,
+    que `construir_envolvente` traduce en el ValueError "no queda espacio edificable".
+    """
+    if g is None or g.is_empty:
+        return Polygon()
+    if not g.is_valid:
+        g = g.buffer(0)
+        if g.is_empty:
+            return Polygon()
+    if hasattr(g, "geoms"):
+        polys = [p for p in g.geoms if p.geom_type == "Polygon" and not p.is_empty]
+        if not polys:
+            return Polygon()
+        g = max(polys, key=lambda p: p.area)
+    if g.geom_type != "Polygon":
+        return Polygon()
+    return g
+
+
 @dataclass
 class Patio:
     geometry: Polygon
@@ -61,13 +87,12 @@ def _restar_franja_lado(huella: Polygon, p1, p2, retranqueo: float) -> Polygon:
         return huella
     seg = LineString([p1, p2])
     franja = seg.buffer(retranqueo, cap_style=2)  # cap_style=2 = flat (sin redondeo)
-    nueva = huella.difference(franja).buffer(0)
-    if nueva.is_empty:
-        return huella
-    if hasattr(nueva, "geoms"):
-        # Si la diferencia partió el polígono, conservamos la pieza más grande.
-        nueva = max(nueva.geoms, key=lambda g: g.area)
-    return nueva
+    # `_normalizar` repara invalidez, descarta restos no poligonales (LineString/
+    # GeometryCollection en vértices cóncavos) y conserva la pieza mayor. Si el
+    # retranqueo agota la huella se devuelve Polygon() vacío (antes se devolvía la
+    # huella intacta, sobreestimando el suelo edificable): así el ValueError de
+    # construir_envolvente refleja que no queda espacio (§2.7-2.9).
+    return _normalizar(huella.difference(franja))
 
 
 def _aplicar_ocupacion_maxima(huella: Polygon, ocup_area: float) -> Polygon:
@@ -105,6 +130,13 @@ def aplicar_retranqueos(parcela: Polygon, params: Parametros, lados=None) -> Pol
 
     Si `lados` es None, no hay clasificación: se aplica `retranqueo_linderos`
     como buffer uniforme negativo (comportamiento conservador).
+
+    Caso uniforme (un único retranqueo efectivo para TODOS los lados — lo habitual
+    en producción, donde la parcela suele venir con todos los lados como "fachada"):
+    se usa `buffer(-d)` con esquinas a inglete (`join_style=2`), robusto en parcelas
+    cóncavas (formas en L/U, patios). El offset por franjas solo se conserva para el
+    caso direccional real (dos retranqueos distintos con lados mezclados), donde una
+    erosión uniforme deformaría los lados que no deben moverse.
     """
     u = params.urbanismo
     r_fach = float(u.retranqueo_fachada)
@@ -116,8 +148,23 @@ def aplicar_retranqueos(parcela: Polygon, params: Parametros, lados=None) -> Pol
     if not lados:
         # Sin lados clasificados, aplicamos el mayor de los dos como uniforme.
         retranqueo = max(r_fach, r_lind)
-        return parcela.buffer(-retranqueo).buffer(0) if retranqueo > 0 else parcela
+        return _normalizar(parcela.buffer(-retranqueo, join_style=2)) if retranqueo > 0 else parcela
 
+    # Retranqueo efectivo por lado según su tipo.
+    retr_por_lado = [
+        (r_fach if getattr(l, "tipo", "fachada") == "fachada" else r_lind)
+        for l in lados
+    ]
+    distintos = {round(r, 6) for r in retr_por_lado}
+    if distintos == {0.0}:
+        return parcela
+    if len(distintos) == 1:
+        # Mismo retranqueo en todos los lados → erosión uniforme robusta a cóncavos.
+        d = next(iter(distintos))
+        return _normalizar(parcela.buffer(-d, join_style=2))
+
+    # Caso direccional real (retranqueos distintos con lados mezclados): offset por
+    # franja lado a lado. `_restar_franja_lado` ya normaliza la salida.
     huella = parcela
     for lado in lados:
         tipo = getattr(lado, "tipo", "fachada")
@@ -203,7 +250,10 @@ def construir_envolvente(
             raise ValueError("Tras aplicar ocupación máxima no queda huella construible.")
 
     espesor = params.diseno.espesor_muro_fachada
-    interior_base = huella.buffer(-espesor)
+    # `_normalizar`: el offset de muro puede partir la huella en un cuello estrecho
+    # (< 2·espesor) y devolver MultiPolygon; nos quedamos con la pieza mayor para
+    # no falsear el útil ni arrastrar geometrías inválidas a las plantas.
+    interior_base = _normalizar(huella.buffer(-espesor))
     if interior_base.is_empty:
         # Para parcelas muy pequeñas, fallback: interior = huella sin offset.
         interior_base = huella
@@ -255,7 +305,7 @@ def construir_envolvente(
     # ── Ático ────────────────────────────────────────────────────────────────
     if params.urbanismo.tiene_atico:
         huella_at = _huella_atico(huella, params.urbanismo.retranqueo_atico)
-        interior_at = huella_at.buffer(-espesor) if not huella_at.is_empty else Polygon()
+        interior_at = _normalizar(huella_at.buffer(-espesor)) if not huella_at.is_empty else Polygon()
         n_at = (plantas[-1].n + 1) if plantas else 0
         atico = Planta(
             n=n_at,

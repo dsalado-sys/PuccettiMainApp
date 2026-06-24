@@ -9,8 +9,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 RAIZ_APP = Path(__file__).resolve().parents[2]
@@ -24,31 +25,58 @@ DATABASE_URL = os.environ.get(
 )
 
 
-_es_sqlite = DATABASE_URL.startswith("sqlite")
-engine = create_engine(
-    DATABASE_URL,
-    future=True,
-    echo=False,
-    connect_args={"check_same_thread": False} if _es_sqlite else {},
-)
-
-
 class Base(DeclarativeBase):
     """Base declarativa para todos los modelos ORM de la app."""
 
 
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-    expire_on_commit=False,
-    future=True,
-)
+def _es_url_sqlite(url: str) -> bool:
+    return url.startswith("sqlite")
 
 
-def init_db() -> None:
-    """Crea las tablas si no existen y siembra catálogos. Idempotente."""
-    # Importar los módulos de modelos ORM aquí para que se registren en Base.metadata.
+def _es_sqlite_memoria(url: str) -> bool:
+    """True si la URL apunta a una SQLite en memoria (no a un fichero)."""
+    return _es_url_sqlite(url) and (":memory:" in url or url in ("sqlite://", "sqlite:///"))
+
+
+def crear_db(url: str, **engine_kwargs) -> tuple[Engine, sessionmaker]:
+    """Factoría: construye `(engine, SessionLocal)` para una URL de BBDD.
+
+    Es el único punto que conoce los detalles del motor. La app la usa con
+    `DATABASE_URL` para el adapter por defecto; los tests la usan con
+    `sqlite://` (en memoria) para aislarse de `app/data/puccetti.sqlite`.
+
+    Para SQLite en memoria fuerza `StaticPool` + `check_same_thread=False` para
+    que todas las conexiones (incluidas las de distintos hilos del TestClient)
+    compartan la misma base; de lo contrario cada conexión vería una BBDD vacía.
+    """
+    es_sqlite = _es_url_sqlite(url)
+    kwargs: dict = {
+        "future": True,
+        "echo": False,
+        "connect_args": {"check_same_thread": False} if es_sqlite else {},
+    }
+    if _es_sqlite_memoria(url):
+        kwargs["poolclass"] = StaticPool
+    kwargs.update(engine_kwargs)
+    engine = create_engine(url, **kwargs)
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        future=True,
+    )
+    return engine, session_factory
+
+
+# Instancias por defecto (compat): el resto de la app sigue importando estos
+# símbolos de módulo. Cambiar a Postgres es solo ajustar `PUCCETTI_DB_URL`.
+engine, SessionLocal = crear_db(DATABASE_URL)
+_es_sqlite = _es_url_sqlite(DATABASE_URL)
+
+
+def _registrar_modelos() -> None:
+    """Importa los módulos ORM para que se registren en `Base.metadata`."""
     from . import proyectos_sqlalchemy  # noqa: F401
     from . import callejero_sqlalchemy  # noqa: F401
     from . import normativa_municipal_sqlalchemy  # noqa: F401
@@ -59,41 +87,30 @@ def init_db() -> None:
     from . import anexo_i_hotelero_sqlalchemy  # noqa: F401
     from . import carpetas_normativa_sqlalchemy  # noqa: F401
     from . import usuarios_sqlalchemy  # noqa: F401
-    Base.metadata.create_all(bind=engine)
 
-    if _es_sqlite:
-        _migracion_sqlite_idempotente()
+
+def init_db(
+    engine: Engine | None = None,
+    session_factory: sessionmaker | None = None,
+) -> None:
+    """Crea las tablas si no existen y siembra catálogos. Idempotente.
+
+    Sin argumentos usa el `engine`/`SessionLocal` de módulo (adapter por
+    defecto). Los tests pasan un engine/sessionmaker en memoria para aislarse.
+    """
+    eng = engine if engine is not None else globals()["engine"]
+    sf = session_factory if session_factory is not None else SessionLocal
+
+    _registrar_modelos()
+    # `create_all` crea las tablas que falten (cómodo en dev/test). La EVOLUCIÓN
+    # del esquema en producción la gobierna Alembic (`alembic upgrade head`, ver
+    # `app/alembic/`): ya no se hacen ALTER ad-hoc con `except: pass`.
+    Base.metadata.create_all(bind=eng)
 
     from .callejero_seed import sembrar_callejero
     from .seed_normativa import sembrar_todo
     from .seed_usuarios import sembrar_usuarios
-    with SessionLocal() as session:
+    with sf() as session:
         sembrar_callejero(session)
         sembrar_todo(session)
         sembrar_usuarios(session)
-
-
-def _migracion_sqlite_idempotente() -> None:
-    """Aplica ALTER TABLE para columnas añadidas tras la creación de la BBDD.
-
-    SQLAlchemy `create_all` solo crea tablas que no existen; no altera tablas
-    existentes. Esta función añade columnas nuevas a tablas ya creadas, sin
-    fallar si la columna ya existe.
-    """
-    from sqlalchemy import text
-    columnas_nuevas: list[tuple[str, str, str]] = [
-        # (tabla, nombre_columna, tipo SQL)
-        ("anexo_i_vivienda", "area_target_m2", "REAL"),
-    ]
-    with engine.begin() as conn:
-        for tabla, columna, tipo in columnas_nuevas:
-            try:
-                existe = conn.execute(
-                    text(f"SELECT {columna} FROM {tabla} LIMIT 1")
-                )
-                existe.close()
-            except Exception:
-                try:
-                    conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}"))
-                except Exception:
-                    pass

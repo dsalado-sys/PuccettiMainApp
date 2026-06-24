@@ -10,6 +10,15 @@
 (function () {
   "use strict";
 
+  // Escapa texto antes de interpolarlo en innerHTML. Cubre nombres editables de
+  // carpeta/normativa, etiquetas de estancias y mensajes de error del servidor:
+  // sin esto, un valor con HTML (p. ej. `<img src=x onerror=...>`) se ejecutaría.
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
   const form = document.getElementById("rc-form");
   if (!form) return;
 
@@ -455,8 +464,8 @@
           const compCelda = computa
             ? `${fmt.m2.format(util)} m²`
             : '<span class="rc-mu-nocomp">no computa</span>';
-          tr.innerHTML = `<td class="rc-mu-est-nombre">${warn}${e.etiqueta || e.nombre}</td>
-            <td class="rc-mu-est-cat">${e.categoria || ""}</td>
+          tr.innerHTML = `<td class="rc-mu-est-nombre">${warn}${escapeHtml(e.etiqueta || e.nombre)}</td>
+            <td class="rc-mu-est-cat">${escapeHtml(e.categoria || "")}</td>
             <td class="rc-num rc-mu-col-comp">${compCelda}</td>`;
           tbody.appendChild(tr);
         });
@@ -479,7 +488,10 @@
   }
 
   // ─── Alertas — agrupadas por regla en acordeón ────────────────────────
-  const NIVEL_PESO = { error: 0, aviso: 1, info: 2 };
+  // Debe contener EXACTAMENTE los literales de NivelAlerta del backend
+  // (dominio.py): antes faltaba "incumplimiento" e inventaba un "error" no emitido,
+  // y por el fallback `?? 1` todo incumplimiento se degradaba al peso de "aviso".
+  const NIVEL_PESO = { error: 0, incumplimiento: 1, aviso: 2, info: 3 };
   function repintarAlertas(alertas) {
     if (!alertasBox || !alertasUl) return;
     if (!alertas || !alertas.length) {
@@ -498,15 +510,15 @@
     });
 
     const reglas = Array.from(grupos.keys()).sort((a, b) => {
-      const pa = Math.min(...grupos.get(a).map(x => NIVEL_PESO[x.nivel] ?? 1));
-      const pb = Math.min(...grupos.get(b).map(x => NIVEL_PESO[x.nivel] ?? 1));
+      const pa = Math.min(...grupos.get(a).map(x => NIVEL_PESO[x.nivel] ?? NIVEL_PESO.info));
+      const pb = Math.min(...grupos.get(b).map(x => NIVEL_PESO[x.nivel] ?? NIVEL_PESO.info));
       return pa - pb;
     });
 
     reglas.forEach(regla => {
       const items = grupos.get(regla);
       const nivelTop = items.reduce(
-        (acc, x) => (NIVEL_PESO[x.nivel] ?? 1) < (NIVEL_PESO[acc] ?? 1) ? x.nivel : acc,
+        (acc, x) => (NIVEL_PESO[x.nivel] ?? NIVEL_PESO.info) < (NIVEL_PESO[acc] ?? NIVEL_PESO.info) ? x.nivel : acc,
         "info"
       );
       const li = document.createElement("li");
@@ -522,7 +534,7 @@
         const det = document.createElement("details");
         det.className = "rc-alerta-detalles";
         const sum = document.createElement("summary");
-        sum.innerHTML = `<span class="rc-alerta-regla">${regla}</span>
+        sum.innerHTML = `<span class="rc-alerta-regla">${escapeHtml(regla)}</span>
           <span class="rc-alerta-contador">${items.length} avisos</span>`;
         det.appendChild(sum);
         const ul = document.createElement("ul");
@@ -674,8 +686,8 @@
         warn = `<span class="rc-mu-est-warn rc-mu-est-warn-amarillo" title="El círculo de Ø ${e.diametro_min_m} m solo cabe en planta cuadrada; no con proporción 1:1.5">⚠</span>`;
       }
       tr.innerHTML = `
-        <td class="rc-mu-est-nombre">${warn}${e.etiqueta || e.nombre}</td>
-        <td class="rc-mu-est-cat">${e.categoria || ""}</td>
+        <td class="rc-mu-est-nombre">${warn}${escapeHtml(e.etiqueta || e.nombre)}</td>
+        <td class="rc-mu-est-cat">${escapeHtml(e.categoria || "")}</td>
         <td class="rc-num">${fmt.m2.format(sup)} m²</td>
         <td class="rc-num">${fmt.m2.format(e.area_min_m2 || 0)} m²</td>`;
       tablaEstanciasBody.appendChild(tr);
@@ -724,16 +736,19 @@
   }
 
   // ─── Guardar parámetros ───────────────────────────────────────────────
+  let guardando = false;   // anti-doble-click: evita POST /guardar concurrentes
   async function guardar() {
-    if (!puedeEditar) return;
-    const bloques = leerFormulario();
-    // Iter. 3: el resumen ahora viene de data.capacidad (no de edificio.totales).
-    const resumen = ESTADO.fullPayload?.capacidad
-      || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
-      || ESTADO.fullPayload?.edificio?.totales
-      || ESTADO.previewPayload?.envolvente
-      || {};
+    if (!puedeEditar || guardando) return;
+    guardando = true;
+    if (btnGuardar) btnGuardar.disabled = true;
     try {
+      const bloques = leerFormulario();
+      // Iter. 3: el resumen ahora viene de data.capacidad (no de edificio.totales).
+      const resumen = ESTADO.fullPayload?.capacidad
+        || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
+        || ESTADO.fullPayload?.edificio?.totales
+        || ESTADO.previewPayload?.envolvente
+        || {};
       const resp = await fetch("/modulos/render-calculos/guardar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -747,6 +762,10 @@
       }
       mostrarToast("Guardado en el proyecto");
     } catch (e) { mostrarToast("Error de red", true); }
+    finally {
+      guardando = false;
+      if (btnGuardar) btnGuardar.disabled = false;
+    }
   }
 
   // ─── Export CSV ───────────────────────────────────────────────────────
@@ -868,7 +887,7 @@
       det.className = "rc-carpeta";
       det.dataset.id = c.id;
       const sum = document.createElement("summary");
-      sum.innerHTML = `<span class="rc-carpeta-nombre">${c.nombre}</span>`;
+      sum.innerHTML = `<span class="rc-carpeta-nombre">${escapeHtml(c.nombre)}</span>`;
       det.appendChild(sum);
       const ul = document.createElement("ul");
       ul.className = "rc-carpeta-normativas";
@@ -900,8 +919,8 @@
         }
         li.dataset.id = n.id;
         li.innerHTML = `<button type="button" class="rc-carpeta-cargar">
-            <strong>${n.nombre}</strong>
-            <small>${n.direccion || "—"}</small>
+            <strong>${escapeHtml(n.nombre)}</strong>
+            <small>${escapeHtml(n.direccion || "—")}</small>
           </button>`;
         li.querySelector(".rc-carpeta-cargar").addEventListener("click", () =>
           seleccionarNormativa(n.id)
@@ -1035,12 +1054,12 @@
       }
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${err.detail || "Error"}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(err.detail || "Error")}</td></tr>`;
         return;
       }
       const data = await resp.json();
       if (data.error) {
-        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${data.error}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(data.error)}</td></tr>`;
         return;
       }
       const lbl = nDorms === 0 ? "estudio (0 dormitorios)" : `${nDorms} dormitorio${nDorms > 1 ? "s" : ""}`;
