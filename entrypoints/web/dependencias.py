@@ -157,6 +157,18 @@ def eliminar_proyecto_uc(
     return EliminarProyecto(repo=repo)
 
 
+def carpetas_proyecto_repo(session: Session = Depends(sesion_bbdd)):
+    """Organización de proyectos en carpetas (capa aparte del aggregate Proyecto).
+
+    Comparte la sesión por request con el repositorio de proyectos (FastAPI
+    cachea `sesion_bbdd`), así carpetas y proyectos viven en la misma transacción.
+    """
+    from app.plataforma.persistencia.carpetas_proyecto_sqlalchemy import (
+        CarpetasProyectoSQLAlchemy,
+    )
+    return CarpetasProyectoSQLAlchemy(session)
+
+
 # ── Usuarios / autenticación ───────────────────────────────────────────────
 def repositorio_usuarios(
     session: Session = Depends(sesion_bbdd),
