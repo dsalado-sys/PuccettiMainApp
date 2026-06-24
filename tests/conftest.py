@@ -16,8 +16,8 @@ import os
 # ── Aislamiento de entorno (antes de importar la app) ───────────────────────
 # Throwaway in-memory por defecto: ningún camino accidental escribe en disco.
 os.environ.setdefault("PUCCETTI_DB_URL", "sqlite://")
-# Credenciales del usuario semilla deterministas (evita la contraseña aleatoria
-# y su volcado por consola). Permite, si hace falta, loguearse como el admin.
+# Credenciales del usuario semilla fijas para los tests. Permite, si hace falta,
+# loguearse como el admin sin depender del valor por defecto del seed.
 os.environ.setdefault("PUCCETTI_ADMIN_USER", "Arquitecto0")
 os.environ.setdefault("PUCCETTI_ADMIN_PASSWORD", "Test-Admin-1234")
 # Modo desarrollo: SECRET_KEY se autogenera; cookies no exigen https.
