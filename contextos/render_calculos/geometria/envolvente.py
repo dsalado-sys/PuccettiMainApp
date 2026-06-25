@@ -238,49 +238,70 @@ def construir_envolvente(
         if superficie_referencia and superficie_referencia > 0
         else parcela.area
     )
-    huella = aplicar_retranqueos(parcela, params, lados)
-    if huella.is_empty:
+    huella_retr = aplicar_retranqueos(parcela, params, lados)
+    if huella_retr.is_empty:
         raise ValueError("Tras retranqueos no queda espacio edificable.")
 
-    # Aplicar ocupación máxima: si la huella excede `ocupacion × superficie`, recortar.
-    ocup_area = params.urbanismo.ocupacion_maxima * sup_ref
-    if ocup_area > 0:
-        huella = _aplicar_ocupacion_maxima(huella, ocup_area)
-        if huella.is_empty:
-            raise ValueError("Tras aplicar ocupación máxima no queda huella construible.")
-
     espesor = params.diseno.espesor_muro_fachada
-    # `_normalizar`: el offset de muro puede partir la huella en un cuello estrecho
-    # (< 2·espesor) y devolver MultiPolygon; nos quedamos con la pieza mayor para
-    # no falsear el útil ni arrastrar geometrías inválidas a las plantas.
-    interior_base = _normalizar(huella.buffer(-espesor))
-    if interior_base.is_empty:
-        # Para parcelas muy pequeñas, fallback: interior = huella sin offset.
-        interior_base = huella
+
+    # Ocupación máxima POR CATEGORÍA DE PLANTA: PB (y sótano) usan la ocupación de
+    # planta baja; las plantas tipo (y el ático) la suya. Partimos de la MISMA huella
+    # tras retranqueos y la erosionamos a cada límite de forma independiente. Si ambas
+    # ocupaciones coinciden (lo habitual / proyectos sin ocupación de tipo) las huellas
+    # son idénticas y el resultado no cambia respecto al histórico.
+    def _huella_ocupada(ocup_frac: float) -> Polygon:
+        area = max(0.0, float(ocup_frac)) * sup_ref
+        if area <= 0:
+            return huella_retr
+        return _aplicar_ocupacion_maxima(huella_retr, area)
+
+    def _interior(h: Polygon) -> Polygon:
+        # `_normalizar`: el offset de muro puede partir la huella en un cuello estrecho
+        # (< 2·espesor) y devolver MultiPolygon; nos quedamos con la pieza mayor para no
+        # falsear el útil. Fallback (parcelas muy pequeñas): interior = huella sin offset.
+        if h.is_empty:
+            return Polygon()
+        i = _normalizar(h.buffer(-espesor))
+        return i if not i.is_empty else h
+
+    huella_pb = _huella_ocupada(params.urbanismo.ocupacion_maxima)
+    if huella_pb.is_empty:
+        raise ValueError("Tras aplicar ocupación máxima no queda huella construible.")
+    huella_tipo = _huella_ocupada(
+        getattr(params.urbanismo, "ocupacion_maxima_tipo", params.urbanismo.ocupacion_maxima)
+    )
+    if huella_tipo.is_empty:
+        huella_tipo = huella_pb
+
+    interior_pb = _interior(huella_pb)
+    interior_tipo = _interior(huella_tipo)
 
     plantas: list[Planta] = []
     edif_acumulada = 0.0
 
-    # ── Sótano ───────────────────────────────────────────────────────────────
+    # ── Sótano (bajo rasante: ocupa la huella completa de PB) ──────────────────
     if params.urbanismo.tiene_sotano:
         sotano = Planta(
             n=-1,
-            footprint=huella,
-            interior=interior_base,
+            footprint=huella_pb,
+            interior=interior_pb,
             patios=[],
-            area_construida_m2=huella.area,
-            area_util_m2=interior_base.area,
+            area_construida_m2=huella_pb.area,
+            area_util_m2=interior_pb.area,
             computa_edif=params.urbanismo.sotano_computa_edificabilidad,
             tipo="sotano",
         )
         plantas.append(sotano)
         if sotano.computa_edif:
-            edif_acumulada += huella.area
+            edif_acumulada += huella_pb.area
 
-    # ── Plantas regulares ────────────────────────────────────────────────────
+    # ── Plantas regulares: la primera (PB) usa la huella de PB; el resto, la de las
+    #    plantas tipo (su propia ocupación). ──────────────────────────────────
+    huella_ultima_regular = huella_pb
     for n in range(params.programa.n_plantas):
-        f = huella
-        i = interior_base
+        f = huella_pb if n == 0 else huella_tipo
+        i = interior_pb if n == 0 else interior_tipo
+        huella_ultima_regular = f
         patios: list[Patio] = []
         patio = detectar_patio(i, params)
         if patio is not None:
@@ -303,8 +324,10 @@ def construir_envolvente(
         edif_acumulada += f.area
 
     # ── Ático ────────────────────────────────────────────────────────────────
+    # Retranqueo perimetral sobre la huella de la planta inmediatamente inferior
+    # (plantas tipo si las hay; si no, PB). El ático comparte el perfil de las tipo.
     if params.urbanismo.tiene_atico:
-        huella_at = _huella_atico(huella, params.urbanismo.retranqueo_atico)
+        huella_at = _huella_atico(huella_ultima_regular, params.urbanismo.retranqueo_atico)
         interior_at = _normalizar(huella_at.buffer(-espesor)) if not huella_at.is_empty else Polygon()
         n_at = (plantas[-1].n + 1) if plantas else 0
         atico = Planta(
@@ -330,8 +353,13 @@ def construir_envolvente(
     if getattr(urb, "usar_coeficiente_edificabilidad", True):
         edif_max = sup_ref * urb.coeficiente_edificabilidad
     else:
-        ocup_area_max = urb.ocupacion_maxima * sup_ref
-        edif_max = ocup_area_max * max(1, urb.n_plantas_max)
+        # Techo por ocupación × nº de plantas → cota SUPERIOR. Se usa la MAYOR de las
+        # dos ocupaciones (PB / plantas tipo), porque la planta de mayor huella puede
+        # ser la tipo (PB comercial retranqueada + plantas voladas): así el consumo
+        # real (huella_pb + (n−1)·huella_tipo) nunca supera n·max(ocup)·sup_ref y no
+        # se dispara un falso exceso de edificabilidad.
+        ocup_max = max(urb.ocupacion_maxima, getattr(urb, "ocupacion_maxima_tipo", urb.ocupacion_maxima))
+        edif_max = ocup_max * sup_ref * max(1, urb.n_plantas_max)
     return Envolvente(
         parcela=parcela,
         plantas=plantas,

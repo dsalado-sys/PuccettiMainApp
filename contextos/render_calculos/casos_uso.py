@@ -1127,7 +1127,9 @@ class ValidarCumplimiento:
 
         # ── Límites SUPERIORES (proyecto > normativa → incumplimiento) ──
         superiores = [
-            ("Ocupación máxima", urb_p.ocupacion_maxima_pct,
+            ("Ocupación máxima (PB)", urb_p.ocupacion_maxima_pct,
+             normativa.ocupacion_maxima_pct, "%", 0),
+            ("Ocupación máxima (plantas tipo)", urb_p.ocupacion_maxima_pct_tipo,
              normativa.ocupacion_maxima_pct, "%", 0),
             ("Plantas máximas", urb_p.n_plantas_max,
              normativa.n_plantas_max, "", 0),

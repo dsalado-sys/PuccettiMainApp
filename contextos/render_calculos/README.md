@@ -123,6 +123,15 @@ para todo el edificio y el sótano forzaba circulación 0).
 replica PB en todas las plantas → resultado idéntico al histórico hasta que el
 usuario edita una planta tipo/ático/sótano.
 
+**Ocupación máxima por planta** (`urbanisticos.ocupacion_maxima_pct` y
+`…_pct_tipo`): la huella se calcula por categoría en
+[`construir_envolvente`](geometria/envolvente.py). PB y sótano usan la ocupación
+de planta baja; las plantas regulares por encima de PB (y el ático, retranqueado
+sobre la planta inferior) usan la de plantas tipo. Si la clave `…_pct_tipo` no
+viene en el JSON, **hereda** la de PB → todas las plantas comparten huella
+(comportamiento previo). El recorte por ocupación es una erosión uniforme de la
+misma huella tras retranqueos, independiente para cada límite.
+
 ---
 
 ## 4. Reparto multi-tipología (use-agnóstico)
@@ -374,9 +383,10 @@ sobre `NormativaMunicipal` archivada en BBDD.
   orientación cardinal (normal exterior, no azimut del segmento).
 - **Pestañas de planta**: PB / P1 / P2 / Ático / S1. PB es independiente: en
   ella se edita todo (urbanismo, opciones de sótano/ático, uso, % local PB,
-  tipología y ambas secciones de Diseño). En las plantas tipo solo se edita el
-  **tipo de unidad** y **Diseño · muros** + **Diseño · circulación y
-  accesibilidad**; ático y sótano solo su **% muros** y **% circulación**. La
+  tipología y ambas secciones de Diseño). En las plantas tipo se edita el
+  **tipo de unidad**, la **ocupación máxima de plantas tipo** (recorta su
+  huella) y **Diseño · muros** + **Diseño · circulación y accesibilidad**;
+  ático y sótano solo su **% muros** y **% circulación**. La
   visibilidad combina `data-cuando-uso` × `data-visible-en-planta`
   (`pb|tipo|atico|sotano`) en `aplicarVisibilidad`; cada campo editable por
   planta se enruta con `data-bloque` (`diseno`/`diseno_tipo`/`diseno_atico`/

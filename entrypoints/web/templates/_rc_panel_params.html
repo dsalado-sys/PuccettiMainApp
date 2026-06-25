@@ -54,7 +54,9 @@
   {% set es_inmueble = modo and modo.es_inmueble %}
 
   {% if "urbanismo" not in _ocultas %}
-  <details class="rc-grupo" open data-visible-en-planta="pb">
+  {# Grupo visible en PB y en plantas tipo: en la pestaña «tipo» solo aparece la
+     ocupación de plantas tipo; el resto de valores son de EDIFICIO (gated a «pb»). #}
+  <details class="rc-grupo" open data-visible-en-planta="pb tipo">
     <summary><span class="rc-grupo-titulo">Urbanismo</span>
       {% if pgou_municipio_activo %}
         <span class="rc-badge rc-badge-dorado" title="Valores cargados del PGOU del municipio">
@@ -67,13 +69,13 @@
       {% set urb = parametros.urbanisticos %}
 
       {% if "edificabilidad" not in _ocultas %}
-      <label class="rc-checkbox">
+      <label class="rc-checkbox" data-visible-en-planta="pb">
         <input type="checkbox" name="usar_coeficiente_edificabilidad"
                {% if urb.usar_coeficiente_edificabilidad %}checked{% endif %}
                data-bloque="urbanisticos" id="rc-chk-usar-coef">
         <span>Usar coeficiente de edificabilidad</span>
       </label>
-      <label class="rc-campo">
+      <label class="rc-campo" data-visible-en-planta="pb">
         <span class="rc-campo-label">Coeficiente de edificabilidad (m²t/m²s)</span>
         <input type="number" name="coeficiente_edificabilidad" min="0.1" max="8" step="0.05"
                value="{{ urb.coeficiente_edificabilidad }}" data-bloque="urbanisticos"
@@ -82,22 +84,22 @@
       </label>
       {% endif %}
 
+      {# Ocupación máxima por categoría de planta: PB (pestaña «pb») y plantas tipo
+         (pestaña «tipo»). La de tipo recorta la huella de las plantas de piso; si
+         ambas coinciden, todas las plantas comparten huella (comportamiento previo). #}
       {% if "ocupacion" not in _ocultas %}
-      <label class="rc-campo">
-        <span class="rc-campo-label">Ocupación máxima (%)</span>
-        <input type="number" name="ocupacion_maxima_pct" min="10" max="100" step="1"
-               value="{{ urb.ocupacion_maxima_pct }}" data-bloque="urbanisticos">
-      </label>
+      {{ dnum("Ocupación máxima (PB) (%)", "ocupacion_maxima_pct", "urbanisticos", urb.ocupacion_maxima_pct, "10", "100", "1", "pb") }}
+      {{ dnum("Ocupación máxima (plantas tipo) (%)", "ocupacion_maxima_pct_tipo", "urbanisticos", urb.ocupacion_maxima_pct_tipo, "10", "100", "1", "tipo") }}
       {% endif %}
 
-      <label class="rc-campo">
+      <label class="rc-campo" data-visible-en-planta="pb">
         <span class="rc-campo-label">Número máximo de plantas</span>
         <input type="number" name="n_plantas_max" min="1" max="20" step="1"
                value="{{ urb.n_plantas_max }}" data-bloque="urbanisticos">
       </label>
 
       {% if "retranqueos" not in _ocultas %}
-      <div class="rc-fila">
+      <div class="rc-fila" data-visible-en-planta="pb">
         <label class="rc-campo">
           <span class="rc-campo-label">Retranq. fachada (m)</span>
           <input type="number" name="retranqueo_fachada_m" min="0" max="10" step="0.1"
@@ -111,7 +113,7 @@
       </div>
       {% endif %}
 
-      <fieldset class="rc-usos">
+      <fieldset class="rc-usos" data-visible-en-planta="pb">
         <legend>Usos permitidos por el PGOU</legend>
         {% for u, label in [("residencial", "Residencial"), ("hotelero", "Hotelero"), ("terciario", "Terciario"), ("mixto", "Mixto")] %}
           <label class="rc-checkbox">
@@ -123,7 +125,7 @@
         {% endfor %}
       </fieldset>
 
-      <div class="rc-fila">
+      <div class="rc-fila" data-visible-en-planta="pb">
         <label class="rc-campo">
           <span class="rc-campo-label">Luz mín. patio (m)</span>
           <input type="number" name="luz_recta_patio_min_m" min="0" step="0.1"
@@ -139,7 +141,7 @@
       {# Patios reales del edificio: una superficie por patio. El cálculo descuenta
          su suma en cada planta; «Luz/Área mín.» de arriba son solo referencia
          normativa. Inputs con name="patios" → el JS los recoge como array. #}
-      <fieldset class="rc-patios">
+      <fieldset class="rc-patios" data-visible-en-planta="pb">
         <legend>Patios del edificio</legend>
         <div class="rc-patios-lista" id="rc-patios-lista">
           {% for area in urb.patios %}

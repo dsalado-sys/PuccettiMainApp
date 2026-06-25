@@ -53,7 +53,8 @@ class ParametrosUrbanisticos:
     """
     coeficiente_edificabilidad: float = 2.5
     usar_coeficiente_edificabilidad: bool = True
-    ocupacion_maxima: float = 1.00
+    ocupacion_maxima: float = 1.00       # ocupación de la PLANTA BAJA (y sótano)
+    ocupacion_maxima_tipo: float = 1.00  # ocupación de las PLANTAS TIPO (y ático)
     n_plantas_max: int = 3
     retranqueo_fachada: float = 0.0
     retranqueo_linderos: float = 0.0

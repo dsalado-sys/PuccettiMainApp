@@ -49,7 +49,8 @@ class ParametrosUrbanisticos:
     # ── límites SUPERIORES ──
     coeficiente_edificabilidad: float = 2.5
     usar_coeficiente_edificabilidad: bool = True
-    ocupacion_maxima_pct: float = 100.0     # 0..100
+    ocupacion_maxima_pct: float = 100.0      # 0..100 — ocupación de la PLANTA BAJA (y sótano)
+    ocupacion_maxima_pct_tipo: float = 100.0  # 0..100 — ocupación de las PLANTAS TIPO (y ático)
     n_plantas_max: int = 3
     diametro_max_vestibulo_m: float = 1.50  # SUPERIOR
     espesor_muro_medianero_max_m: float = 0.25      # SUPERIOR
@@ -235,6 +236,7 @@ class ParametrosRender:
                 coeficiente_edificabilidad=self.urbanisticos.coeficiente_edificabilidad,
                 usar_coeficiente_edificabilidad=self.urbanisticos.usar_coeficiente_edificabilidad,
                 ocupacion_maxima=max(0.0, min(1.0, self.urbanisticos.ocupacion_maxima_pct / 100.0)),
+                ocupacion_maxima_tipo=max(0.0, min(1.0, self.urbanisticos.ocupacion_maxima_pct_tipo / 100.0)),
                 n_plantas_max=self.urbanisticos.n_plantas_max,
                 retranqueo_fachada=self.urbanisticos.retranqueo_fachada_m,
                 retranqueo_linderos=self.urbanisticos.retranqueo_linderos_m,
@@ -302,6 +304,7 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
             "coeficiente_edificabilidad": p.urbanisticos.coeficiente_edificabilidad,
             "usar_coeficiente_edificabilidad": p.urbanisticos.usar_coeficiente_edificabilidad,
             "ocupacion_maxima_pct": p.urbanisticos.ocupacion_maxima_pct,
+            "ocupacion_maxima_pct_tipo": p.urbanisticos.ocupacion_maxima_pct_tipo,
             "n_plantas_max": p.urbanisticos.n_plantas_max,
             "retranqueo_fachada_m": p.urbanisticos.retranqueo_fachada_m,
             "retranqueo_linderos_m": p.urbanisticos.retranqueo_linderos_m,
@@ -469,6 +472,12 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         retr_fachada = 0.0
         retr_linderos = r_old
 
+    # Ocupación máxima: PB y plantas tipo. Si el JSON no trae la clave de tipo,
+    # HEREDA la de PB → un proyecto con una sola ocupación da la misma huella en
+    # todas las plantas (comportamiento idéntico al histórico).
+    ocup_pb = _f(urb_in, "ocupacion_maxima_pct", base.urbanisticos.ocupacion_maxima_pct)
+    ocup_tipo = _f(urb_in, "ocupacion_maxima_pct_tipo", ocup_pb)
+
     usos_raw = urb_in.get("usos_permitidos") or list(base.urbanisticos.usos_permitidos)
     usos_validos = [str(v) for v in usos_raw if isinstance(v, str) and v in USOS_PGOU_VALIDOS]
     if not usos_validos:
@@ -494,7 +503,8 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
     urb = ParametrosUrbanisticos(
         coeficiente_edificabilidad=coef,
         usar_coeficiente_edificabilidad=_b(urb_in, "usar_coeficiente_edificabilidad", base.urbanisticos.usar_coeficiente_edificabilidad),
-        ocupacion_maxima_pct=_f(urb_in, "ocupacion_maxima_pct", base.urbanisticos.ocupacion_maxima_pct),
+        ocupacion_maxima_pct=ocup_pb,
+        ocupacion_maxima_pct_tipo=ocup_tipo,
         n_plantas_max=max(1, min(_i(urb_in, "n_plantas_max", base.urbanisticos.n_plantas_max), N_PLANTAS_LIMITE)),
         retranqueo_fachada_m=retr_fachada,
         retranqueo_linderos_m=retr_linderos,

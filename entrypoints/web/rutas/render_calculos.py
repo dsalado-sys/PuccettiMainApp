@@ -144,6 +144,14 @@ def _aplicar_normativa_secciones_ocultas(
             if hasattr(normativa, attr):
                 setattr(params.urbanisticos, attr, getattr(normativa, attr))
 
+    # La normativa archivada solo guarda UNA ocupación (no distingue PB de plantas tipo).
+    # Si el modo oculta la sección "ocupacion", el panel no envía ninguno de los dos
+    # campos; tras tomar la de PB de la normativa, espejamos ese valor en plantas tipo
+    # para conservar la OCUPACIÓN ÚNICA (misma huella en todas las plantas), como en el
+    # histórico de un solo campo. Sin esto, plantas tipo se quedarían al 100%.
+    if "ocupacion" in modo_cfg.secciones_ocultas:
+        params.urbanisticos.ocupacion_maxima_pct_tipo = params.urbanisticos.ocupacion_maxima_pct
+
 
 def _estado_pantalla(proyecto: Proyecto | None) -> str:
     if proyecto is None:

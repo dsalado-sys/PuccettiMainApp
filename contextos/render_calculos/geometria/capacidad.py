@@ -284,11 +284,16 @@ def calcular_capacidad(
 
     huella = envolvente.plantas[0].footprint.area if envolvente.plantas else parcela_area
     coef = urb.coeficiente_edificabilidad
+    # `ocup_area` = ocupación de PB (KPI `ocupacion_area_m2`, huella efectiva y factor
+    # limitante, todos referidos a la planta baja). El TECHO por ocupación, en cambio,
+    # usa la MAYOR de PB/tipo: la planta de mayor huella puede ser la tipo, y el consumo
+    # (suma de huellas por planta) debe caber bajo el techo sin falsear el exceso.
     ocup_area = urb.ocupacion_maxima * parcela_area
+    ocup_max = max(urb.ocupacion_maxima, getattr(urb, "ocupacion_maxima_tipo", urb.ocupacion_maxima))
     if getattr(urb, "usar_coeficiente_edificabilidad", True):
         edificabilidad_m2 = coef * parcela_area
     else:
-        edificabilidad_m2 = ocup_area * max(1, urb.n_plantas_max)
+        edificabilidad_m2 = ocup_max * parcela_area * max(1, urb.n_plantas_max)
     huella_efectiva = min(huella, ocup_area) if ocup_area > 0 else huella
 
     # Perfiles de tipología: PB (params) y plantas tipo (params_tipo). El ático
