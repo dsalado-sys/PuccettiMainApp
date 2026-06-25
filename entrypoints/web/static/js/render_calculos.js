@@ -1100,9 +1100,11 @@
     const body = document.getElementById("rc-modal-tip-body");
     const vacio = document.getElementById("rc-modal-tip-vacio");
     const podadas = document.getElementById("rc-modal-tip-podadas");
+    const excluidasEl = document.getElementById("rc-modal-tip-excluidas");
     body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Calculando…</td></tr>';
     vacio.hidden = true;
     podadas.hidden = true;
+    if (excluidasEl) excluidasEl.hidden = true;
     if (typeof modalTip.showModal === "function") modalTip.showModal();
     else modalTip.setAttribute("open", "");
     try {
@@ -1128,9 +1130,27 @@
       const lbl = nDorms === 0 ? "estudio (0 dormitorios)" : `${nDorms} dormitorio${nDorms > 1 ? "s" : ""}`;
       sub.textContent = `Combinaciones para ${lbl} · categoría ${data.categoria}.`;
       const combos = data.combinaciones || [];
+      const excluidas = data.excluidas_util_maximo || [];
+
+      // Combinaciones que no caben en el útil máximo de la tipología (R3): se
+      // muestran las viables y se avisa de las excluidas, en vez de bloquear todo.
+      if (excluidasEl && excluidas.length) {
+        excluidasEl.hidden = false;
+        const techo = excluidas[0].util_maximo_m2;
+        const detalle = excluidas
+          .map(e => `«${e.etiqueta}» (necesita ${fmt.m2.format(e.util_minimo_m2)} m²)`)
+          .join(", ");
+        excluidasEl.textContent =
+          `${excluidas.length} combinación(es) no caben en el útil máximo de la tipología ` +
+          `(${fmt.m2.format(techo)} m²): ${detalle}. Sube el útil máximo de esa tipología ` +
+          `o reduce sus superficies mínimas.`;
+      }
+
       body.innerHTML = "";
       if (!combos.length) {
-        vacio.hidden = false;
+        // Si todas se excluyeron por útil máximo, la nota de arriba ya lo explica;
+        // si no, el vacío genérico (no caben en la envolvente).
+        if (!excluidas.length) vacio.hidden = false;
         return;
       }
       for (const c of combos) {

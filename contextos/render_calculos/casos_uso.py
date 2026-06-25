@@ -872,6 +872,9 @@ class CalcularTipologiasDormitorios:
         cfg = layout._sincronizar_minimos(params)
 
         # Despacho por uso: alfabeto de tamaños, objetivo, mínimo y plazas.
+        # `techo_util_maximo`: solo vivienda tiene útil máximo editable por
+        # tipología (R3); los demás usos no tienen techo del que excluir combos.
+        techo_util_maximo = None
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             from .geometria.programa_apartamentos import (
                 PLAZAS, TAMANOS_DORMITORIO, util_minimo_combo,
@@ -886,7 +889,7 @@ class CalcularTipologiasDormitorios:
         elif uso == UsoEdificio.VIVIENDA:
             from .geometria.programa import (
                 PLAZAS_DORMITORIO_VIVIENDA, TAMANOS_DORMITORIO_VIVIENDA,
-                util_minimo_vivienda_combo, util_objetivo_vivienda_combo,
+                util_maximo, util_minimo_vivienda_combo, util_objetivo_vivienda_combo,
             )
             salon_open = bool(prog.salon_cocina_open)
             tamanos = TAMANOS_DORMITORIO_VIVIENDA
@@ -896,6 +899,7 @@ class CalcularTipologiasDormitorios:
                 util_objetivo_vivienda_combo(combo, salon_open, cfg) if combo.es_estudio
                 else util_minimo_vivienda_combo(combo, salon_open, cfg)
             )
+            techo_util_maximo = lambda combo: util_maximo(combo.n_dorms, cfg)
             meta = {"categoria": prog.categoria_vivienda.value}
         else:
             return {
@@ -907,10 +911,30 @@ class CalcularTipologiasDormitorios:
         combos = sorted(enumerar_combinaciones(n_dorms, tamanos), key=objetivo)
 
         viables: list[dict[str, Any]] = []
+        excluidas: list[dict[str, Any]] = []
         for combo in combos:
+            # R3 (solo vivienda): si el útil mínimo viable de la combinación supera
+            # su útil máximo editable, esa combinación no se puede construir, pero NO
+            # invalida a las demás → se reporta como excluida, sin abortar la lista
+            # (antes el error de un combo descartaba también los viables anteriores).
+            if techo_util_maximo is not None:
+                umax = techo_util_maximo(combo)
+                umin = minimo(combo)
+                if umin > umax + 1e-6:
+                    excluidas.append({
+                        "slug": combo.slug,
+                        "composicion": dict(combo.composicion),
+                        "etiqueta": _etiqueta_combo(combo.composicion),
+                        "n_dorms": combo.n_dorms,
+                        "plazas": combo.plazas(plazas_map),
+                        "util_minimo_m2": round(umin, 2),
+                        "util_maximo_m2": round(umax, 2),
+                    })
+                    continue
             res = layout.ejecutar(parcela, params, combo_override=combo.slug)
             if res.get("error"):
-                # Envolvente inválida: no depende de la combinación → abortar.
+                # Error real (envolvente inválida): no depende de la combinación →
+                # abortar (el caso de útil máximo ya se filtró arriba sin abortar).
                 return {"error": res["error"], "n_dorms": n_dorms, "combinaciones": []}
             cap = res.get("capacidad") or {}
             n_unidades = int(cap.get("n_viviendas_objetivo", 0) or 0)
@@ -932,7 +956,8 @@ class CalcularTipologiasDormitorios:
             **meta,
             "total_combinaciones": len(combos),
             "viables": len(viables),
-            "podadas": len(combos) - len(viables),
+            "podadas": len(combos) - len(viables) - len(excluidas),
+            "excluidas_util_maximo": excluidas,
             "combinaciones": viables,
         }
 
