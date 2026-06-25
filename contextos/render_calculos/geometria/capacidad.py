@@ -25,6 +25,12 @@ Planta tipo / ático:
 Sótanos: viv=0 forzado. Ático: si computa_edif=False no consume techo.
 Reparto multi-tipología: si hay tipologías_extra, se asigna ≥1 unidad de
 cada y se rellena el sobrante con la más pequeña.
+
+Edificabilidad: el exceso sobre el techo (`construida_computable_total >
+edificabilidad_m2`) marca el factor limitante y dispara el aviso de incumplimiento,
+pero NO retira plantas del reparto. Todas las plantas habitables con útil alojan
+unidades, también las que superan el techo (p. ej. una planta consolidada/legalizada
+por antigüedad en rehabilitación, que se usa como una planta más).
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -116,7 +122,7 @@ class Capacidad:
     # Detalle por unidad de cada planta: lista [(n_dorms, util_m2), ...].
     # Permite a `tabla_unidad_desde_capacidad` generar una fila por unidad con
     # su tipología y útil real (sin promediar). Las plantas sin viviendas
-    # (sotano, ático no admitido…) guardan lista vacía.
+    # (sótano, o una planta sin útil tras descuentos) guardan lista vacía.
     unidades_por_planta: list[list[tuple[int, float]]] = field(default_factory=list)
     # Slug de tipología de cada unidad (paralelo a `unidades_por_planta`). Permite
     # a la serialización regenerar las estancias por unidad cuando la planta mezcla
@@ -324,36 +330,13 @@ def calcular_capacidad(
         max(1, int(edificabilidad_m2 // huella_efectiva)) if huella_efectiva else 1
     )
 
-    # Recorte por techo: si la suma de plantas computables excede, las de arriba
-    # quedan sin admitir (generan 0 unidades). La admisión es CONTIGUA de abajo
-    # arriba: en cuanto una planta computable no cabe en el techo restante, ni ella
-    # ni ninguna superior se admiten (`freno`). Una planta no computable (ático)
-    # solo se admite si la planta habitable inmediatamente inferior fue admitida —
-    # así nunca "vuela" sobre regulares rechazadas, compute o no edificabilidad.
-    # El sótano (siempre el primero, bajo rasante) se admite aparte: no aloja
-    # unidades, así que no puede falsear el reparto.
+    # El exceso de edificabilidad NO retira plantas del reparto: solo alimenta el factor
+    # limitante y el aviso de incumplimiento (`_alertas_envolvente` / `ValidarCumplimiento`,
+    # ambos independientes de aquí). Todas las plantas habitables con útil reparten unidades,
+    # también las que superan el techo (p. ej. una planta consolidada/legalizada por
+    # antigüedad en rehabilitación, que se usa como una planta más). El sótano no aloja
+    # unidades por su propia rama (`cat == "sotano"`), no por el techo.
     excede_techo = construida_computable_total > edificabilidad_m2 + 1e-3
-    techo_restante = edificabilidad_m2
-    plantas_admitidas_idx: set[int] = set()
-    freno = False
-    hay_regular_admitida = False
-    for i, p in enumerate(plantas):
-        if freno:
-            continue
-        if p.computa_edif:
-            if techo_restante + 1e-3 >= p.footprint.area:
-                plantas_admitidas_idx.add(i)
-                techo_restante -= p.footprint.area
-                if p.tipo != "sotano":
-                    hay_regular_admitida = True
-            else:
-                freno = True
-        elif p.tipo == "sotano":
-            plantas_admitidas_idx.add(i)
-        elif hay_regular_admitida:
-            plantas_admitidas_idx.add(i)
-        else:
-            freno = True
 
     factor_limitante = "ninguno (cumple holgado)"
     if pct_total_max >= 100.0:
@@ -398,10 +381,10 @@ def calcular_capacidad(
         # construida que se REPORTA (sin patio) se calcula más abajo, una vez
         # conocido `patio_i`.
         construida_i = p.footprint.area
-        admitida = i in plantas_admitidas_idx
-        if p.computa_edif and admitida:
-            # La edificabilidad (techo consumido) se sigue midiendo sobre la
-            # huella completa; es un concepto distinto del construido.
+        if p.computa_edif:
+            # La edificabilidad (techo consumido) se mide sobre la huella completa de
+            # TODAS las plantas que computan; es un concepto distinto del construido y
+            # ya no depende de ninguna admisión por techo (coincide con el consumo real).
             construida_computable_efectiva += construida_i
 
         cat = _categoria_planta(p, es_primera_regular)
@@ -493,7 +476,7 @@ def calcular_capacidad(
             util_disponible_planta = util_disponible_i
             util_total += util_disponible_planta
 
-            if admitida and util_disponible_i > 0 and perfil.util_viv > 0:
+            if util_disponible_i > 0 and perfil.util_viv > 0:
                 unidades_i, tipologias_i = _reparto_planta(util_disponible_i, perfil, cfg_vivienda)
                 viv_i = len(unidades_i)
                 mix_counts: dict[str, int] = {}

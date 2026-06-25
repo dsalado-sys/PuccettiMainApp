@@ -1087,9 +1087,6 @@ class ValidarCumplimiento:
         parcela: ParcelaMetrica,
         params: ParametrosRender,
         normativa: ParametrosUrbanisticos | None,
-        *,
-        edificabilidad_consumida_m2: float | None = None,
-        superficie_referencia_m2: float | None = None,
     ) -> list[Alerta]:
         alertas: list[Alerta] = []
 
@@ -1100,22 +1097,17 @@ class ValidarCumplimiento:
         dis_p = params.diseno
         prog_p = params.programa
 
-        # ── Edificabilidad: el cumplimiento se mide por el CONSUMO REAL contra el
-        # coeficiente NORMATIVO, no por el coeficiente de ENTRADA del proyecto. Así
-        # vale igual con dimensionado por coeficiente o por ocupación: cuando el
-        # proyecto desmarca el coeficiente (`usar_coeficiente_edificabilidad=False`),
-        # antes el techo legal dejaba de vigilarse y un exceso quedaba silenciado. Si
-        # no llega el consumo, se cae al contraste del coeficiente declarado, solo
-        # cuando el proyecto efectivamente dimensiona por él.
-        if edificabilidad_consumida_m2 is not None and superficie_referencia_m2:
-            techo_legal = superficie_referencia_m2 * normativa.coeficiente_edificabilidad
-            if edificabilidad_consumida_m2 > techo_legal + 1e-3:
-                alertas.append(Alerta(
-                    "incumplimiento", "Normativa",
-                    f"Edificabilidad consumida ({edificabilidad_consumida_m2:.2f} m²) "
-                    f"supera el máximo del coeficiente normativo ({techo_legal:.2f} m²).",
-                ))
-        elif (
+        # ── Edificabilidad ──
+        # El "techo" (consumo real vs límite) lo vigila `_alertas_envolvente` con el
+        # criterio que el proyecto haya elegido: por coeficiente o —si desmarca la
+        # casilla— por ocupación × nº de plantas. Replicarlo aquí contra el coeficiente
+        # normativo (a) duplicaba el aviso (mismo número cuando el coeficiente del
+        # proyecto es el del PGOU) y (b) seguía saltando aunque el proyecto NO
+        # dimensionara por coeficiente. A nivel de cumplimiento basta contrastar el
+        # PARÁMETRO declarado con el normativo, como el resto de límites SUPERIORES, y
+        # solo cuando el proyecto dimensiona por coeficiente (si lo desmarca, el suelo
+        # se rige por ocupación y altura, validadas aparte más abajo).
+        if (
             urb_p.usar_coeficiente_edificabilidad
             and urb_p.coeficiente_edificabilidad > normativa.coeficiente_edificabilidad + 1e-6
         ):

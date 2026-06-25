@@ -383,13 +383,7 @@ def preview(
     _aplicar_normativa_secciones_ocultas(params, payload, normativa)
     resultado = CalcularEnvolvente().ejecutar(parcela, params)
 
-    env = resultado.get("envolvente") or {}
-    parc = resultado.get("parcela") or {}
-    alertas_extra = ValidarCumplimiento().ejecutar(
-        parcela, params, normativa,
-        edificabilidad_consumida_m2=env.get("edificabilidad_consumida_m2"),
-        superficie_referencia_m2=parc.get("area_m2"),
-    )
+    alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
     resultado["alertas"] = list(resultado.get("alertas", [])) + [
         {"nivel": a.nivel, "regla": a.regla, "mensaje": a.mensaje, "elemento": a.elemento}
         for a in alertas_extra
@@ -430,13 +424,7 @@ def calcular(
     )
     resultado = caso_uso.ejecutar(parcela, params, combo_override=combo_override)
 
-    env = resultado.get("envolvente") or {}
-    parc = resultado.get("parcela") or {}
-    alertas_extra = ValidarCumplimiento().ejecutar(
-        parcela, params, normativa,
-        edificabilidad_consumida_m2=env.get("edificabilidad_consumida_m2"),
-        superficie_referencia_m2=parc.get("area_m2"),
-    )
+    alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
     resultado["alertas"] = list(resultado.get("alertas", [])) + [
         {"nivel": a.nivel, "regla": a.regla, "mensaje": a.mensaje, "elemento": a.elemento}
         for a in alertas_extra
