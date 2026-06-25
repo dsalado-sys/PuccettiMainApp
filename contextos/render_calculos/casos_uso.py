@@ -50,7 +50,6 @@ from .puertos import (
     CatalogoHotelApartamentoRepositorio,
     CatalogoHoteleroRepositorio,
     CatalogoSuperficiesRepositorio,
-    NormativaMunicipalRepositorio,
 )
 
 
@@ -1567,8 +1566,7 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
             alertas.append(Alerta(
                 "info", "Capacidad",
                 f"Sobran {sobrante:.2f} m² útiles tras truncar — si reduces el "
-                f"objetivo por unidad (hoy {cap.util_objetivo_viv_m2:.2f} m²) "
-                f"podría caber 1 unidad más.",
+                f"mínimo por estancias podría caber 1 unidad más.",
             ))
 
     if programa_uso is not None and programa_uso.tipo_unidad in (
