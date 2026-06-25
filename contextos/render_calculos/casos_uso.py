@@ -1542,7 +1542,7 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
         prog = params.programa
         if programa_uso.tipo_unidad == "apartamento":
             cat, tip = prog.categoria_apartamentos.value, prog.tipologia_apartamento.value
-            etiqueta_area = "áreas comunes y sociales obligatorias"
+            etiqueta_area = "áreas comunes y sociales obligatorias en la columna de circulación"
         else:  # habitacion
             cat, tip = prog.categoria_hotelero.value, prog.tipologia_habitacion.value
             etiqueta_area = "áreas sociales del establecimiento"
