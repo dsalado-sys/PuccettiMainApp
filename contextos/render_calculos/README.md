@@ -25,7 +25,6 @@ app/contextos/render_calculos/
 │   ├── capacidad.py           # Bucle por planta → capacidad numérica
 │   ├── programa.py            # Anexo I.5 vivienda VPO + política escalado
 │   ├── programa_apartamentos.py     # Anexo I.3 (edificios) + I.4 (conjuntos) Decreto 194/2010
-│   ├── programa_hotel_apartamento.py # Anexo I.2 hoteles-apartamento (estrellas)
 │   ├── programa_hotelero.py         # Anexo I.1 hotel/hostal/pensión/albergue (habitación)
 │   ├── programa_uso.py        # `ProgramaUso` + `TipologiaUnidadDescriptor` + reparto genérico
 │   ├── macro_layout.py        # Generación geométrica de unidades dentro de la planta
@@ -39,7 +38,6 @@ Persistencia (en `app/plataforma/persistencia/`):
 - `catalogo_superficies_sqlalchemy.py` — Anexo I.5 vivienda + parámetros motor.
 - `anexo_i_apartamentos_sqlalchemy.py` — Anexo I.3 apartamentos turísticos (edificios).
 - `anexo_i_apartamentos_conjuntos_sqlalchemy.py` — Anexo I.4 apartamentos (conjuntos).
-- `anexo_i_hotel_apartamento_sqlalchemy.py` — Anexo I.2 hoteles-apartamento.
 - `anexo_i_hotelero_sqlalchemy.py` — Anexo I.1 hotel/hostal/pensión/albergue.
 - `normativa_municipal_sqlalchemy.py` — datos urbanísticos por municipio.
 - `carpetas_normativa_sqlalchemy.py` — normativas archivadas (carpetas).
@@ -131,8 +129,8 @@ usuario edita una planta tipo/ático/sótano.
 
 Cuando el usuario elige tipologías extra (selector dinámico `+` / `−`),
 `calcular_capacidad` reparte la planta entre varias tipologías. El
-reparto NO sabe si la unidad es vivienda, apartamento, habitación de
-hotel o hotel-apartamento: opera sobre `TipologiaUnidadDescriptor`.
+reparto NO sabe si la unidad es vivienda, apartamento o habitación de
+hotel: opera sobre `TipologiaUnidadDescriptor`.
 
 ```python
 # programa_uso.py
@@ -192,7 +190,6 @@ el preview rápido.
 |-----|-------|---------------------|---------------------------|
 | Vivienda | I.5 — VPO Junta Andalucía | nº de dormitorios (0..4) | `programa.programa_uso_vivienda(n_dorms, salon_open)` |
 | Apartamentos turísticos | I.3 (edificios) / I.4 (conjuntos) — Decreto 194/2010 | categoría 1L–4L × tipología estudio/1d/2d/3d | `programa_apartamentos.programa_uso_apartamento(cat, tip)` |
-| Hotel-Apartamento | I.2 — categorías por estrellas 1E–5E | estudio / individual / doble / triple / cuádruple | `programa_hotel_apartamento.programa_uso_hap(cat, tip)` |
 | Hotelero | I.1 — Hotel 1–5★, Hostal 1–2★, Pensión, Albergue | individual / doble / triple / cuádruple / múltiple (sólo albergue) | `programa_hotelero.programa_uso_hotelero(cat, tip)` |
 
 Para los usos NO-vivienda, cada uso descuenta del techo de planta las
@@ -248,8 +245,8 @@ TOTAL = 25 m² (util_maximo VPO)
 `util_minimo_vivienda(0)` = `max(25, sum_min × 1.15)` — garantiza ≥ 25
 en cualquier caso.
 
-> Los programas de los otros 3 usos (apartamentos, hotel-apartamento,
-> hotelero) producen estancias derivadas de sus mínimos legales + áreas
+> Los programas de los otros 2 usos (apartamentos, hotelero) producen
+> estancias derivadas de sus mínimos legales + áreas
 > comunes — no aplican la política de escalado por % de circulación
 > interior (las habitaciones de hotel no tienen pasillos internos
 > propios).
@@ -286,8 +283,6 @@ son tablas planas con mínimos por (categoría, tipología, estancia).
 - `anexo_i_apartamentos` (PK: `categoria, tipologia, estancia`) — Anexo I.3.
 - `anexo_i_apartamentos_conjuntos` (PK: `categoria, tipologia, estancia`)
   — Anexo I.4; solo categorías 1L y 2L.
-- `anexo_i_hotel_apartamento` (PK: `estrellas, tipologia, estancia`)
-  — Anexo I.2.
 - `anexo_i_hotelero` (PK: `categoria, tipologia, estancia`)
   — Anexo I.1; modelo "habitación" (sin cocina por unidad).
 
@@ -409,8 +404,8 @@ el usuario contra el reseed automático. La columna `area_target_m2` y
 la tabla `parametros_motor_vivienda` están preparadas para futuras
 pantallas de edición (panel de administración del Anexo I).
 
-Las tablas `anexo_i_apartamentos*`, `anexo_i_hotel_apartamento` y
-`anexo_i_hotelero` siguen el mismo patrón (flag `editable_por_usuario`)
+Las tablas `anexo_i_apartamentos*` y `anexo_i_hotelero` siguen el mismo
+patrón (flag `editable_por_usuario`)
 y el módulo de Normativa Municipal ya tiene CRUD para los parámetros
 urbanísticos. Falta exponer las tablas de superficies mínimas en una
 pantalla específica.

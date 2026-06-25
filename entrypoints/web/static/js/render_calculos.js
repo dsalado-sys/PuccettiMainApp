@@ -422,7 +422,7 @@
     // La columna/fila "Computable" (útil − circulación) se muestra en vivienda y
     // en usos turísticos; en local (sin estancias) se oculta. La nota turística y
     // el matiz "de acceso" de la circulación solo aplican a usos turísticos.
-    const esTurismo = ["apartamento", "hotel_apartamento", "habitacion"].includes(ds.tipo);
+    const esTurismo = ["apartamento", "habitacion"].includes(ds.tipo);
     const mostrarComputable = esTurismo || ds.tipo === "vivienda";
     modalEl.classList.toggle("rc-mu-no-turismo", !esTurismo);
     modalEl.classList.toggle("rc-mu-no-comp", !mostrarComputable);
@@ -1369,7 +1369,7 @@
 
   // ─── Modal "Superficies mínimas" para usos turístico/hoteleros ────────
   // Réplica del editor de vivienda, acotado a la categoría seleccionada en el
-  // panel (apartamentos turísticos · hotel-apartamento · hotelero).
+  // panel (apartamentos turísticos · hotelero).
   const API_MIN = "/modulos/render-calculos/minimos";
   const modalMin = document.getElementById("rc-modal-minimos");
   const LBL_TIP_MIN = {
@@ -1381,7 +1381,6 @@
   };
   const SELECT_CATEGORIA_MIN = {
     apartamentos_turisticos: "categoria_apartamentos",
-    hotel_apartamento: "categoria_hotel_apartamento",
     hotelero: "categoria_hotelero",
   };
   let MIN_CTX = { uso: null, categoria: "", grupo: "edificios" };

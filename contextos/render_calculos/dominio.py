@@ -16,7 +16,6 @@ class UsoEdificio(str, Enum):
     VIVIENDA = "vivienda"                              # Anexo I.5
     HOTELERO = "hotelero"                              # Anexo I.1
     APARTAMENTOS_TURISTICOS = "apartamentos_turisticos"  # Anexo I.3 / I.4
-    HOTEL_APARTAMENTO = "hotel_apartamento"            # Anexo I.2
 
 
 class CategoriaVivienda(str, Enum):
@@ -38,11 +37,11 @@ CATEGORIA_A_NUM_DORMS = {
 
 
 class TipologiaApartamento(str, Enum):
-    """Anexo I.2/I.3/I.4 — tipologías de apartamento turístico y hotel-apartamento.
+    """Anexo I.3/I.4 — tipologías de apartamento turístico.
 
-    Salvo la vivienda (que va por nº de dormitorios), apartamentos turísticos y
-    hoteles-apartamento se clasifican por la OCUPACIÓN del dormitorio
-    (individual/doble/triple/cuádruple), más el estudio.
+    Salvo la vivienda (que va por nº de dormitorios), los apartamentos turísticos
+    se clasifican por la OCUPACIÓN del dormitorio (individual/doble/triple/
+    cuádruple), más el estudio.
     """
     ESTUDIO = "estudio"
     INDIVIDUAL = "individual"
@@ -67,7 +66,7 @@ TIPOLOGIA_APT_A_NUM_DORMS = {
     TipologiaApartamento.CUADRUPLE: 1,
 }
 
-# Plazas (ocupación) por tipología de apartamento / hotel-apartamento.
+# Plazas (ocupación) por tipología de apartamento turístico.
 TIPOLOGIA_APT_A_PLAZAS = {
     TipologiaApartamento.ESTUDIO: 2,
     TipologiaApartamento.INDIVIDUAL: 1,
@@ -85,15 +84,6 @@ class GrupoApartamentos(str, Enum):
     """
     EDIFICIOS = "edificios"
     CONJUNTOS = "conjuntos"
-
-
-class CategoriaHotelApartamento(str, Enum):
-    """Anexo I.2 — Hoteles-Apartamento por número de estrellas."""
-    CINCO_E = "5E"
-    CUATRO_E = "4E"
-    TRES_E = "3E"
-    DOS_E = "2E"
-    UNA_E = "1E"
 
 
 class CategoriaHotelero(str, Enum):
@@ -130,10 +120,6 @@ TIPOLOGIA_HABITACION_A_PLAZAS = {
     TipologiaHabitacion.CUADRUPLE: 4,
     TipologiaHabitacion.MULTIPLE: 6,
 }
-
-# Hotel-apartamento comparte el espacio de tipologías del apartamento turístico.
-TIPOLOGIA_HAP_A_NUM_DORMS = TIPOLOGIA_APT_A_NUM_DORMS
-
 
 # Severidad de mayor a menor:
 #   "error"         → fallo técnico o dato ausente: NO se pudo calcular (arregla la entrada).

@@ -283,75 +283,6 @@ def sembrar_anexo_i_apartamentos_conjuntos(session: Session, forzar: bool = Fals
         session.commit()
 
 
-# ─── Anexo I.2 — hoteles-apartamento (categorías por estrellas) ────────────
-def _filas_anexo_i_hotel_apartamento() -> list[tuple[str, str, str, float, float]]:
-    """Filas del Anexo I.2, atomizadas como el Anexo I.1 del hotel: una entrada
-    por tipo de espacio tabulado en A1.2 (4 dormitorios por ocupación + estudio +
-    el salón-comedor común a la unidad), más el baño DERIVADO por unidad (réplica
-    de la Habitación + Baño del hotel). El **salón-comedor es una sola fila** por
-    categoría (común a todas las ocupaciones); no se repite por tipología, así que
-    editarlo una vez basta. El útil máximo de cada fila es el apartamento completo
-    (salón + dormitorio + baño), que da holgura al editar sin romper el invariante.
-    """
-    from app.contextos.render_calculos.geometria.programa_hotel_apartamento import (
-        ESTRELLAS,
-        MIN_DORMITORIO_HAP,
-        MIN_ESTUDIO_HAP,
-        MIN_SALON_COMEDOR_HAP,
-        MIN_BANO_HAP,
-        AREA_SOCIAL_POR_UA_HAP,
-    )
-
-    filas: list[tuple[str, str, str, float, float]] = []
-    for star in ESTRELLAS:
-        salon = MIN_SALON_COMEDOR_HAP[star]
-        bano = MIN_BANO_HAP[star]
-        # Dormitorios por ocupación: cada unidad = Dormitorio + Baño.
-        for tip in ("individual", "doble", "triple", "cuadruple"):
-            dorm = MIN_DORMITORIO_HAP[tip][star]
-            apt = round(salon + dorm + bano, 2)
-            filas.append((star, tip, "dormitorio", dorm, apt))
-            filas.append((star, tip, "bano", bano, apt))
-        # Estudio: espacio único (salón-dormitorio) + baño.
-        estudio = MIN_ESTUDIO_HAP[star]
-        apt_est = round(estudio + bano, 2)
-        filas.append((star, "estudio", "estudio", estudio, apt_est))
-        filas.append((star, "estudio", "bano", bano, apt_est))
-        # Salón-comedor (hasta 4 personas): UNA fila común de la unidad (A1.2).
-        apt_max = round(salon + MIN_DORMITORIO_HAP["cuadruple"][star] + bano, 2)
-        filas.append((star, "salon_comedor", "salon_comedor", salon, apt_max))
-
-    # Áreas sociales por u.a. (= Hotel del mismo nº de estrellas, A1.1).
-    for star in ESTRELLAS:
-        por_ua = AREA_SOCIAL_POR_UA_HAP[star]
-        if por_ua > 0:
-            filas.append((f"comunes_{star}", "comunes", "area_social_por_ua", por_ua, por_ua))
-    return filas
-
-
-def sembrar_anexo_i_hotel_apartamento(session: Session, forzar: bool = False, commit: bool = True) -> None:
-    from .anexo_i_hotel_apartamento_sqlalchemy import AnexoIHotelApartamentoORM
-    if not forzar:
-        existe = session.scalar(select(AnexoIHotelApartamentoORM).limit(1))
-        if existe is not None:
-            return
-    ahora = datetime.now(timezone.utc)
-    for cat, tip, estancia, min_m2, max_m2 in _filas_anexo_i_hotel_apartamento():
-        orm = session.get(AnexoIHotelApartamentoORM, (cat, tip, estancia))
-        if orm is None:
-            session.add(AnexoIHotelApartamentoORM(
-                categoria=cat,
-                tipologia=tip,
-                estancia=estancia,
-                min_m2=min_m2,
-                max_m2_util=max_m2,
-                editable_por_usuario=0,
-                actualizado_en=ahora,
-            ))
-    if commit:
-        session.commit()
-
-
 # ─── Anexo I.1 — hoteles / hostales / pensiones / albergues ────────────────
 def _filas_anexo_i_hotelero() -> list[tuple[str, str, str, float, float]]:
     from app.contextos.render_calculos.geometria.programa_hotelero import (
@@ -415,6 +346,5 @@ def sembrar_todo(session: Session) -> None:
     sembrar_anexo_i_vivienda(session)
     sembrar_anexo_i_apartamentos(session)
     sembrar_anexo_i_apartamentos_conjuntos(session)
-    sembrar_anexo_i_hotel_apartamento(session)
     sembrar_anexo_i_hotelero(session)
     sembrar_parametros_motor_vivienda(session)

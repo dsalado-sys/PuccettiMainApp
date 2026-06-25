@@ -55,7 +55,6 @@ from ..catalogo_modulos import CATALOGO, TarjetaModulo
 from ..render_modos import MODO_POR_DEFECTO, MODOS, modo_o_none
 from ..dependencias import (
     catalogo_apartamentos_adapter,
-    catalogo_hotel_apartamento_adapter,
     catalogo_hotelero_adapter,
     catalogo_superficies_adapter,
     proyecto_activo,
@@ -325,7 +324,6 @@ def pantalla(
     usos_catalogo = [
         {"value": "vivienda", "label": "Vivienda", "habilitado": True},
         {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": True},
-        {"value": "hotel_apartamento", "label": "Hotel-apartamento", "habilitado": True},
         {"value": "hotelero", "label": "Hotelero", "habilitado": True},
     ]
     # Hook de configuración por modo: si el modo restringe usos, se filtran.
@@ -400,7 +398,6 @@ def calcular(
     repo_norm: NormativaMunicipalRepositorio = Depends(_normativa_repo),
     catalogo_viv=Depends(catalogo_superficies_adapter),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
@@ -421,7 +418,6 @@ def calcular(
     caso_uso = CalcularLayout(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
-        catalogo_hotel_apartamento=catalogo_hap,
         catalogo_hotelero=catalogo_hot,
     )
     resultado = caso_uso.ejecutar(parcela, params, combo_override=combo_override)
@@ -448,7 +444,6 @@ def estancias_inmueble(
     proyecto: Proyecto | None = Depends(proyecto_activo),
     catalogo_viv=Depends(catalogo_superficies_adapter),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     """Distribuye las estancias de un inmueble concreto a partir de su construida.
@@ -473,7 +468,6 @@ def estancias_inmueble(
     resultado = CalcularEstanciasInmueble(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
-        catalogo_hotel_apartamento=catalogo_hap,
         catalogo_hotelero=catalogo_hot,
     ).ejecutar(params, construida, n_dormitorios=n_dorms)
     return JSONResponse(resultado)
@@ -487,7 +481,6 @@ def tipologias_dormitorios(
     proyecto: Proyecto | None = Depends(proyecto_activo),
     catalogo_viv=Depends(catalogo_superficies_adapter),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     """Para un nº de dormitorios, devuelve las combinaciones viables y cuántas
@@ -510,7 +503,6 @@ def tipologias_dormitorios(
     resultado = CalcularTipologiasDormitorios(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
-        catalogo_hotel_apartamento=catalogo_hap,
         catalogo_hotelero=catalogo_hot,
     ).ejecutar(parcela, params, n_dorms)
     return JSONResponse(resultado)
@@ -680,17 +672,15 @@ def reset_superficies_vivienda(
 # ─── Superficies mínimas de los usos turístico/hoteleros (Anexo I.1–I.4) ─────
 # Análogo a vivienda, pero acotado a la categoría seleccionada en el panel
 # (las tablas tienen una entrada por categoría × tipología × estancia). Los
-# adapters de apartamentos/hotel-apt/hotelero se consultan en vivo en cada
-# cálculo, así que no hay constantes que recargar tras editar (a diferencia de
-# vivienda, cuyo motor cachea los mínimos).
-_USOS_MINIMOS = {"apartamentos_turisticos", "hotel_apartamento", "hotelero"}
+# adapters de apartamentos/hotelero se consultan en vivo en cada cálculo, así
+# que no hay constantes que recargar tras editar (a diferencia de vivienda, cuyo
+# motor cachea los mínimos).
+_USOS_MINIMOS = {"apartamentos_turisticos", "hotelero"}
 
 
-def _adapter_minimos(uso: str, apt, hap, hot):
+def _adapter_minimos(uso: str, apt, hot):
     if uso == "apartamentos_turisticos":
         return apt
-    if uso == "hotel_apartamento":
-        return hap
     if uso == "hotelero":
         return hot
     raise HTTPException(404, f"Uso desconocido para el editor de mínimos: {uso!r}.")
@@ -703,12 +693,11 @@ def listar_minimos(
     grupo: Annotated[str, Query()] = "edificios",
     rol: Rol = Depends(rol_activo),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     """Mínimos por estancia y tipología de la categoría seleccionada del uso dado."""
     _exige_permiso(rol, PermisoModulo.VER)
-    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hap, catalogo_hot)
+    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hot)
     if uso == "apartamentos_turisticos":
         filas = adapter.filas_min(categoria, grupo)
     else:
@@ -722,13 +711,12 @@ def guardar_minimos(
     payload: Annotated[dict[str, Any], Body(...)],
     rol: Rol = Depends(rol_activo),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     """Persiste los mínimos editados de la categoría. `payload = {categoria,
     grupo, cambios: [{tipologia, estancia, valor}, ...]}`."""
     _exige_permiso(rol, PermisoModulo.EDITAR)
-    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hap, catalogo_hot)
+    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hot)
     categoria = str(payload.get("categoria") or "").strip()
     grupo = str(payload.get("grupo") or "edificios").strip() or "edificios"
     if not categoria:
@@ -768,12 +756,11 @@ def reset_minimos(
     uso: str,
     rol: Rol = Depends(rol_activo),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     """Restablece los mínimos del uso a los valores sembrados (Anexo I)."""
     _exige_permiso(rol, PermisoModulo.EDITAR)
-    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hap, catalogo_hot)
+    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hot)
     adapter.reset()
     return JSONResponse({"ok": True})
 
@@ -786,7 +773,6 @@ def export_csv(
     proyecto: Proyecto | None = Depends(proyecto_activo),
     catalogo_viv=Depends(catalogo_superficies_adapter),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
@@ -799,7 +785,6 @@ def export_csv(
     caso_uso = CalcularLayout(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
-        catalogo_hotel_apartamento=catalogo_hap,
         catalogo_hotelero=catalogo_hot,
     )
     resultado = caso_uso.ejecutar(parcela, params)

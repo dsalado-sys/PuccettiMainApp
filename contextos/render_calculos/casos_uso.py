@@ -48,7 +48,6 @@ from .parametros import (
 )
 from .puertos import (
     CatalogoApartamentosRepositorio,
-    CatalogoHotelApartamentoRepositorio,
     CatalogoHoteleroRepositorio,
     CatalogoSuperficiesRepositorio,
 )
@@ -374,13 +373,11 @@ class CalcularLayout:
     Inyectables opcionales (si faltan → fallback a constantes del motor):
     - `catalogo_vivienda`: Anexo I.5 (vivienda).
     - `catalogo_apartamentos`: Anexo I.3/I.4 (apartamentos turísticos).
-    - `catalogo_hotel_apartamento`: Anexo I.2 (hoteles-apartamento).
     - `catalogo_hotelero`: Anexo I.1 (hoteles / hostales / pensiones / albergues).
     """
 
     catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
     catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
-    catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
     catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
 
     def ejecutar(
@@ -518,7 +515,7 @@ class CalcularLayout:
     def _sincronizar_minimos(self, params: ParametrosRender):
         """BBDD → config INMUTABLE del motor para el uso activo (Anexo I.1–I.5, §3.8).
 
-        Devuelve un `Programa*Config` (vivienda/apartamentos/hotel-apt/hotelero) con
+        Devuelve un `Programa*Config` (vivienda/apartamentos/hotelero) con
         los mínimos editados desde el editor y el % de circulación interior del panel.
         Antes esto se volcaba a constantes de módulo (`cargar_desde_repo` /
         `set_pct_circulacion_interior`), lo que cruzaba ediciones entre requests
@@ -539,9 +536,6 @@ class CalcularLayout:
             from .geometria import programa_apartamentos
             grupo = params.programa.grupo_apartamentos.value
             return programa_apartamentos.config_desde_repo(self.catalogo_apartamentos, grupo, pct_circ)
-        if uso == UsoEdificio.HOTEL_APARTAMENTO:
-            from .geometria import programa_hotel_apartamento
-            return programa_hotel_apartamento.config_desde_repo(self.catalogo_hotel_apartamento, pct_circ)
         if uso == UsoEdificio.HOTELERO:
             from .geometria import programa_hotelero
             return programa_hotelero.config_desde_repo(self.catalogo_hotelero, pct_circ)
@@ -649,16 +643,6 @@ class CalcularLayout:
                 )
             except Exception:
                 return None
-        if prog.uso == UsoEdificio.HOTEL_APARTAMENTO:
-            if self.catalogo_hotel_apartamento is None:
-                return None
-            try:
-                return self.catalogo_hotel_apartamento.util_objetivo(
-                    prog.categoria_hotel_apartamento.value,
-                    prog.tipologia_apartamento.value,
-                )
-            except Exception:
-                return None
         if prog.uso == UsoEdificio.HOTELERO:
             if self.catalogo_hotelero is None:
                 return None
@@ -717,12 +701,6 @@ class CalcularLayout:
             grupo = prog.grupo_apartamentos.value
             principal = prog.tipologia_apartamento.value
             constructor = lambda slug: descriptor_tipologia_apartamento(cat, slug, grupo, cfg_uso)
-        elif uso == UsoEdificio.HOTEL_APARTAMENTO:
-            from .geometria.programa_hotel_apartamento import CONFIG_DEFAULT, descriptor_tipologia_hotel_apartamento
-            cfg_uso = cfg if cfg is not None else CONFIG_DEFAULT
-            cat = prog.categoria_hotel_apartamento.value
-            principal = prog.tipologia_apartamento.value
-            constructor = lambda slug: descriptor_tipologia_hotel_apartamento(cat, slug, cfg_uso)
         elif uso == UsoEdificio.HOTELERO:
             from .geometria.programa_hotelero import CONFIG_DEFAULT, descriptor_tipologia_hotelero
             cfg_uso = cfg if cfg is not None else CONFIG_DEFAULT
@@ -754,7 +732,7 @@ class CalcularLayout:
         """Construye el descriptor de uso con sus áreas comunes/sociales obligatorias.
 
         Para vivienda: None (calcular_capacidad no necesita programa_uso). Para
-        apartamentos / hotel-apartamento / hotelero hace una iteración de dos
+        apartamentos / hotelero hace una iteración de dos
         pasos para dimensionar las comunes (que escalan con nº de unidades, o de
         plazas en albergue). `combo_override` (§2.5) dimensiona desde la combinación.
         `cfg` (§3.8) son los mínimos editados del uso activo.
@@ -776,12 +754,6 @@ class CalcularLayout:
             tip = prog.tipologia_apartamento.value
             grupo = prog.grupo_apartamentos.value
             builder = lambda n, p: programa_uso_apartamento(cat, tip, n_unidades_estimado=n, grupo=grupo, cfg=cfg_uso)
-        elif uso == UsoEdificio.HOTEL_APARTAMENTO:
-            from .geometria.programa_hotel_apartamento import CONFIG_DEFAULT, programa_uso_hotel_apartamento
-            cfg_uso = cfg if cfg is not None else CONFIG_DEFAULT
-            cat = prog.categoria_hotel_apartamento.value
-            tip = prog.tipologia_apartamento.value
-            builder = lambda n, p: programa_uso_hotel_apartamento(cat, tip, n_unidades_estimado=n, cfg=cfg_uso)
         elif uso == UsoEdificio.HOTELERO:
             from .geometria.programa_hotelero import CONFIG_DEFAULT, programa_uso_hotelero
             cfg_uso = cfg if cfg is not None else CONFIG_DEFAULT
@@ -848,12 +820,11 @@ class CalcularTipologiasDormitorios:
     con `combo_override` para que el conteo coincida exactamente con el que se
     obtiene al elegir esa combinación. Aplica a **vivienda** (dormitorios
     individual/doble) y **apartamentos turísticos** (individual/doble/triple/
-    cuádruple); hotelero y hotel-apartamento clasifican por ocupación → error.
+    cuádruple); hotelero clasifica por ocupación → error.
     """
 
     catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
     catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
-    catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
     catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
 
     def ejecutar(
@@ -873,7 +844,6 @@ class CalcularTipologiasDormitorios:
         layout = CalcularLayout(
             catalogo_vivienda=self.catalogo_vivienda,
             catalogo_apartamentos=self.catalogo_apartamentos,
-            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
             catalogo_hotelero=self.catalogo_hotelero,
         )
         cfg = layout._sincronizar_minimos(params)
@@ -972,7 +942,6 @@ class CalcularTipologiasDormitorios:
 _USO_A_TIPO_UNIDAD: dict[UsoEdificio, str] = {
     UsoEdificio.VIVIENDA: "vivienda",
     UsoEdificio.APARTAMENTOS_TURISTICOS: "apartamento",
-    UsoEdificio.HOTEL_APARTAMENTO: "hotel_apartamento",
     UsoEdificio.HOTELERO: "habitacion",
 }
 
@@ -992,12 +961,11 @@ class CalcularEstanciasInmueble:
     así que NO se descuenta aquí —se contaría dos veces—.
 
     Reutiliza el motor de estancias por unidad (`_estancias_por_unidad_dorms`), que ya
-    ramifica por uso (vivienda / apartamento / hotel-apartamento / habitación).
+    ramifica por uso (vivienda / apartamento / habitación).
     """
 
     catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
     catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
-    catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
     catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
 
     def ejecutar(
@@ -1022,7 +990,6 @@ class CalcularEstanciasInmueble:
         layout = CalcularLayout(
             catalogo_vivienda=self.catalogo_vivienda,
             catalogo_apartamentos=self.catalogo_apartamentos,
-            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
             catalogo_hotelero=self.catalogo_hotelero,
         )
         cfg = layout._sincronizar_minimos(params)
@@ -1576,15 +1543,12 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
             ))
 
     if programa_uso is not None and programa_uso.tipo_unidad in (
-        "apartamento", "hotel_apartamento", "habitacion"
+        "apartamento", "habitacion"
     ):
         prog = params.programa
         if programa_uso.tipo_unidad == "apartamento":
             cat, tip = prog.categoria_apartamentos.value, prog.tipologia_apartamento.value
             etiqueta_area = "áreas comunes y sociales obligatorias"
-        elif programa_uso.tipo_unidad == "hotel_apartamento":
-            cat, tip = prog.categoria_hotel_apartamento.value, prog.tipologia_apartamento.value
-            etiqueta_area = "áreas sociales obligatorias"
         else:  # habitacion
             cat, tip = prog.categoria_hotelero.value, prog.tipologia_habitacion.value
             etiqueta_area = "áreas sociales del establecimiento"

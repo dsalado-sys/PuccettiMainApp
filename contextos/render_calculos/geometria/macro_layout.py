@@ -646,9 +646,9 @@ def _marcar_unidades_adaptadas(
 ) -> None:
     """Marca como adaptadas (DB-SUA) las unidades que exige la tabla por tramos.
 
-    Solo aplica a usos turísticos (apartamentos turísticos, hoteles y
-    hoteles-apartamento); en vivienda no marca ninguna. Se priorizan las unidades
-    de planta baja (acceso sin ascensor). Modifica `u.es_adaptada` en sitio.
+    Solo aplica a usos turísticos (apartamentos turísticos y hoteles); en vivienda
+    no marca ninguna. Se priorizan las unidades de planta baja (acceso sin
+    ascensor). Modifica `u.es_adaptada` en sitio.
     """
     from .accesibilidad import es_uso_adaptable, n_unidades_adaptadas
 

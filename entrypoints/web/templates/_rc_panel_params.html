@@ -298,26 +298,6 @@
         {% endif %}
       </div>
 
-      {# ── HOTEL-APARTAMENTO (Anexo I.2) — categoría global (PB) ── #}
-      <label class="rc-campo" data-cuando-uso="hotel_apartamento" data-visible-en-planta="pb">
-        <span class="rc-campo-label">Categoría</span>
-        <select name="categoria_hotel_apartamento" data-bloque="programa">
-          {% for c in ["5E","4E","3E","2E","1E"] %}
-            <option value="{{ c }}" {% if prog.categoria_hotel_apartamento == c %}selected{% endif %}>
-              {{ c[0] }} estrella{{ "s" if c[0] != "1" }}
-            </option>
-          {% endfor %}
-        </select>
-      </label>
-      {{ tip_bloque("hotel_apartamento", "apartamento", lbl_apt, "tipologia_apartamento", prog, "programa", "pb", "rc-tip-hotel-apartamento", permitir_extra=(not es_inmueble)) }}
-      {{ tip_bloque("hotel_apartamento", "apartamento", lbl_apt, "tipologia_apartamento", prog_t, "programa_tipo", "tipo", "rc-tip-hotel-apartamento-tipo", permitir_extra=(not es_inmueble)) }}
-      <div class="rc-campo" data-cuando-uso="hotel_apartamento" data-visible-en-planta="pb">
-        <span class="rc-campo-label">Superficies mínimas de estancias</span>
-        <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-minimos"
-                data-uso="hotel_apartamento">Ver / editar mínimos</button>
-        <small class="rc-hint">Mínimo por estancia y tipología de la categoría elegida, según Normativa.</small>
-      </div>
-
       {# ── HOTELERO: hotel / hostal / pensión / albergue (Anexo I.1) — categoría global (PB) ── #}
       <label class="rc-campo" data-cuando-uso="hotelero" data-visible-en-planta="pb">
         <span class="rc-campo-label">Categoría</span>
@@ -362,7 +342,7 @@
                value="{{ prog.pct_otros_pb }}" data-bloque="programa">
         <small class="rc-hint">Reduce útiles de PB para otros usos.</small>
       </label>
-      <label class="rc-campo" data-cuando-uso="apartamentos_turisticos hotel_apartamento hotelero" data-visible-en-planta="pb">
+      <label class="rc-campo" data-cuando-uso="apartamentos_turisticos hotelero" data-visible-en-planta="pb">
         <span class="rc-campo-label">% usos comunes en planta baja</span>
         <input type="number" name="pct_usos_comunes_pb" min="0" max="100" step="1"
                value="{{ prog.pct_usos_comunes_pb }}" data-bloque="programa">
@@ -434,7 +414,7 @@
       {% endif %}
 
       {# % circulación INTERIOR de la unidad — único, compartido por todos los usos
-         (vivienda/AT/hotel/hotel-apt). Solo se edita en PB; reemplaza el 15% fijo.
+         (vivienda/AT/hotel). Solo se edita en PB; reemplaza el 15% fijo.
          En modo inmueble es el único reparto de circulación que aplica. #}
       {{ dnum("% circulación interior unidad", "pct_circulacion_interior", "diseno", d.pct_circulacion_interior, "0", "40", "1", "pb") }}
 

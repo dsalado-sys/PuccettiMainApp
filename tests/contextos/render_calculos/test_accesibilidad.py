@@ -57,13 +57,12 @@ def test_modo_parcial_solo_1_a_5():
 def test_factor_por_uso():
     assert factor_agrandado("apartamento") == 1.25
     assert factor_agrandado("habitacion") == 1.30
-    assert factor_agrandado("hotel_apartamento") == 1.30
     assert factor_agrandado("vivienda") == 1.0
     assert factor_agrandado("desconocido") == 1.0
 
 
 def test_usos_adaptables_excluyen_vivienda():
-    for t in ("apartamento", "habitacion", "hotel_apartamento"):
+    for t in ("apartamento", "habitacion"):
         assert es_uso_adaptable(t)
     assert not es_uso_adaptable("vivienda")
 

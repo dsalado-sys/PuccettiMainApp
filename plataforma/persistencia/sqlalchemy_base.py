@@ -83,7 +83,6 @@ def _registrar_modelos() -> None:
     from . import catalogo_superficies_sqlalchemy  # noqa: F401
     from . import anexo_i_apartamentos_sqlalchemy  # noqa: F401
     from . import anexo_i_apartamentos_conjuntos_sqlalchemy  # noqa: F401
-    from . import anexo_i_hotel_apartamento_sqlalchemy  # noqa: F401
     from . import anexo_i_hotelero_sqlalchemy  # noqa: F401
     from . import carpetas_normativa_sqlalchemy  # noqa: F401
     from . import carpetas_proyecto_sqlalchemy  # noqa: F401

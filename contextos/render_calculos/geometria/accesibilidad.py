@@ -3,7 +3,7 @@
 Sustituye al antiguo parámetro editable `pct_unidades_adaptadas`. El número de
 unidades adaptadas se deriva del número total de alojamientos del edificio
 según la tabla normativa de accesibilidad; solo aplica a los usos turísticos
-(apartamentos turísticos, hoteles y hoteles-apartamento), NUNCA a vivienda.
+(apartamentos turísticos y hoteles), NUNCA a vivienda.
 
 Las unidades adaptadas son más grandes (un factor por uso) y, al ocupar más,
 REDUCEN la capacidad del edificio (caben menos unidades). La dependencia
@@ -21,16 +21,14 @@ from .capacidad import Capacidad
 
 # Usos cuyas unidades pueden adaptarse (tipo_unidad del motor de estancias).
 USOS_TURISTICOS_ADAPTABLES: tuple[str, ...] = (
-    "apartamento", "hotel_apartamento", "habitacion",
+    "apartamento", "habitacion",
 )
 
-# Factor de agrandado de las estancias de una unidad adaptada, por uso. El
-# hotel-apartamento usa, de momento, el factor del hotel (puede cambiar: este
-# mapa es el ÚNICO punto a tocar).
+# Factor de agrandado de las estancias de una unidad adaptada, por uso (este mapa
+# es el ÚNICO punto a tocar para ajustarlo).
 FACTOR_AGRANDADO_POR_TIPO: Mapping[str, float] = {
     "apartamento": 1.25,
     "habitacion": 1.30,
-    "hotel_apartamento": 1.30,
 }
 
 

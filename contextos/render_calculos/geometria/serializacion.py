@@ -257,7 +257,7 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
         })
 
     # NOTA iter. junio 2026: las "Comunes obligatorias" del uso (apartamentos,
-    # hotel-apartamento, hotelero) están ya distribuidas dentro de
+    # hotelero) están ya distribuidas dentro de
     # `circulacion_por_planta[i]` (suma de `pct_circ × construida` + cuota de
     # `area_servicios_obligatorios_m2 / n_plantas_habitables`). No se añade
     # fila aparte: duplicaría m².
@@ -273,7 +273,7 @@ def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]
 
 
 # Usos cuyas unidades se rigen por normativa TURÍSTICA (computable ≠ útil total).
-USOS_TURISMO = ("apartamento", "hotel_apartamento", "habitacion")
+USOS_TURISMO = ("apartamento", "habitacion")
 
 # Margen de circulación de acceso (vestíbulo/pasillo interior de la unidad) que NO
 # computa a efectos turísticos. Coincide con el 15% que `util_objetivo_* = mínimos
@@ -371,7 +371,7 @@ def _slug_principal(params, tipo_unidad: str) -> str:
     if tipo_unidad == "habitacion":
         t = getattr(prog, "tipologia_habitacion", None)
         return t.value if t is not None else "doble"
-    t = getattr(prog, "tipologia_apartamento", None)  # apartamento / hotel_apartamento
+    t = getattr(prog, "tipologia_apartamento", None)  # apartamento turístico
     return t.value if t is not None else "doble"
 
 
@@ -384,7 +384,6 @@ def _estancias_por_unidad_dorms(
     Ramifica por `programa_uso.tipo_unidad`:
     - `vivienda`          → `programa_vivienda(n_dorms, util)` (Anexo I.5).
     - `apartamento`       → `programa_apartamentos(slug, cat, util, grupo)` (A1.3/A1.4).
-    - `hotel_apartamento` → `programa_hotel_apartamento(slug, cat, util)` (A1.2).
     - `habitacion`        → `programa_habitacion(slug, cat, util)` (A1.1).
 
     `slug` es la tipología REAL de esta unidad (mezcla multi-tipología); si falta,
@@ -400,9 +399,6 @@ def _estancias_por_unidad_dorms(
     )
     from .programa_apartamentos import (
         CONFIG_DEFAULT as CFG_APT, programa_apartamentos, programa_apartamentos_combo,
-    )
-    from .programa_hotel_apartamento import (
-        CONFIG_DEFAULT as CFG_HAP, programa_hotel_apartamento,
     )
     from .programa_hotelero import CONFIG_DEFAULT as CFG_HOT, programa_habitacion
 
@@ -435,12 +431,6 @@ def _estancias_por_unidad_dorms(
             estancias = programa_apartamentos_combo(slug_a_combo(tip_v), cat_v, util_computable, grupo_v, cfg_apt)
         else:
             estancias = programa_apartamentos(tip_v, cat_v, util_computable, grupo_v, cfg_apt)
-    elif tipo_unidad == "hotel_apartamento":
-        cfg_hap = cfg if cfg is not None else CFG_HAP
-        cat = getattr(params.programa, "categoria_hotel_apartamento", None)
-        cat_v = cat.value if cat is not None else "3E"
-        tip_v = slug or _slug_principal(params, "hotel_apartamento")
-        estancias = programa_hotel_apartamento(tip_v, cat_v, util_computable, cfg_hap)
     elif tipo_unidad == "habitacion":
         cfg_hot = cfg if cfg is not None else CFG_HOT
         cat = getattr(params.programa, "categoria_hotelero", None)

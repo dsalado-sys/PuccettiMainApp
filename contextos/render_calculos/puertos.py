@@ -30,7 +30,7 @@ class NormativaMunicipalRepositorio(Protocol):
 
 
 class CatalogoSuperficiesRepositorio(Protocol):
-    """Anexo I.5 editable (vivienda). Hotel/apt usan otro adapter."""
+    """Anexo I.5 editable (vivienda). Hotelero/apartamentos usan otro adapter."""
 
     def superficies_vivienda(self, n_dormitorios: int) -> dict[str, float]:
         """Mínimos y máximos por estancia para una vivienda de N dormitorios."""
@@ -82,33 +82,6 @@ class CatalogoApartamentosRepositorio(Protocol):
         valor: float,
         usuario: str | None = None,
         grupo: str = "edificios",
-    ) -> None: ...
-
-    def reset(self) -> None: ...
-
-
-class CatalogoHotelApartamentoRepositorio(Protocol):
-    """Anexo I.2 editable (hoteles-apartamento, categorías por estrellas)."""
-
-    def superficies(self, categoria: str, tipologia: str) -> dict[str, float]: ...
-
-    def util_objetivo(self, categoria: str, tipologia: str) -> float | None: ...
-
-    def consolidadas_hotel_apartamento(self) -> dict:
-        """Mínimos consolidados para `programa_hotel_apartamento.config_desde_repo` ({} si vacía)."""
-        ...
-
-    def areas_sociales(self, categoria: str) -> dict[str, float]: ...
-
-    def filas_min(self, categoria: str) -> list[dict]: ...
-
-    def actualizar(
-        self,
-        categoria: str,
-        tipologia: str,
-        estancia: str,
-        valor: float,
-        usuario: str | None = None,
     ) -> None: ...
 
     def reset(self) -> None: ...

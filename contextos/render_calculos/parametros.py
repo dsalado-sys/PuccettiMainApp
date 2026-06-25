@@ -19,7 +19,6 @@ from typing import Any
 
 from .dominio import (
     CategoriaApartamentos,
-    CategoriaHotelApartamento,
     CategoriaHotelero,
     CategoriaVivienda,
     GrupoApartamentos,
@@ -123,13 +122,11 @@ class ParametrosPrograma:
     tipologia_habitacion: TipologiaHabitacion = TipologiaHabitacion.DOBLE      # Anexo I.1
     categoria_apartamentos: CategoriaApartamentos = CategoriaApartamentos.DOS_LLAVES
     tipologia_apartamento: TipologiaApartamento = TipologiaApartamento.DOBLE
-    categoria_hotel_apartamento: CategoriaHotelApartamento = CategoriaHotelApartamento.TRES_E  # Anexo I.2
     grupo_apartamentos: GrupoApartamentos = GrupoApartamentos.EDIFICIOS        # A1.3 vs A1.4
     salon_cocina_open: bool = False
     # Tipologías adicionales para la mezcla multi-tipología. Los slugs válidos
-    # dependen del uso activo (vivienda: estudio/1d/2d/3d/4d+; apartamentos y
-    # hotel-apartamento: estudio/1d/2d/3d; hotelero: individual/doble/triple/
-    # cuadruple/multiple).
+    # dependen del uso activo (vivienda: estudio/1d/2d/3d/4d+; apartamentos:
+    # estudio/1d/2d/3d; hotelero: individual/doble/triple/cuadruple/multiple).
     tipologias_extra: list[str] = field(default_factory=list)
     pct_local_pb: float = 0.0                       # % útil PB destinado a local no residencial
     pct_otros_pb: float = 0.0                       # % útil PB destinado a otros usos
@@ -173,16 +170,12 @@ class ParametrosRender:
             CATEGORIA_A_NUM_DORMS,
             TIPOLOGIA_APT_A_NUM_DORMS,
             TIPOLOGIA_HABITACION_A_PLAZAS,
-            TIPOLOGIA_HAP_A_NUM_DORMS,
         )
 
         uso = programa.uso
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             n_dorms = TIPOLOGIA_APT_A_NUM_DORMS.get(programa.tipologia_apartamento, 1)
             categoria_label = programa.categoria_apartamentos.value
-        elif uso == UsoEdificio.HOTEL_APARTAMENTO:
-            n_dorms = TIPOLOGIA_HAP_A_NUM_DORMS.get(programa.tipologia_apartamento, 1)
-            categoria_label = programa.categoria_hotel_apartamento.value
         elif uso == UsoEdificio.HOTELERO:
             # "n_dorms" para hotelero es solo etiqueta (plazas de la habitación);
             # el reparto real usa el útil objetivo inyectado por casos_uso.
@@ -294,7 +287,6 @@ def _programa_a_dict(prog: ParametrosPrograma) -> dict[str, Any]:
         "tipologia_habitacion": prog.tipologia_habitacion.value,
         "categoria_apartamentos": prog.categoria_apartamentos.value,
         "tipologia_apartamento": prog.tipologia_apartamento.value,
-        "categoria_hotel_apartamento": prog.categoria_hotel_apartamento.value,
         "grupo_apartamentos": prog.grupo_apartamentos.value,
         "salon_cocina_open": prog.salon_cocina_open,
         "tipologias_extra": list(prog.tipologias_extra),
@@ -427,14 +419,13 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         tip_apt = _enum(TipologiaApartamento, "tipologia_apartamento", base_prog.tipologia_apartamento)
         cat_hot = _enum(CategoriaHotelero, "categoria_hotelero", base_prog.categoria_hotelero)
         tip_hab = _enum(TipologiaHabitacion, "tipologia_habitacion", base_prog.tipologia_habitacion)
-        cat_hap = _enum(CategoriaHotelApartamento, "categoria_hotel_apartamento", base_prog.categoria_hotel_apartamento)
         # Default tolerante "edificios": JSON antiguos sin el campo no cambian de resultado.
         grupo_apt = _enum(GrupoApartamentos, "grupo_apartamentos", base_prog.grupo_apartamentos)
 
         # Los slugs válidos de la mezcla dependen del uso activo.
         if uso == UsoEdificio.HOTELERO:
             slugs_validos = {"individual", "doble", "triple", "cuadruple", "multiple"}
-        elif uso in (UsoEdificio.APARTAMENTOS_TURISTICOS, UsoEdificio.HOTEL_APARTAMENTO):
+        elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             slugs_validos = {"estudio", "individual", "doble", "triple", "cuadruple"}
         else:  # VIVIENDA
             slugs_validos = {"estudio", "1d", "2d", "3d", "4d+"}
@@ -451,7 +442,6 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             tipologia_habitacion=tip_hab,
             categoria_apartamentos=cat_apt,
             tipologia_apartamento=tip_apt,
-            categoria_hotel_apartamento=cat_hap,
             grupo_apartamentos=grupo_apt,
             salon_cocina_open=_b(node, "salon_cocina_open", base_prog.salon_cocina_open),
             tipologias_extra=tip_extra,
@@ -545,7 +535,6 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             "uso": programa.uso.value,
             "categoria_apartamentos": programa.categoria_apartamentos.value,
             "grupo_apartamentos": programa.grupo_apartamentos.value,
-            "categoria_hotel_apartamento": programa.categoria_hotel_apartamento.value,
             "categoria_hotelero": programa.categoria_hotelero.value,
             "salon_cocina_open": programa.salon_cocina_open,
             "pct_local_pb": programa.pct_local_pb,
