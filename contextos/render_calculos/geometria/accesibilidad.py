@@ -31,6 +31,8 @@ FACTOR_AGRANDADO_POR_TIPO: Mapping[str, float] = {
     "habitacion": 1.30,
 }
 
+_MAX_ITER_PUNTO_FIJO = 12
+
 
 def es_uso_adaptable(tipo_unidad: str) -> bool:
     """¿El uso (tipo_unidad del motor) admite unidades adaptadas? Vivienda no."""
@@ -160,12 +162,30 @@ def aplicar_adaptacion_capacidad(cap: Capacidad, tipo_unidad: str) -> Capacidad:
             cap, n_unidades_adaptadas=min(n_unidades_adaptadas(total), total),
             modo_adaptacion="parcial",
         )
-    # El nº de adaptadas lo fija el nº NOMINAL de alojamientos (lo que la huella da
-    # antes de agrandar); el repack determina luego el total real. Así el par
-    # (total, k) es siempre consistente y no oscila en las fronteras de tramo.
+    # El nº de adaptadas debe corresponder al nº de alojamientos que el edificio
+    # ofrece DE VERDAD (tras recolocar las adaptadas), no al nominal previo: una
+    # huella que da 51 estándar pero 50 con las adaptadas agrandadas es un edificio
+    # de 50 alojamientos → 1 adaptada, no 2. Punto fijo sobre el repack real: itera
+    # hasta que k == tramo(total_final).
     factor = factor_agrandado(tipo_unidad)
     k = n_unidades_adaptadas(total)
     capn = _repack_adaptadas(cap, k, factor)
+    vistos: list[int] = [k]
+    for _ in range(_MAX_ITER_PUNTO_FIJO):
+        k_obj = n_unidades_adaptadas(capn.n_viviendas_objetivo)
+        if k_obj == k:
+            break
+        if k_obj in vistos:
+            # Oscilación de frontera (la holgura aloja k pero no k+1, p.ej. 51
+            # nominal que con 1 adaptada se queda en 51 y con 2 baja a 50): se toma
+            # el MENOR k, coherente con leer el total final (criterio del arquitecto:
+            # un edificio que ofrece ~50 alojamientos lleva las adaptadas de ~50).
+            k = min(k, k_obj)
+            capn = _repack_adaptadas(cap, k, factor)
+            break
+        vistos.append(k_obj)
+        k = k_obj
+        capn = _repack_adaptadas(cap, k, factor)
     return replace(
         capn,
         n_unidades_adaptadas=min(k, capn.n_viviendas_objetivo),

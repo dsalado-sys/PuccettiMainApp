@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from app.contextos.render_calculos.geometria.accesibilidad import (
     _repack_adaptadas,
+    aplicar_adaptacion_capacidad,
     es_uso_adaptable,
     estancia_se_agranda,
     factor_agrandado,
@@ -95,6 +96,39 @@ def test_repack_agranda_en_pb_y_reduce_solo_esa_planta():
     assert out.viv_por_planta[1] == 10 and out.viv_por_planta[2] == 10
     # El total emerge del área (no de un descuento global arbitrario).
     assert out.n_viviendas_objetivo == sum(out.viv_por_planta)
+
+
+def test_tramo_se_basa_en_el_total_final_no_en_el_nominal():
+    # 51 nominal (17/planta) SIN holgura: agrandar las adaptadas recorta 1 → 50
+    # finales. El edificio es de 50 alojamientos → 1 adaptada (no 2 por contar el
+    # nominal 51). Reproduce el caso real de CL LEVIES (mínimos de BBDD).
+    cap = _capacidad_3_plantas(uds_por_planta=17, util=90.0)
+    assert cap.n_viviendas_objetivo == 51
+    out = aplicar_adaptacion_capacidad(cap, "apartamento")
+    assert out.n_viviendas_objetivo == 50
+    assert out.n_unidades_adaptadas == 1
+    assert out.n_unidades_adaptadas == n_unidades_adaptadas(out.n_viviendas_objetivo)
+
+
+def test_tramo_en_frontera_con_holgura_prefiere_menos_adaptadas():
+    # 51 nominal con holgura que aloja 1 adaptada pero no 2 → oscila entre
+    # (1 adaptada, 51) y (2 adaptadas, 50). Se prefiere la menor: 1 adaptada.
+    cap = _capacidad_3_plantas(uds_por_planta=17, util=90.0)
+    cap = replace_util_disp(cap, 1560.0)  # holgura 30 m²/planta
+    out = aplicar_adaptacion_capacidad(cap, "apartamento")
+    assert out.n_unidades_adaptadas == 1
+
+
+def test_garantia_nunca_mas_adaptadas_que_el_tramo_del_total_final():
+    # Invariante clave en TODA frontera y holgura: el nº de adaptadas NUNCA supera
+    # tramo(total_final). El usuario no puede volver a ver "50 unidades → 2".
+    for uds in range(2, 90):
+        for slack in (0.0, 10.0, 22.0, 30.0):
+            cap = replace_util_disp(
+                _capacidad_3_plantas(uds_por_planta=uds, util=30.0), uds * 30.0 + slack,
+            )
+            out = aplicar_adaptacion_capacidad(cap, "apartamento")
+            assert out.n_unidades_adaptadas <= n_unidades_adaptadas(out.n_viviendas_objetivo)
 
 
 def test_repack_sin_recorte_si_hay_holgura():
