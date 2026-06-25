@@ -130,6 +130,10 @@ class Capacidad:
     # núcleo, `patio_sin_espacio` queda en True para emitir el aviso correspondiente.
     area_patio_min_m2: float = 0.0
     patio_sin_espacio: bool = False
+    # Accesibilidad (DB-SUA): nº de unidades adaptadas asignadas automáticamente
+    # por tramos (0 en vivienda) y modo de adaptación ("total" o "parcial").
+    n_unidades_adaptadas: int = 0
+    modo_adaptacion: str = "total"
 
 
 def _nombre_planta(idx_visual: int, tipo: str) -> str:
@@ -650,5 +654,7 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "area_servicios_comunes_m2": round(cap.area_servicios_comunes_m2, 2),
         "area_patio_min_m2": round(cap.area_patio_min_m2, 2),
         "patio_sin_espacio": cap.patio_sin_espacio,
+        "n_unidades_adaptadas": cap.n_unidades_adaptadas,
+        "modo_adaptacion": cap.modo_adaptacion,
         "factor_limitante": cap.factor_limitante,
     }

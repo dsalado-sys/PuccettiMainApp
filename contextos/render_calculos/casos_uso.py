@@ -29,6 +29,7 @@ from .dominio import (
     ResumenEnvolvente,
     UsoEdificio,
 )
+from .geometria.accesibilidad import aplicar_adaptacion_capacidad
 from .geometria.capacidad import DisenoPlanta, calcular_capacidad, capacidad_a_dict
 from .geometria.envolvente import construir_envolvente
 from .geometria.parcelas import LadoParcela, azimut_normal_exterior, orientacion_cardinal
@@ -468,6 +469,13 @@ class CalcularLayout:
             descriptores_tipologia_tipo=descriptores_tipo,
             disenos=_disenos_por_categoria(params),
             cfg_vivienda=cfg_vivienda,
+        )
+
+        # 4.bis) Accesibilidad (DB-SUA): asignación automática de unidades
+        # adaptadas por tramos. En usos turísticos agranda las adaptadas y reduce
+        # la capacidad; en vivienda no hace nada.
+        cap = aplicar_adaptacion_capacidad(
+            cap, _USO_A_TIPO_UNIDAD.get(params.programa.uso, "vivienda"),
         )
 
         # 4) Tablas sintéticas derivadas del cálculo (no de geometría).
@@ -1186,8 +1194,6 @@ class ValidarCumplimiento:
              normativa.luz_recta_patio_min_m, "m", 2),
             ("Área patio mínima", urb_p.area_patio_min_m2,
              normativa.area_patio_min_m2, "m²", 2),
-            ("Unidades adaptadas", prog_p.pct_unidades_adaptadas,
-             normativa.pct_unidades_adaptadas_min, "%", 0),
             ("Ancho total fachada", ancho_fachada_total,
              normativa.ancho_min_fachada_m, "m", 1),
             ("Espesor tabique", dis_p.espesor_tabique_m,

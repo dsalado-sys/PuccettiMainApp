@@ -150,7 +150,6 @@
     set("edif", bloques.urbanisticos.edificabilidad_m2t_m2s ?? "—");
     set("plantas", bloques.urbanisticos.n_plantas_max ?? "—");
     set("ocupacion", bloques.urbanisticos.ocupacion_maxima_pct ?? "—");
-    set("adapt", bloques.programa.pct_unidades_adaptadas ?? "—");
   }
 
   // ─── Toast y spinner ──────────────────────────────────────────────────
@@ -367,6 +366,7 @@
       const tr = document.createElement("tr");
       const esReserva = r.tipo === "local" || r.tipo === "otros" || r.tipo === "usos_comunes";
       tr.className = esReserva ? "rc-fila-unidad-local" : "rc-fila-unidad-clicable";
+      if (!esReserva && r.adaptada) tr.classList.add("rc-fila-unidad-adaptada");
       tr.dataset.id = r.vivienda;
       tr.dataset.planta = r.planta;
       tr.dataset.tipo = r.tipo || "vivienda";
@@ -977,7 +977,6 @@
     ["retranqueo_linderos_m", "Retranq. linderos", " m"],
     ["retranqueo_atico_m", "Retranq. ático", " m"],
     ["ancho_min_fachada_m", "Fachada mín.", " m"],
-    ["pct_unidades_adaptadas_min", "% adaptadas mín.", " %"],
     ["luz_recta_patio_min_m", "Luz mín. patio", " m"],
     ["area_patio_min_m2", "Área mín. patio", " m²"],
     ["diametro_max_vestibulo_m", "Ø máx. vestíbulo", " m"],

@@ -69,7 +69,6 @@ class ParametrosUrbanisticos:
     # normativa (validación de cumplimiento). Default = un patio de 12 m² (= el
     # comportamiento histórico de patio único).
     patios: list[float] = field(default_factory=lambda: [12.0])
-    pct_unidades_adaptadas_min: float = 5.0         # INFERIOR
     ancho_min_fachada_m: float = 5.0                # INFERIOR (sobre la parcela)
     espesor_tabique_min_m: float = 0.10             # INFERIOR
     ancho_min_pasillo_comun_m: float = 1.20         # INFERIOR
@@ -135,7 +134,6 @@ class ParametrosPrograma:
     pct_local_pb: float = 0.0                       # % útil PB destinado a local no residencial
     pct_otros_pb: float = 0.0                       # % útil PB destinado a otros usos
     pct_usos_comunes_pb: float = 0.0                # % útil PB para usos comunes (AT / hoteles)
-    pct_unidades_adaptadas: float = 5.0
 
 
 @dataclass
@@ -259,7 +257,6 @@ class ParametrosRender:
                 n_dormitorios=n_dorms,
                 salon_cocina_open=programa.salon_cocina_open,
                 n_plantas=self.urbanisticos.n_plantas_max,
-                pct_unidades_adaptadas=programa.pct_unidades_adaptadas,
                 tipologias_extra=tipologias_extra_n,
                 pct_local_pb=max(0.0, min(100.0, float(programa.pct_local_pb))),
                 pct_otros_pb=max(0.0, min(100.0, float(programa.pct_otros_pb))),
@@ -304,7 +301,6 @@ def _programa_a_dict(prog: ParametrosPrograma) -> dict[str, Any]:
         "pct_local_pb": prog.pct_local_pb,
         "pct_otros_pb": prog.pct_otros_pb,
         "pct_usos_comunes_pb": prog.pct_usos_comunes_pb,
-        "pct_unidades_adaptadas": prog.pct_unidades_adaptadas,
     }
 
 
@@ -324,7 +320,6 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
             "diametro_max_vestibulo_m": p.urbanisticos.diametro_max_vestibulo_m,
             "espesor_muro_medianero_max_m": p.urbanisticos.espesor_muro_medianero_max_m,
             "espesor_separacion_unidades_max_m": p.urbanisticos.espesor_separacion_unidades_max_m,
-            "pct_unidades_adaptadas_min": p.urbanisticos.pct_unidades_adaptadas_min,
             "ancho_min_fachada_m": p.urbanisticos.ancho_min_fachada_m,
             "espesor_tabique_min_m": p.urbanisticos.espesor_tabique_min_m,
             "ancho_min_pasillo_comun_m": p.urbanisticos.ancho_min_pasillo_comun_m,
@@ -463,7 +458,6 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             pct_local_pb=max(0.0, min(100.0, _f(node, "pct_local_pb", base_prog.pct_local_pb))),
             pct_otros_pb=max(0.0, min(100.0, _f(node, "pct_otros_pb", base_prog.pct_otros_pb))),
             pct_usos_comunes_pb=max(0.0, min(100.0, _f(node, "pct_usos_comunes_pb", base_prog.pct_usos_comunes_pb))),
-            pct_unidades_adaptadas=_f(node, "pct_unidades_adaptadas", base_prog.pct_unidades_adaptadas),
         )
 
     urb_in = d.get("urbanisticos") or {}
@@ -521,7 +515,6 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         diametro_max_vestibulo_m=_f(urb_in, "diametro_max_vestibulo_m", base.urbanisticos.diametro_max_vestibulo_m),
         espesor_muro_medianero_max_m=_f(urb_in, "espesor_muro_medianero_max_m", base.urbanisticos.espesor_muro_medianero_max_m),
         espesor_separacion_unidades_max_m=_f(urb_in, "espesor_separacion_unidades_max_m", base.urbanisticos.espesor_separacion_unidades_max_m),
-        pct_unidades_adaptadas_min=_f(urb_in, "pct_unidades_adaptadas_min", base.urbanisticos.pct_unidades_adaptadas_min),
         ancho_min_fachada_m=_f(urb_in, "ancho_min_fachada_m", base.urbanisticos.ancho_min_fachada_m),
         espesor_tabique_min_m=_f(urb_in, "espesor_tabique_min_m", base.urbanisticos.espesor_tabique_min_m),
         ancho_min_pasillo_comun_m=_f(urb_in, "ancho_min_pasillo_comun_m", base.urbanisticos.ancho_min_pasillo_comun_m),
@@ -558,7 +551,6 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             "pct_local_pb": programa.pct_local_pb,
             "pct_otros_pb": programa.pct_otros_pb,
             "pct_usos_comunes_pb": programa.pct_usos_comunes_pb,
-            "pct_unidades_adaptadas": programa.pct_unidades_adaptadas,
             "categoria_vivienda": prog_tipo_node.get("categoria_vivienda", programa.categoria_vivienda.value),
             "tipologia_apartamento": prog_tipo_node.get("tipologia_apartamento", programa.tipologia_apartamento.value),
             "tipologia_habitacion": prog_tipo_node.get("tipologia_habitacion", programa.tipologia_habitacion.value),

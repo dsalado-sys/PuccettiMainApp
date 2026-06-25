@@ -336,15 +336,9 @@
         <small class="rc-hint">Mínimo por estancia y tipología de la categoría elegida, según Normativa.</small>
       </div>
 
-      {# % unidades adaptadas: aplica a un edificio con varias unidades; en un
-         inmueble suelto no tiene sentido. #}
-      {% if not es_inmueble %}
-      <label class="rc-campo" data-visible-en-planta="pb">
-        <span class="rc-campo-label">% unidades adaptadas</span>
-        <input type="number" name="pct_unidades_adaptadas" min="0" max="100" step="1"
-               value="{{ prog.pct_unidades_adaptadas }}" data-bloque="programa">
-      </label>
-      {% endif %}
+      {# Las unidades adaptadas (DB-SUA) se asignan automáticamente por tramos
+         según el nº total de alojamientos; solo en usos turísticos. Ya no hay
+         porcentaje editable: el resultado aparece en la tabla de unidades. #}
       {# Salón-cocina integrado: solo aplica a vivienda (Anexo I.5). El uso
          turístico/hotelero lo ignora; al cambiar de uso este campo se oculta y
          no entra al payload, así que no "arrastra" un valor activado. #}

@@ -73,7 +73,6 @@ class ParametrosPrograma:
     n_dormitorios: int = 2                    # 0 = estudio
     salon_cocina_open: bool = False
     n_plantas: int = 3
-    pct_unidades_adaptadas: float = 5.0       # mínimo accesibilidad
     tipologias_extra: list[int] = field(default_factory=list)  # nº dormitorios adicionales
     pct_local_pb: float = 0.0                 # % útil PB destinado a local no residencial
     pct_otros_pb: float = 0.0                 # % útil PB destinado a otros usos

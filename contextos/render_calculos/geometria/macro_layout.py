@@ -642,17 +642,22 @@ def _clonar_planta(tipo: PlantaPlurifamiliar, n: int) -> PlantaPlurifamiliar:
 
 
 def _marcar_unidades_adaptadas(
-    plantas: list[PlantaPlurifamiliar], pct: float,
+    plantas: list[PlantaPlurifamiliar], tipo_unidad: str,
 ) -> None:
-    """Marca como adaptadas (DB SUA) un % del total de unidades del edificio.
+    """Marca como adaptadas (DB-SUA) las unidades que exige la tabla por tramos.
 
-    Se priorizan las viviendas en planta baja (acceso sin ascensor), después
-    las de planta primera. Modifica `u.es_adaptada` en sitio.
+    Solo aplica a usos turísticos (apartamentos turísticos, hoteles y
+    hoteles-apartamento); en vivienda no marca ninguna. Se priorizan las unidades
+    de planta baja (acceso sin ascensor). Modifica `u.es_adaptada` en sitio.
     """
+    from .accesibilidad import es_uso_adaptable, n_unidades_adaptadas
+
+    if not es_uso_adaptable(tipo_unidad):
+        return
     todas: list[Unidad] = [u for pl in plantas for u in pl.unidades]
     if not todas:
         return
-    objetivo = max(0, round(len(todas) * pct / 100.0))
+    objetivo = n_unidades_adaptadas(len(todas))
     if objetivo == 0:
         return
     todas.sort(key=lambda u: int(u.id.split("-")[0][1:]) if "-" in u.id else 0)
@@ -699,7 +704,8 @@ def generar_edificio(
         programa_uso=programa_uso)
     plantas = [tipo if n == tipo.n else _clonar_planta(tipo, n)
                for n in range(cap.n_plantas_edificables)]
-    _marcar_unidades_adaptadas(plantas, params.programa.pct_unidades_adaptadas)
+    tipo_unidad = programa_uso.tipo_unidad if programa_uso is not None else "vivienda"
+    _marcar_unidades_adaptadas(plantas, tipo_unidad)
     consumida = sum(p.construida_m2 for p in plantas)
     return EdificioPlurifamiliar(
         parcela=envolvente.parcela, plantas=plantas,

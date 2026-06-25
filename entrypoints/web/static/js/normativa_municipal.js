@@ -220,7 +220,6 @@
       set("nm-f-rlind", urb.retranqueo_linderos_m ?? 0);
       set("nm-f-ratico", urb.retranqueo_atico_m ?? 3);
       set("nm-f-anchofach", urb.ancho_min_fachada_m ?? 5);
-      set("nm-f-adapt", urb.pct_unidades_adaptadas_min ?? 5);
       set("nm-f-luz", urb.luz_recta_patio_min_m ?? 3);
       set("nm-f-areapatio", urb.area_patio_min_m2 ?? 12);
       set("nm-f-vest", urb.diametro_max_vestibulo_m ?? 1.5);
@@ -264,7 +263,6 @@
         retranqueo_linderos_m: valof("nm-f-rlind", 0),
         retranqueo_atico_m: valof("nm-f-ratico", 3),
         ancho_min_fachada_m: valof("nm-f-anchofach", 5),
-        pct_unidades_adaptadas_min: valof("nm-f-adapt", 5),
         luz_recta_patio_min_m: valof("nm-f-luz", 3),
         area_patio_min_m2: valof("nm-f-areapatio", 12),
         diametro_max_vestibulo_m: valof("nm-f-vest", 1.5),

@@ -137,7 +137,6 @@ def edificio_a_dict(
             "categoria": params.programa.categoria,
             "n_dormitorios": params.programa.n_dormitorios,
             "n_plantas": len(edif.plantas),
-            "pct_unidades_adaptadas": params.programa.pct_unidades_adaptadas,
         },
         "parcela": {
             "poligono": ring(edif.parcela),
@@ -378,7 +377,7 @@ def _slug_principal(params, tipo_unidad: str) -> str:
 
 def _estancias_por_unidad_dorms(
     params, n_dorms: int, util_por_unidad: float, programa_uso, slug: str | None = None,
-    cfg=None,
+    cfg=None, *, es_adaptada: bool = False, modo: str = "total", factor: float = 1.0,
 ) -> list[dict[str, Any]]:
     """Estancias programadas para una unidad concreta.
 
@@ -460,13 +459,21 @@ def _estancias_por_unidad_dorms(
             estancias = programa_vivienda(n_dorms, util_por_unidad, salon_open, cfg_viv)
 
     salida: list[dict[str, Any]] = []
+    # Accesibilidad (DB-SUA): en una unidad adaptada se agrandan por el factor del
+    # uso las estancias correspondientes (modo total: toda la unidad; modo parcial:
+    # solo dormitorio/habitación + baño/aseo).
+    from .accesibilidad import estancia_se_agranda
+
     for e in estancias:
-        nivel, diam = _nivel_diametro(e.nombre, e.area_target_m2)
+        area_target = e.area_target_m2
+        if es_adaptada and factor > 1.0 and estancia_se_agranda(e.nombre, modo):
+            area_target = area_target * factor
+        nivel, diam = _nivel_diametro(e.nombre, area_target)
         salida.append({
             "nombre": e.nombre,
             "etiqueta": _etiqueta_estancia(e.nombre),
             "categoria": e.categoria,
-            "area_target_m2": round(e.area_target_m2, 2),
+            "area_target_m2": round(area_target, 2),
             "area_min_m2": round(e.area_min_m2, 2),
             "diametro_min_m": diam,
             "cabe_diametro": nivel == "ok",
@@ -479,9 +486,16 @@ def _estancias_por_unidad_dorms(
 
     # Circulación de acceso (NO computable) como estancia explícita en turismo, si
     # el programa no la incluyó ya: remanente del útil tras las estancias computables.
+    # En una unidad adaptada lo computable ya está agrandado por el factor; su
+    # circulación es el margen normativo SOBRE ese computable (la unidad crece de
+    # forma coherente: en modo total, ~factor; el remanente del slot estándar la
+    # absorbería incorrectamente).
     if es_turismo and not any(not e["computa_turismo"] for e in salida):
         computable_total = sum(e["area_target_m2"] for e in salida)
-        circ = round(max(0.0, util_por_unidad - computable_total), 2)
+        if es_adaptada and factor > 1.0:
+            circ = round(computable_total * PCT_CIRCULACION_TURISMO / 100.0, 2)
+        else:
+            circ = round(max(0.0, util_por_unidad - computable_total), 2)
         if circ > 0.05:
             nivel, diam = _nivel_diametro("circulacion_interior", circ)
             salida.append({
@@ -534,9 +548,17 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None, cfg=None) -> li
     util_obj = cap.util_objetivo_viv_m2
     tipo_unidad = programa_uso.tipo_unidad if programa_uso is not None else "vivienda"
 
-    total_unidades = cap.n_viviendas_objetivo
-    pct_adapt = max(0.0, float(getattr(params.programa, "pct_unidades_adaptadas", 0.0)))
-    n_adaptadas = int(total_unidades * pct_adapt / 100.0 + 0.5)
+    from .accesibilidad import factor_agrandado
+
+    # Accesibilidad (DB-SUA): nº y modo ya resueltos en la capacidad por tramos
+    # (0 en vivienda). Las `n_adaptadas` primeras unidades —recorridas PB primero—
+    # se marcan como adaptadas. En modo TOTAL su útil ya viene agrandado en
+    # `unidades_por_planta` (repack geométrico), así que las estancias salen mayores
+    # SIN reescalar aquí (factor=1, evita doble conteo). En modo PARCIAL (edificios
+    # diminutos, sin repack) el agrandado de dormitorio+aseo se aplica aquí.
+    n_adaptadas = int(getattr(cap, "n_unidades_adaptadas", 0))
+    modo_adapt = getattr(cap, "modo_adaptacion", "total")
+    factor_adapt = factor_agrandado(tipo_unidad) if modo_adapt == "parcial" else 1.0
     adaptadas_marcadas = 0
 
     local_pp = list(getattr(cap, "local_por_planta", [])) or [0.0] * len(cap.nombres_planta)
@@ -598,13 +620,13 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None, cfg=None) -> li
             # La unidad lleva su cuota de MUROS perimetrales del edificio
             # (prorrateada al útil) MÁS su propia TABIQUERÍA interior. La
             # circulación común y el núcleo son del edificio (tabla por planta).
-            factor = util_u / util_i_consumido
-            muros_u = muros_i * factor
-            muros_int_u = muros_int_i * factor
-            construida_u = util_u + muros_u + muros_int_u
+            prorr = util_u / util_i_consumido
+            muros_u = muros_i * prorr
+            muros_int_u = muros_int_i * prorr
 
             estancias = _estancias_por_unidad_dorms(
-                params, n_dorms_u, util_u, programa_uso, slug_u, cfg
+                params, n_dorms_u, util_u, programa_uso, slug_u, cfg,
+                es_adaptada=es_adapt, modo=modo_adapt, factor=factor_adapt,
             )
 
             # Circulación interior (intrínseca) de la unidad = útil de la unidad
@@ -617,7 +639,14 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None, cfg=None) -> li
             computable_u = sum(
                 e["area_target_m2"] for e in estancias if e.get("computa_turismo", e.get("categoria") != "circulacion")
             )
-            circ_interior_u = max(0.0, util_u - computable_u)
+            # Una unidad adaptada es más grande: su útil reportado es la suma de
+            # sus estancias (ya agrandadas), no el slot estándar de la planta.
+            util_unidad = (
+                sum(e["area_target_m2"] for e in estancias)
+                if (es_adapt and factor_adapt > 1.0) else util_u
+            )
+            circ_interior_u = max(0.0, util_unidad - computable_u)
+            construida_u = util_unidad + muros_u + muros_int_u
 
             rows.append({
                 "planta": nombre_planta,
@@ -627,7 +656,7 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None, cfg=None) -> li
                 "tipo": tipo_unidad,
                 "util_m2_objetivo": util_obj,
                 "construida_por_unidad_m2": round(construida_u, 2),
-                "util_por_unidad_m2": round(util_u, 2),
+                "util_por_unidad_m2": round(util_unidad, 2),
                 "computable_turismo_por_unidad_m2": round(computable_u, 2),
                 "muros_por_unidad_m2": round(muros_u, 2),
                 "muros_interior_por_unidad_m2": round(muros_int_u, 2),
