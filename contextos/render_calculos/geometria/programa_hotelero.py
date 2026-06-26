@@ -125,12 +125,6 @@ def _cat_validada(categoria: str) -> str:
     return categoria if categoria in SALON_SOCIAL_MIN else "hotel_3"
 
 
-def tipologias_validas(categoria: str) -> list[str]:
-    """Tipos de habitación ofrecidos por la categoría (según el Anexo I.1)."""
-    cat = _cat_validada(categoria)
-    return [tipo for (c, tipo) in MIN_HABITACION if c == cat]
-
-
 def _habitacion_min(
     categoria: str, tipo: str, cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT,
 ) -> float:

@@ -27,9 +27,6 @@ app/contextos/render_calculos/
 │   ├── programa_apartamentos.py     # Anexo I.3 (edificios) + I.4 (conjuntos) Decreto 194/2010
 │   ├── programa_hotelero.py         # Anexo I.1 hotel/hostal/pensión/albergue (habitación)
 │   ├── programa_uso.py        # `ProgramaUso` + `TipologiaUnidadDescriptor` + reparto genérico
-│   ├── macro_layout.py        # Generación geométrica de unidades dentro de la planta
-│   ├── interiores.py          # Layout interior (paredes, bandas) por vivienda
-│   ├── adyacencias.py         # Grafo de adyacencias entre estancias
 │   └── serializacion.py       # Output JSON (tablas por planta, por unidad, modal)
 └── README.md                  # Este documento
 ```
@@ -64,7 +61,7 @@ construir_envolvente(parcela, params)       envolvente.py
    └── _huella_atico (opcional)
         │
         ▼
-EdificioPlurifamiliar
+Envolvente
    ├── plantas: list[Planta]               (PB, P1, P2, Ático, Sótano)
    └── parcela, lados, edificabilidad_*
         │
@@ -197,7 +194,7 @@ el preview rápido.
 
 | Uso | Anexo | Driver de tipología | Construcción `ProgramaUso` |
 |-----|-------|---------------------|---------------------------|
-| Vivienda | I.5 — VPO Junta Andalucía | nº de dormitorios (0..4) | `programa.programa_uso_vivienda(n_dorms, salon_open)` |
+| Vivienda | I.5 — VPO Junta Andalucía | nº de dormitorios (0..4) | rama directa con `programa_uso=None` (estancias vía `programa.programa_vivienda`) |
 | Apartamentos turísticos | I.3 (edificios) / I.4 (conjuntos) — Decreto 194/2010 | categoría 1L–4L × tipología estudio/1d/2d/3d | `programa_apartamentos.programa_uso_apartamento(cat, tip)` |
 | Hotelero | I.1 — Hotel 1–5★, Hostal 1–2★, Pensión, Albergue | individual / doble / triple / cuádruple / múltiple (sólo albergue) | `programa_hotelero.programa_uso_hotelero(cat, tip)` |
 

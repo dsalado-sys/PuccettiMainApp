@@ -364,7 +364,7 @@ def _resolver_util_objetivo_combo(catalogo_apartamentos, prog, slug: str, cfg=No
 # ─── Caso de uso 2: CalcularLayout (§2.4+§2.5 — calculations-first iter. 3) ─
 @dataclass
 class CalcularLayout:
-    """req. 8+12 — capacidad numérica + tablas sintéticas, sin macro_layout.
+    """req. 8+12 — capacidad numérica + tablas sintéticas (sin geometría de polígonos).
 
     Desde iteración 3 la fuente de verdad es `calcular_capacidad()`. El render
     geométrico de unidades queda en backlog; la respuesta lleva `edificio: null`
@@ -1448,8 +1448,8 @@ def _indicadores_disenho(
     compacidad = (4 * math.pi * area / (perim ** 2)) if perim > 0 else 0.0
 
     # Estimación gruesa de huecos: 25% de la fachada del edificio (regla de pulgar)
-    # por número de plantas. En iteración posterior puede afinarse desde el
-    # macro_layout (suma de hueco_disp_m2 por unidad).
+    # por número de plantas. En iteración posterior puede afinarse con un
+    # cálculo de huecos por unidad.
     n_plantas = len(plantas) or 1
     altura_total = n_plantas * 3.0
     area_fachada = long_fach * altura_total if long_fach else 1.0

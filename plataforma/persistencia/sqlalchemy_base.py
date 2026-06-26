@@ -102,9 +102,9 @@ def init_db(
     sf = session_factory if session_factory is not None else SessionLocal
 
     _registrar_modelos()
-    # `create_all` crea las tablas que falten (cómodo en dev/test). La EVOLUCIÓN
-    # del esquema en producción la gobierna Alembic (`alembic upgrade head`, ver
-    # `app/alembic/`): ya no se hacen ALTER ad-hoc con `except: pass`.
+    # `create_all` crea las tablas que falten (cómodo en dev/test). No hay
+    # migraciones automáticas: Alembic se retiró del árbol, así que evolucionar
+    # el esquema sobre una BBDD existente se hace a mano (ver `app/CLAUDE.md`).
     Base.metadata.create_all(bind=eng)
 
     from .callejero_seed import sembrar_callejero

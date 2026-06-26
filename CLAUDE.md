@@ -103,7 +103,7 @@ ModuloPuccetti, Rol, PermisoModulo, MATRIZ_PERMISOS, puede_acceder`. `acceso`,
   tolerante con compat de JSON antiguo; cota `N_PLANTAS_LIMITE=60` anti-DoS);
   `puertos.py` (4 catálogos: Normativa/Superficies/Apartamentos/Hotelero `Repositorio`);
   `casos_uso.py` (`CalcularEnvolvente/Layout/TipologiasDormitorios/EstanciasInmueble`,
-  `ValidarCumplimiento`, `GuardarRender`); `geometria/` (subpaquete, motor aislado de
+  `ValidarCumplimiento`, `GuardarRender`); `geometria/` (subpaquete ~11 módulos, motor aislado de
   FastAPI/SQLAlchemy); **`README.md` propio** (doc de detalle). Lee los mínimos vivos de
   BBDD en CADA cálculo (`_sincronizar_minimos`, §3.8); sin globals.
 - **proyectos §2.11** — sin `dominio.py` (aggregate en `nucleo/`); `ProyectoRepositorio`;

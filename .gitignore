@@ -15,6 +15,7 @@ tmptmp.*.sqlite
 # Copias de seguridad
 *.bak
 *~
+app/data/*backup*.json
 
 # Entornos virtuales
 .venv/

@@ -5,7 +5,7 @@
      /estancias). Debounce 300 ms. Repinta capacidad, tablas por planta/unidad,
      KPIs, alertas y canvas, sin spinner ni toasts.
    - el botón «Calcular capacidad» queda RESERVADO para pintar el render
-     (macro_layout: unidades, núcleo, pasillos) en una próxima iteración.
+     geométrico (unidades, núcleo, pasillos) en una próxima iteración.
 */
 (function () {
   "use strict";

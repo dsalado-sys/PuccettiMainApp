@@ -690,23 +690,3 @@ def reparto_multi_tipologia(
     ]
     seleccion = reparto_multi_tipologia_generico(util_disponible, descriptores)
     return [(d.n_dorms_label, util) for d, util in seleccion]
-
-
-def programa_uso_vivienda(
-    n_dorms: int, salon_cocina_open: bool = False,
-    cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
-):
-    """Constructor del descriptor `ProgramaUso` para vivienda.
-
-    Import perezoso para evitar ciclos: `programa_uso.py` no importa nada de
-    este módulo, y este módulo importa `ProgramaUso` solo cuando hace falta.
-    """
-    from .programa_uso import ProgramaUso
-    return ProgramaUso(
-        util_objetivo_unidad_m2=util_maximo(n_dorms, cfg),
-        area_min_unidad_m2=util_minimo_vivienda(n_dorms, salon_cocina_open, cfg),
-        util_max_unidad_m2=util_maximo(n_dorms, cfg) * 1.25,
-        n_dormitorios=n_dorms,
-        tipo_unidad="vivienda",
-        area_servicios_obligatorios_m2=0.0,
-    )

@@ -290,7 +290,7 @@ def obtener_parcela_temporal(
 
 # ── Sesión: rol y proyecto activos ─────────────────────────────────────────
 def rol_activo(usuario: Usuario | None = Depends(usuario_actual)) -> Rol:
-    """Rol del usuario conectado. Por defecto, arquitecto si no hay sesión.
+    """Rol del usuario conectado. Sin sesión se asume `ROL_POR_DEFECTO` (el rol de menor privilegio), no arquitecto.
 
     Con autenticación real (§2.11), el rol lo fija el usuario y no la UI; la
     firma sigue devolviendo `Rol`, así que las rutas que dependen de ella no
