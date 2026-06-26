@@ -325,7 +325,9 @@ def calcular_capacidad(
 
     descuento_por_planta = area_servicios_comunes_m2 / n_plantas_habitables
 
-    construida_computable_total = sum(p.footprint.area for p in plantas if p.computa_edif)
+    construida_computable_total = sum(
+        getattr(p, "area_construida_m2", p.footprint.area) for p in plantas if p.computa_edif
+    )
     n_plantas_edif_max = (
         max(1, int(edificabilidad_m2 // huella_efectiva)) if huella_efectiva else 1
     )
@@ -382,10 +384,11 @@ def calcular_capacidad(
         # conocido `patio_i`.
         construida_i = p.footprint.area
         if p.computa_edif:
-            # La edificabilidad (techo consumido) se mide sobre la huella completa de
-            # TODAS las plantas que computan; es un concepto distinto del construido y
-            # ya no depende de ninguna admisión por techo (coincide con el consumo real).
-            construida_computable_efectiva += construida_i
+            # La edificabilidad (techo consumido) suma la superficie CONSTRUIDA de las
+            # plantas que computan: la huella menos los patios (vacíos a cielo abierto,
+            # que no son techo). `construida_i` (huella completa) se reserva como base de
+            # los % de muros/circulación/núcleo de más abajo.
+            construida_computable_efectiva += getattr(p, "area_construida_m2", construida_i)
 
         cat = _categoria_planta(p, es_primera_regular)
         dis = disenos.get(cat, dis_tipo)
