@@ -98,6 +98,7 @@
   display: inline-flex; align-items: center; gap: 8px;
   font-size: 13px; cursor: pointer; padding: 4px 0;
 }
+.rc-checkbox[hidden] { display: none; }
 .rc-checkbox input { accent-color: var(--dorado); }
 
 .rc-usos { border: 1px solid #E4DFCC; border-radius: var(--radio); padding: 10px 12px; }
