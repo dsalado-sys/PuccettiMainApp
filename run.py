@@ -13,6 +13,7 @@ Funciona invocado de cualquiera de estas formas:
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -29,14 +30,26 @@ def _asegurar_paquete_app_en_path() -> None:
         sys.path.insert(0, raiz_repo_str)
 
 
+def _bool_entorno(nombre: str, por_defecto: bool) -> bool:
+    valor = os.environ.get(nombre)
+    if valor is None:
+        return por_defecto
+    return valor.strip().lower() not in ("0", "false", "no", "off", "")
+
+
 def main() -> None:
     _asegurar_paquete_app_en_path()
     import uvicorn
+    # Configurable por entorno (coherente con PUCCETTI_DB_URL / PUCCETTI_SECRET_KEY).
+    # Por defecto, desarrollo local: 127.0.0.1:8080 con reload.
+    host = os.environ.get("PUCCETTI_HOST", "127.0.0.1")
+    port = int(os.environ.get("PUCCETTI_PORT", "8080"))
+    reload = _bool_entorno("PUCCETTI_RELOAD", True)
     uvicorn.run(
         "app.entrypoints.web.aplicacion:app",
-        host="127.0.0.1",
-        port=8080,
-        reload=True,
+        host=host,
+        port=port,
+        reload=reload,
     )
 
 

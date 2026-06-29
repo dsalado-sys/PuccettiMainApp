@@ -1,16 +1,20 @@
 {% extends "base.html" %}
 {% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
 
-{% block contenido %}
+{% block head %}
 <link rel="stylesheet" href="/static/css/normativa_municipal.css?v={{ estaticos_version }}" />
+{% endblock %}
 
-<section class="hero nm-hero">
-  <div class="nm-hero-titulo">
+{% block contenido %}
+
+<section class="hero">
+  <div class="hero-titulo">
+    <span class="eyebrow eyebrow--oro">Normativa</span>
     <h1>{{ tarjeta.titulo }}</h1>
-    <p class="nm-hero-sub">{{ tarjeta.descripcion }}</p>
+    <p class="hero-sub">{{ tarjeta.descripcion }}</p>
   </div>
-  <div class="nm-hero-acciones">
-    <span id="nm-toast" class="nm-toast" role="status" aria-live="polite"></span>
+  <div class="hero-acciones">
+    <span id="nm-toast" class="toast" role="status" aria-live="polite"></span>
   </div>
 </section>
 
@@ -20,10 +24,10 @@
   <!-- ─── Columna izquierda: carpetas + normativas archivadas ─── -->
   <aside class="nm-col-carpetas" aria-label="Carpetas de normativas">
     <header class="nm-col-header">
-      <h2>Carpetas</h2>
+      <h2 class="eyebrow">Carpetas</h2>
       <div class="nm-col-acciones">
-        <label class="nm-buscador-lupa" aria-label="Buscar carpeta">
-          <span class="nm-icono-lupa" aria-hidden="true">⌕</span>
+        <label class="buscador" aria-label="Buscar carpeta">
+          <span class="icono-lupa" aria-hidden="true">⌕</span>
           <input type="text" id="nm-buscar" placeholder="Buscar…" autocomplete="off">
         </label>
         {% if puede_editar %}
@@ -41,7 +45,7 @@
   <!-- ─── Columna derecha: datos de la normativa seleccionada ─── -->
   <section class="nm-col-datos" aria-label="Datos de la normativa">
     <header class="nm-col-header">
-      <h2 id="nm-detalle-titulo">Selecciona una normativa</h2>
+      <h2 class="eyebrow" id="nm-detalle-titulo">Selecciona una normativa</h2>
       <div class="nm-col-acciones" id="nm-detalle-acciones" hidden>
         {% if puede_editar %}
         <button type="button" id="nm-btn-guardar" class="boton-primario">Guardar cambios</button>
@@ -55,15 +59,15 @@
 
     <form id="nm-detalle-form" class="nm-detalle-form" hidden autocomplete="off">
       <div class="nm-bloque">
-        <h3>Identificación</h3>
+        <h3 class="eyebrow">Identificación</h3>
         <div class="nm-fila">
           <label class="nm-campo">
-            <span class="nm-campo-label">Nombre</span>
+            <span class="nm-campo-label eyebrow">Nombre</span>
             <input type="text" id="nm-f-nombre" maxlength="160"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Dirección</span>
+            <span class="nm-campo-label eyebrow">Dirección</span>
             <input type="text" id="nm-f-direccion" maxlength="200"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
@@ -71,21 +75,21 @@
       </div>
 
       <div class="nm-bloque">
-        <h3>Parámetros del PGOU</h3>
+        <h3 class="eyebrow">Parámetros del PGOU</h3>
 
         <div class="nm-fila">
           <label class="nm-campo">
-            <span class="nm-campo-label">Coef. edificabilidad (m²t/m²s)</span>
+            <span class="nm-campo-label eyebrow">Coef. edificabilidad (m²t/m²s)</span>
             <input type="number" id="nm-f-coef" min="0.1" max="8" step="0.05"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Ocupación máx. (%)</span>
+            <span class="nm-campo-label eyebrow">Ocupación máx. (%)</span>
             <input type="number" id="nm-f-ocup" min="30" max="100" step="1"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Plantas máx.</span>
+            <span class="nm-campo-label eyebrow">Plantas máx.</span>
             <input type="number" id="nm-f-plantas" min="1" max="20" step="1"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
@@ -93,12 +97,12 @@
 
         <div class="nm-fila">
           <label class="nm-campo">
-            <span class="nm-campo-label">Retranq. fachada (m)</span>
+            <span class="nm-campo-label eyebrow">Retranq. fachada (m)</span>
             <input type="number" id="nm-f-rfach" min="0" max="10" step="0.1"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Retranq. linderos (m)</span>
+            <span class="nm-campo-label eyebrow">Retranq. linderos (m)</span>
             <input type="number" id="nm-f-rlind" min="0" max="10" step="0.1"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
@@ -106,35 +110,30 @@
 
         <div class="nm-fila">
           <label class="nm-campo">
-            <span class="nm-campo-label">Retranq. ático (m) · fijo</span>
+            <span class="nm-campo-label eyebrow">Retranq. ático (m) · fijo</span>
             <input type="number" id="nm-f-ratico" min="0" max="10" step="0.1"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Ancho mín. fachada (m)</span>
+            <span class="nm-campo-label eyebrow">Ancho mín. fachada (m)</span>
             <input type="number" id="nm-f-anchofach" min="0" max="50" step="0.5"
-                   {% if not puede_editar %}readonly{% endif %}>
-          </label>
-          <label class="nm-campo">
-            <span class="nm-campo-label">% adaptadas mín.</span>
-            <input type="number" id="nm-f-adapt" min="0" max="100" step="1"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
         </div>
 
         <div class="nm-fila">
           <label class="nm-campo">
-            <span class="nm-campo-label">Luz patio (m) · máx</span>
+            <span class="nm-campo-label eyebrow">Luz patio (m) · máx</span>
             <input type="number" id="nm-f-luz" min="0" max="20" step="0.1"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Área mín. patio (m²)</span>
+            <span class="nm-campo-label eyebrow">Área mín. patio (m²)</span>
             <input type="number" id="nm-f-areapatio" min="0" max="80" step="0.5"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Vestíbulo Ø (m) · máx</span>
+            <span class="nm-campo-label eyebrow">Vestíbulo Ø (m) · máx</span>
             <input type="number" id="nm-f-vest" min="0" max="5" step="0.05"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
@@ -142,44 +141,44 @@
       </div>
 
       <div class="nm-bloque">
-        <h3>Espesores y anchos · normativa de diseño</h3>
+        <h3 class="eyebrow">Espesores y anchos · normativa de diseño</h3>
         <div class="nm-fila">
           <label class="nm-campo">
-            <span class="nm-campo-label">Muro medianero (m) · máx</span>
+            <span class="nm-campo-label eyebrow">Muro medianero (m) · máx</span>
             <input type="number" id="nm-f-emurom" min="0" max="1" step="0.01"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Separación unidades (m) · máx</span>
+            <span class="nm-campo-label eyebrow">Separación unidades (m) · máx</span>
             <input type="number" id="nm-f-eseppu" min="0" max="1" step="0.01"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Tabique interior (m) · mín</span>
+            <span class="nm-campo-label eyebrow">Tabique interior (m) · mín</span>
             <input type="number" id="nm-f-etab" min="0" max="0.5" step="0.01"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
         </div>
         <div class="nm-fila">
           <label class="nm-campo">
-            <span class="nm-campo-label">Pasillo común (m) · mín</span>
+            <span class="nm-campo-label eyebrow">Pasillo común (m) · mín</span>
             <input type="number" id="nm-f-pasc" min="0" max="3" step="0.05"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Pasillo vivienda (m) · mín</span>
+            <span class="nm-campo-label eyebrow">Pasillo vivienda (m) · mín</span>
             <input type="number" id="nm-f-pasv" min="0" max="2" step="0.05"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
           <label class="nm-campo">
-            <span class="nm-campo-label">Puerta paso libre (m) · mín</span>
+            <span class="nm-campo-label eyebrow">Puerta paso libre (m) · mín</span>
             <input type="number" id="nm-f-puerta" min="0" max="2" step="0.05"
                    {% if not puede_editar %}readonly{% endif %}>
           </label>
         </div>
 
         <fieldset class="nm-usos">
-          <legend>Usos permitidos</legend>
+          <legend class="eyebrow">Usos permitidos</legend>
           {% for u, label in [("residencial", "Residencial"), ("hotelero", "Hotelero"), ("terciario", "Terciario"), ("mixto", "Mixto")] %}
             <label class="nm-checkbox">
               <input type="checkbox" class="nm-f-uso" value="{{ u }}"
@@ -194,19 +193,19 @@
 </section>
 
 {# Submodal: crear carpeta #}
-<dialog id="nm-submodal-carpeta" class="nm-submodal">
-  <article class="nm-submodal-card">
-    <header class="nm-submodal-header">
+<dialog id="nm-submodal-carpeta" class="modal modal--sm">
+  <article class="modal-card">
+    <header class="modal-header">
       <h3>Nueva carpeta</h3>
-      <button type="button" class="nm-modal-cerrar" data-cerrar="nm-submodal-carpeta">×</button>
+      <button type="button" class="modal-cerrar" data-cerrar="nm-submodal-carpeta" aria-label="Cerrar">×</button>
     </header>
-    <div class="nm-submodal-cuerpo">
+    <div class="modal-cuerpo">
       <label class="nm-campo">
-        <span class="nm-campo-label">Nombre</span>
+        <span class="nm-campo-label eyebrow">Nombre</span>
         <input type="text" id="nm-submodal-carpeta-nombre" maxlength="120" autocomplete="off">
       </label>
     </div>
-    <footer class="nm-submodal-acciones">
+    <footer class="modal-acciones">
       <button type="button" class="boton-secundario" data-cerrar="nm-submodal-carpeta">Cancelar</button>
       <button type="button" id="nm-submodal-carpeta-guardar" class="boton-primario">Guardar</button>
     </footer>
@@ -214,25 +213,25 @@
 </dialog>
 
 {# Submodal: nueva normativa dentro de carpeta #}
-<dialog id="nm-submodal-nueva-norma" class="nm-submodal">
-  <article class="nm-submodal-card">
-    <header class="nm-submodal-header">
+<dialog id="nm-submodal-nueva-norma" class="modal modal--sm">
+  <article class="modal-card">
+    <header class="modal-header">
       <h3>Nueva normativa</h3>
-      <button type="button" class="nm-modal-cerrar" data-cerrar="nm-submodal-nueva-norma">×</button>
+      <button type="button" class="modal-cerrar" data-cerrar="nm-submodal-nueva-norma" aria-label="Cerrar">×</button>
     </header>
-    <div class="nm-submodal-cuerpo">
+    <div class="modal-cuerpo">
       <label class="nm-campo">
-        <span class="nm-campo-label">Nombre</span>
+        <span class="nm-campo-label eyebrow">Nombre</span>
         <input type="text" id="nm-submodal-nueva-nombre" maxlength="160" autocomplete="off"
                placeholder="Ej. Sevilla casco histórico">
       </label>
       <label class="nm-campo">
-        <span class="nm-campo-label">Dirección</span>
+        <span class="nm-campo-label eyebrow">Dirección</span>
         <input type="text" id="nm-submodal-nueva-direccion" maxlength="200" autocomplete="off"
                placeholder="Ej. C/ Mayor 12, Sevilla">
       </label>
     </div>
-    <footer class="nm-submodal-acciones">
+    <footer class="modal-acciones">
       <button type="button" class="boton-secundario" data-cerrar="nm-submodal-nueva-norma">Cancelar</button>
       <button type="button" id="nm-submodal-nueva-guardar" class="boton-primario">Crear</button>
     </footer>
@@ -240,18 +239,18 @@
 </dialog>
 
 {# Submodal: confirmar eliminación #}
-<dialog id="nm-submodal-confirmar" class="nm-submodal">
-  <article class="nm-submodal-card">
-    <header class="nm-submodal-header">
+<dialog id="nm-submodal-confirmar" class="modal modal--sm">
+  <article class="modal-card">
+    <header class="modal-header">
       <h3>Confirmar eliminación</h3>
-      <button type="button" class="nm-modal-cerrar" data-cerrar="nm-submodal-confirmar">×</button>
+      <button type="button" class="modal-cerrar" data-cerrar="nm-submodal-confirmar" aria-label="Cerrar">×</button>
     </header>
-    <div class="nm-submodal-cuerpo">
+    <div class="modal-cuerpo">
       <p id="nm-submodal-confirmar-msg">¿Estás seguro?</p>
     </div>
-    <footer class="nm-submodal-acciones">
+    <footer class="modal-acciones">
       <button type="button" class="boton-secundario" data-cerrar="nm-submodal-confirmar">Cancelar</button>
-      <button type="button" id="nm-submodal-confirmar-ok" class="boton-primario nm-boton-peligro">Eliminar</button>
+      <button type="button" id="nm-submodal-confirmar-ok" class="boton-peligro--solido">Eliminar</button>
     </footer>
   </article>
 </dialog>

@@ -145,9 +145,9 @@ def test_patios_catastrales_sustituyen_al_patio_por_defecto():
     # La parcela tiene 2 patios reales → el motor usa esas 2 áreas, no el [12.0].
     proyecto = _proyecto_con_patios(2, [18.5, 9.0])
     params = ParametrosRender()
-    assert params.urbanisticos.patios == [12.0]  # default antes de adaptar
+    assert [pd.area_m2 for pd in params.urbanisticos.patios] == [12.0]  # default antes de adaptar
     adaptar_params_a_edificio_existente(params, proyecto)
-    assert params.urbanisticos.patios == [18.5, 9.0]
+    assert [pd.area_m2 for pd in params.urbanisticos.patios] == [18.5, 9.0]
 
 
 def test_catastro_sin_patios_deja_lista_vacia():
@@ -163,4 +163,4 @@ def test_sin_dato_de_patios_respeta_el_default():
     proyecto = _proyecto_con(4, [])  # loc sin claves de patios
     params = ParametrosRender()
     adaptar_params_a_edificio_existente(params, proyecto)
-    assert params.urbanisticos.patios == [12.0]
+    assert [pd.area_m2 for pd in params.urbanisticos.patios] == [12.0]

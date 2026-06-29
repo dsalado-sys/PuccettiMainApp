@@ -2,8 +2,13 @@
 {% block titulo %}Puccetti · Menú principal{% endblock %}
 
 {% block contenido %}
+{# El sprite de iconos SVG (símbolos icono-*) vive en base.html: lo comparten
+   rail, cabecera y estas tarjetas. #}
 <section class="hero">
-  <h1>Estudio de prefactibilidad</h1>
+  <div class="hero-titulo">
+    <span class="eyebrow eyebrow--oro">Panel principal</span>
+    <h1>Estudio de prefactibilidad</h1>
+  </div>
 </section>
 
 <section class="rejilla-modulos">
@@ -14,6 +19,7 @@
        href="{% if a.puede_ver %}{{ t.ruta }}{% else %}#{% endif %}"
        {% if not a.puede_ver %}aria-disabled="true"{% endif %}>
       <header>
+        <svg class="tarjeta-icono" aria-hidden="true"><use href="#{{ t.icono }}"></use></svg>
         <h2>{{ t.titulo }}</h2>
       </header>
       <p>{{ t.descripcion }}</p>

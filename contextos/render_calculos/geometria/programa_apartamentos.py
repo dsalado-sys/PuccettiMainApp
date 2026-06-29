@@ -16,6 +16,8 @@ del salón-comedor crece con la *superficie adicional por plaza* a partir de la 
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field, replace
+
 from .combinador_tipologias import ComboDormitorios
 from .programa import Estancia, nombres_banos
 from .programa_uso import ProgramaUso, TipologiaUnidadDescriptor
@@ -51,44 +53,76 @@ PLAZAS: dict[str, int] = {"estudio": 2, "individual": 1, "doble": 2, "triple": 3
 PLAZAS_SALON = 2
 
 
-def _fusionar_minimos(destino: dict, origen: dict) -> None:
-    """Actualiza `destino` in-place con `origen` (hasta 1 nivel de anidamiento).
+# % de circulación interior de la unidad (pasillos + vestíbulo). Editable desde
+# el panel de diseño y COMPARTIDO con los demás usos; antes era un 1.15 fijo.
+PCT_CIRCULACION_INTERIOR = 15.0
 
-    Mutar in-place (en vez de rebind) preserva las referencias que otros módulos
-    importaron del diccionario (p. ej. los tests del Anexo I)."""
+
+# ─── Configuración inmutable del programa (§3.8 — sin globals mutables) ──────
+# Los mínimos editables del Anexo I.3/I.4 viven en una instancia FROZEN que se
+# construye por cálculo (desde BBDD) y se pasa como argumento a las funciones.
+# Antes se volcaban a globals de módulo (`cargar_desde_repo` /
+# `set_pct_circulacion_interior`), cruzando ediciones entre requests concurrentes
+# y tests (Pendiente 3.8). Las constantes de arriba quedan como DEFAULTS inmutables.
+@dataclass(frozen=True)
+class ProgramaApartamentosConfig:
+    min_dormitorio: dict[str, dict[str, float]] = field(
+        default_factory=lambda: {k: dict(v) for k, v in MIN_DORMITORIO.items()})
+    min_estudio: dict[str, float] = field(default_factory=lambda: dict(MIN_ESTUDIO))
+    min_salon_comedor: dict[str, float] = field(default_factory=lambda: dict(MIN_SALON_COMEDOR))
+    min_cocina: dict[str, float] = field(default_factory=lambda: dict(MIN_COCINA))
+    min_bano: dict[str, float] = field(default_factory=lambda: dict(MIN_BANO))
+    pct_circulacion_interior: float = PCT_CIRCULACION_INTERIOR
+
+
+CONFIG_DEFAULT = ProgramaApartamentosConfig()
+
+
+def _fusionar_minimos(destino: dict, origen: dict) -> dict:
+    """Devuelve una COPIA de `destino` fusionada con `origen` (hasta 1 nivel).
+
+    Pura (no muta el original) para que la config por defecto permanezca inmutable
+    y compartible entre hilos."""
+    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in destino.items()}
     for clave, valor in origen.items():
         if isinstance(valor, dict):
-            sub = destino.get(clave)
+            sub = out.get(clave)
             if isinstance(sub, dict):
                 sub.update({str(k): float(v) for k, v in valor.items()})
             else:
-                destino[clave] = {str(k): float(v) for k, v in valor.items()}
+                out[clave] = {str(k): float(v) for k, v in valor.items()}
         else:
-            destino[clave] = float(valor)
+            out[clave] = float(valor)
+    return out
 
 
-def cargar_desde_repo(catalogo, grupo: str = "edificios") -> bool:
-    """Vuelca los mínimos editables de BBDD a las constantes del módulo.
+def config_desde_repo(
+    catalogo=None, grupo: str = "edificios", pct_circulacion_interior: float | None = None,
+) -> ProgramaApartamentosConfig:
+    """Construye un `ProgramaApartamentosConfig` desde el catálogo de BBDD (Anexo I.3/I.4).
 
-    Hermano de `programa.cargar_desde_repo` (vivienda): permite que las ediciones
-    del editor de mínimos (Anexo I.3/I.4) lleguen al dimensionado de estancias sin
-    pasar el repo por toda la cadena de llamadas. Devuelve True si aplicó algún
-    override; False si la BBDD está vacía o el catálogo no expone el método.
-
-    Nota: las constantes no distinguen grupo (1L/2L coinciden en edificios y
-    conjuntos); se cargan los valores del `grupo` del cálculo en curso.
+    Sustituye al antiguo `cargar_desde_repo`, que mutaba globals de módulo. Cualquier
+    clave ausente conserva el default del Anexo. `pct_circulacion_interior`, si se
+    indica (panel de diseño), prevalece. Las constantes no distinguen grupo (1L/2L
+    coinciden); se cargan los valores del `grupo` del cálculo en curso.
     """
-    obtener = getattr(catalogo, "consolidadas_apartamentos", None)
-    if obtener is None:
-        return False
-    datos = obtener(grupo) or {}
-    if not datos:
-        return False
-    g = globals()
-    for clave in ("MIN_DORMITORIO", "MIN_ESTUDIO", "MIN_SALON_COMEDOR", "MIN_COCINA", "MIN_BANO"):
+    base = CONFIG_DEFAULT
+    obtener = getattr(catalogo, "consolidadas_apartamentos", None) if catalogo is not None else None
+    try:
+        datos = (obtener(grupo) or {}) if obtener is not None else {}
+    except Exception:
+        datos = {}
+    campos: dict = {}
+    for clave, campo in (
+        ("MIN_DORMITORIO", "min_dormitorio"), ("MIN_ESTUDIO", "min_estudio"),
+        ("MIN_SALON_COMEDOR", "min_salon_comedor"), ("MIN_COCINA", "min_cocina"),
+        ("MIN_BANO", "min_bano"),
+    ):
         if clave in datos and isinstance(datos[clave], dict):
-            _fusionar_minimos(g[clave], datos[clave])
-    return True
+            campos[campo] = _fusionar_minimos(getattr(base, campo), datos[clave])
+    if pct_circulacion_interior is not None:
+        campos["pct_circulacion_interior"] = max(0.0, float(pct_circulacion_interior))
+    return replace(base, **campos) if campos else base
 
 
 def ocupacion_unidad(plazas_dormitorios: int) -> int:
@@ -121,7 +155,10 @@ def banos_apartamento(categoria: str, plazas_dormitorios: int) -> int:
     return 2 if personas > umbral else 1
 
 
-def salon_min_apartamento(categoria: str, plazas_dormitorios: int) -> float:
+def salon_min_apartamento(
+    categoria: str, plazas_dormitorios: int,
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
+) -> float:
     """m² mínimos del salón-comedor de un apartamento turístico (Anexo A1.3/A1.4).
 
     El salón-comedor base cubre "hasta 4 personas"; por cada persona por encima de
@@ -134,14 +171,16 @@ def salon_min_apartamento(categoria: str, plazas_dormitorios: int) -> float:
     (4+2=6) → 24; 2 dobles (4+2=6) → 24.
     """
     extra = max(0, ocupacion_unidad(plazas_dormitorios) - 4)
-    return MIN_SALON_COMEDOR[categoria] + SUP_ADICIONAL_PLAZA[categoria] * extra
+    return cfg.min_salon_comedor[categoria] + SUP_ADICIONAL_PLAZA[categoria] * extra
 
 
-def _cat_validada(categoria: str, grupo: str) -> str:
+def _cat_validada(
+    categoria: str, grupo: str, cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
+) -> str:
     """Normaliza la categoría según el grupo (conjuntos solo admite 1L/2L)."""
     if grupo == "conjuntos":
         return categoria if categoria in ("1L", "2L") else "2L"
-    return categoria if categoria in MIN_SALON_COMEDOR else "2L"
+    return categoria if categoria in cfg.min_salon_comedor else "2L"
 
 
 def _tip_validada(tipologia: str) -> str:
@@ -154,6 +193,7 @@ def programa_apartamentos(
     categoria: str,
     util_disponible: float,
     grupo: str = "edificios",
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
 ) -> list[Estancia]:
     """Estancias COMPUTABLES de un apartamento turístico (categoría/tipología/grupo).
 
@@ -168,16 +208,16 @@ def programa_apartamentos(
     nunca por debajo de ellos). Con `util_disponible=0` cada estancia cae a su
     mínimo (lo aprovecha `_base_util`).
     """
-    cat = _cat_validada(categoria, grupo)
+    cat = _cat_validada(categoria, grupo, cfg)
     tip = _tip_validada(tipologia)
-    bano_min = MIN_BANO[cat]
+    bano_min = cfg.min_bano[cat]
 
     if tip == "estudio":
         # Anexo I.3/I.4: el estudio es una estancia única (salón-comedor que hace
         # también de dormitorio) + cocina + baño, piezas independientes con su
         # propio mínimo. La estancia absorbe el resto del presupuesto computable.
-        est = MIN_ESTUDIO[cat]
-        cocina_min = MIN_COCINA[cat]
+        est = cfg.min_estudio[cat]
+        cocina_min = cfg.min_cocina[cat]
         cocina_t = cocina_min
         bano_t = bano_min
         salon_t = max(est, util_disponible - cocina_t - bano_t)
@@ -189,9 +229,9 @@ def programa_apartamentos(
 
     plazas = PLAZAS.get(tip, 2)
     # Salón-comedor: mínimo del Anexo + adicional por ocupación > 4 (incl. salón).
-    salon_min = salon_min_apartamento(cat, plazas)
-    dorm_min = MIN_DORMITORIO[tip][cat]
-    cocina_min = MIN_COCINA[cat]
+    salon_min = salon_min_apartamento(cat, plazas, cfg)
+    dorm_min = cfg.min_dormitorio[tip][cat]
+    cocina_min = cfg.min_cocina[cat]
 
     # Cocina y baño(s): tamaño práctico fijo en su mínimo (no escalan con la superficie).
     # Nº de baños por ocupación y categoría (Decreto 194/2010): 1, o 2 si la unidad
@@ -220,36 +260,33 @@ def programa_apartamentos(
     return estancias
 
 
-# % de circulación interior de la unidad (pasillos + vestíbulo). Editable desde
-# el panel de diseño y COMPARTIDO con los demás usos; antes era un 1.15 fijo.
-# `casos_uso` lo sincroniza con `set_pct_circulacion_interior` en cada cálculo.
-PCT_CIRCULACION_INTERIOR = 15.0
-
-
-def set_pct_circulacion_interior(pct: float) -> None:
-    """Fija el % de circulación interior (panel de diseño → motor)."""
-    global PCT_CIRCULACION_INTERIOR
-    PCT_CIRCULACION_INTERIOR = max(0.0, float(pct))
-
-
-def _factor_circulacion() -> float:
+def _factor_circulacion(cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT) -> float:
     """Factor multiplicativo `1 + %circ/100` sobre los mínimos del Anexo."""
-    return 1.0 + PCT_CIRCULACION_INTERIOR / 100.0
+    return 1.0 + cfg.pct_circulacion_interior / 100.0
 
 
-def _base_util(categoria: str, tipologia: str, grupo: str) -> float:
+def _base_util(
+    categoria: str, tipologia: str, grupo: str,
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
+) -> float:
     """Suma de mínimos de las estancias = útil mínimo neto de la unidad."""
-    return sum(e.area_min_m2 for e in programa_apartamentos(tipologia, categoria, 0.0, grupo))
+    return sum(e.area_min_m2 for e in programa_apartamentos(tipologia, categoria, 0.0, grupo, cfg))
 
 
-def util_objetivo_apartamento(categoria: str, tipologia: str, grupo: str = "edificios") -> float:
+def util_objetivo_apartamento(
+    categoria: str, tipologia: str, grupo: str = "edificios",
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
+) -> float:
     """Objetivo de m² útil por unidad: mínimos + % circulación interior."""
-    return round(_base_util(categoria, tipologia, grupo) * _factor_circulacion(), 2)
+    return round(_base_util(categoria, tipologia, grupo, cfg) * _factor_circulacion(cfg), 2)
 
 
-def util_minimo_apartamento(categoria: str, tipologia: str, grupo: str = "edificios") -> float:
+def util_minimo_apartamento(
+    categoria: str, tipologia: str, grupo: str = "edificios",
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
+) -> float:
     """Mínimo viable (suma de mínimos del Anexo)."""
-    return round(_base_util(categoria, tipologia, grupo), 2)
+    return round(_base_util(categoria, tipologia, grupo, cfg), 2)
 
 
 # ─── Programa interior por COMBINACIÓN de dormitorios (§2.5 · paradigma nuevo) ──
@@ -271,38 +308,41 @@ def _plazas_combo(combo: ComboDormitorios) -> int:
 
 def util_minimo_combo(
     combo: ComboDormitorios, categoria: str, grupo: str = "edificios",
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
 ) -> float:
     """Útil mínimo viable de la combinación (suma de mínimos del Anexo)."""
-    cat = _cat_validada(categoria, grupo)
+    cat = _cat_validada(categoria, grupo, cfg)
     if combo.es_estudio:
-        return util_minimo_apartamento(cat, "estudio", grupo)
+        return util_minimo_apartamento(cat, "estudio", grupo, cfg)
     plazas = _plazas_combo(combo)
-    salon_min = salon_min_apartamento(cat, plazas)
+    salon_min = salon_min_apartamento(cat, plazas, cfg)
     dorm_min_total = sum(
-        MIN_DORMITORIO[tam][cat] * n for tam, n in combo.composicion.items()
+        cfg.min_dormitorio[tam][cat] * n for tam, n in combo.composicion.items()
     )
     n_banos = banos_apartamento(cat, plazas)
-    total = salon_min + dorm_min_total + MIN_COCINA[cat] + n_banos * MIN_BANO[cat]
+    total = salon_min + dorm_min_total + cfg.min_cocina[cat] + n_banos * cfg.min_bano[cat]
     return round(total, 2)
 
 
 def util_objetivo_combo(
     combo: ComboDormitorios, categoria: str, grupo: str = "edificios",
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
 ) -> float:
     """Objetivo de m² útil de la combinación: mínimos + % circulación interior."""
-    return round(util_minimo_combo(combo, categoria, grupo) * _factor_circulacion(), 2)
+    return round(util_minimo_combo(combo, categoria, grupo, cfg) * _factor_circulacion(cfg), 2)
 
 
 def descriptor_tipologia_combo(
     combo: ComboDormitorios, categoria: str, grupo: str = "edificios",
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
 ) -> TipologiaUnidadDescriptor:
     """Descriptor para el reparto multi-tipología a partir de una combinación.
 
     El `slug` es el slug canónico de la combinación (`"doble*1+individual*1"`),
     que la serialización reconoce vía `es_slug_combo` para regenerar el programa.
     """
-    cat = _cat_validada(categoria, grupo)
-    util_obj = util_objetivo_combo(combo, cat, grupo)
+    cat = _cat_validada(categoria, grupo, cfg)
+    util_obj = util_objetivo_combo(combo, cat, grupo, cfg)
     return TipologiaUnidadDescriptor(
         slug=combo.slug,
         util_objetivo=util_obj,
@@ -321,6 +361,7 @@ def programa_apartamentos_combo(
     categoria: str,
     util_disponible: float,
     grupo: str = "edificios",
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
 ) -> list[Estancia]:
     """Estancias COMPUTABLES de un apartamento de N dormitorios (combinación).
 
@@ -331,20 +372,20 @@ def programa_apartamentos_combo(
     proporcional a sus mínimos y nunca por debajo de ellos (con `util_disponible=0`
     cada estancia cae a su mínimo, igual que el sizer base).
     """
-    cat = _cat_validada(categoria, grupo)
+    cat = _cat_validada(categoria, grupo, cfg)
     if combo.es_estudio:
-        return programa_apartamentos("estudio", cat, util_disponible, grupo)
+        return programa_apartamentos("estudio", cat, util_disponible, grupo, cfg)
 
     plazas = _plazas_combo(combo)
-    salon_min = salon_min_apartamento(cat, plazas)
-    cocina_min = MIN_COCINA[cat]
-    bano_min = MIN_BANO[cat]
+    salon_min = salon_min_apartamento(cat, plazas, cfg)
+    cocina_min = cfg.min_cocina[cat]
+    bano_min = cfg.min_bano[cat]
 
     # Un dormitorio por unidad de la composición (orden canónico = orden del slug).
     dorms: list[tuple[str, float]] = []
     for tam in sorted(combo.composicion):
         for _ in range(combo.composicion[tam]):
-            dorms.append((tam, MIN_DORMITORIO[tam][cat]))
+            dorms.append((tam, cfg.min_dormitorio[tam][cat]))
     dorm_min_total = sum(m for _, m in dorms)
 
     # Nº de baños por ocupación y categoría (Decreto 194/2010): 1, o 2 si la unidad
@@ -413,10 +454,11 @@ def descriptor_tipologia_apartamento(
     categoria: str,
     tipologia: str,
     grupo: str = "edificios",
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
 ) -> TipologiaUnidadDescriptor:
     """Descriptor para el reparto multi-tipología (mezcla por planta)."""
     tip = _tip_validada(tipologia)
-    util_obj = util_objetivo_apartamento(categoria, tip, grupo)
+    util_obj = util_objetivo_apartamento(categoria, tip, grupo, cfg)
     return TipologiaUnidadDescriptor(
         slug=tip,
         util_objetivo=util_obj,
@@ -434,6 +476,7 @@ def programa_uso_apartamento_combo(
     categoria: str,
     n_unidades_estimado: int = 1,
     grupo: str = "edificios",
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
 ) -> ProgramaUso:
     """Descriptor de uso para una combinación de dormitorios (§2.5).
 
@@ -441,9 +484,9 @@ def programa_uso_apartamento_combo(
     las áreas comunes obligatorias son idénticas (dependen de la categoría y del
     nº de unidades, no de la composición de la unidad).
     """
-    cat = _cat_validada(categoria, grupo)
-    util_obj = util_objetivo_combo(combo, cat, grupo)
-    util_min = util_minimo_combo(combo, cat, grupo)
+    cat = _cat_validada(categoria, grupo, cfg)
+    util_obj = util_objetivo_combo(combo, cat, grupo, cfg)
+    util_min = util_minimo_combo(combo, cat, grupo, cfg)
     comunes = total_comunes_obligatorias_m2(n_unidades_estimado, cat, grupo)
     return ProgramaUso(
         util_objetivo_unidad_m2=util_obj,
@@ -460,11 +503,12 @@ def programa_uso_apartamento(
     tipologia: str,
     n_unidades_estimado: int = 1,
     grupo: str = "edificios",
+    cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
 ) -> ProgramaUso:
     """Descriptor de uso (incluye áreas comunes obligatorias dimensionadas)."""
     tip = _tip_validada(tipologia)
-    util_obj = util_objetivo_apartamento(categoria, tip, grupo)
-    util_min = util_minimo_apartamento(categoria, tip, grupo)
+    util_obj = util_objetivo_apartamento(categoria, tip, grupo, cfg)
+    util_min = util_minimo_apartamento(categoria, tip, grupo, cfg)
     comunes = total_comunes_obligatorias_m2(n_unidades_estimado, categoria, grupo)
     return ProgramaUso(
         util_objetivo_unidad_m2=util_obj,

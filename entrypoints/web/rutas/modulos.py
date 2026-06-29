@@ -49,13 +49,11 @@ def _pantalla_modulo(
     )
 
 
-@router.get("/modelos-planos", response_class=HTMLResponse)
-def modelos_planos(
-    request: Request,
-    rol: Rol = Depends(rol_activo),
-    proyecto: Proyecto | None = Depends(proyecto_activo),
-):
-    return _pantalla_modulo(request, "modelos_planos", rol, proyecto)
+# NOTA: `modelos_planos` no expone ruta. Su tarjeta está desactivada en
+# `catalogo_modulos.py` (módulo aún no integrado), por lo que `_tarjeta` no lo
+# encontraría y la ruta devolvía 404 para todos los roles. Cuando se integre, se
+# reactiva su tarjeta y se añade aquí su ruta a la vez (igual que `informe`).
+# El enum/MODULOS/MATRIZ_PERMISOS conservan la entrada como roadmap.
 
 
 @router.get("/informe", response_class=HTMLResponse)

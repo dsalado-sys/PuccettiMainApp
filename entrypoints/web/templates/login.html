@@ -3,6 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  {# Anti-flash: respeta el tema guardado antes del primer paint (login no tiene
+     conmutador, pero hereda la preferencia del resto de la app). #}
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("puccetti-tema");
+        if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { /* almacenamiento bloqueado */ }
+    })();
+  </script>
   <title>Puccetti · Iniciar sesión</title>
   <link rel="stylesheet" href="/static/css/puccetti.css?v={{ estaticos_version }}" />
 </head>

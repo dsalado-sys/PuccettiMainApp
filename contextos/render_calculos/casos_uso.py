@@ -12,6 +12,7 @@ import math
 import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from functools import lru_cache
 from types import SimpleNamespace
 from typing import Any
 
@@ -28,6 +29,7 @@ from .dominio import (
     ResumenEnvolvente,
     UsoEdificio,
 )
+from .geometria.accesibilidad import aplicar_adaptacion_capacidad
 from .geometria.capacidad import DisenoPlanta, calcular_capacidad, capacidad_a_dict
 from .geometria.envolvente import construir_envolvente
 from .geometria.parcelas import LadoParcela, azimut_normal_exterior, orientacion_cardinal
@@ -41,32 +43,53 @@ from .geometria.serializacion import (
 from .parametros import (
     ParametrosRender,
     ParametrosUrbanisticos,
+    PatioDef,
+    area_de_patio,
     parametros_a_dict,
     parametros_desde_dict,
 )
 from .puertos import (
     CatalogoApartamentosRepositorio,
-    CatalogoHotelApartamentoRepositorio,
     CatalogoHoteleroRepositorio,
     CatalogoSuperficiesRepositorio,
-    NormativaMunicipalRepositorio,
 )
 
 
-# ─── Reproyección WGS84 ↔ UTM30N (Iberia peninsular) ────────────────────────
+# ─── Reproyección WGS84 → UTM dinámico por huso ─────────────────────────────
 # La localización guarda lon/lat en WGS84; el motor de geometría necesita metros.
-_WGS84_A_UTM = Transformer.from_crs("EPSG:4326", "EPSG:25830", always_xy=True)
-_UTM_A_WGS84 = Transformer.from_crs("EPSG:25830", "EPSG:4326", always_xy=True)
+# El huso UTM se deriva de la posición de la parcela en vez de clavarse a 30N
+# (EPSG:25830): reproyectar Cataluña/Baleares (31N), Galicia (29N) o Canarias
+# (REGCAN95/28N) con el huso 30N deforma área, longitudes de lado y huella. Se
+# replica la misma lógica del contexto de localización (copiada, no importada,
+# por la regla de independencia entre contextos) para que la MISMA parcela use el
+# MISMO huso en los dos contextos.
+def _epsg_utm_para_lon(lon: float, lat: float) -> int:
+    if lat < 30:                  # Canarias
+        return 4083               # REGCAN95 / UTM zone 28N
+    if lon < -7.5:                # Galicia
+        return 25829              # ETRS89 / UTM zone 29N
+    if lon < 0.0:                 # Andalucía / Centro / Norte peninsular
+        return 25830              # ETRS89 / UTM zone 30N
+    return 25831                  # ETRS89 / UTM zone 31N — Cataluña, Baleares
 
 
-def _polygon_a_utm(coords_lonlat: list[tuple[float, float]]) -> Polygon:
-    pts_xy = [_WGS84_A_UTM.transform(lon, lat) for lon, lat in coords_lonlat]
+@lru_cache(maxsize=8)
+def _transformer_a_utm(epsg: int) -> Transformer:
+    return Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
+
+
+def _polygon_a_utm(coords_lonlat: list[tuple[float, float]], a_utm: Transformer) -> Polygon:
+    pts_xy = [a_utm.transform(lon, lat) for lon, lat in coords_lonlat]
     return Polygon(pts_xy)
 
 
-def _lado_a_utm(p1: tuple[float, float], p2: tuple[float, float]) -> tuple[tuple[float, float], tuple[float, float]]:
-    a = _WGS84_A_UTM.transform(p1[0], p1[1])
-    b = _WGS84_A_UTM.transform(p2[0], p2[1])
+def _lado_a_utm(
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    a_utm: Transformer,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    a = a_utm.transform(p1[0], p1[1])
+    b = a_utm.transform(p2[0], p2[1])
     return a, b
 
 
@@ -138,7 +161,14 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
     if not contorno or len(contorno) < 3:
         return None
 
-    poly = _polygon_a_utm([(float(p[0]), float(p[1])) for p in contorno])
+    # Huso UTM derivado del primer vértice (mismo criterio que localización, que ya
+    # midió área y clasificó los lados con ese huso): la parcela se reproyecta igual
+    # en ambos contextos, sin la deformación del 30N fijo fuera de la peninsular
+    # centro-occidental.
+    lon_ref, lat_ref = float(contorno[0][0]), float(contorno[0][1])
+    a_utm = _transformer_a_utm(_epsg_utm_para_lon(lon_ref, lat_ref))
+
+    poly = _polygon_a_utm([(float(p[0]), float(p[1])) for p in contorno], a_utm)
     if poly.is_empty or not poly.is_valid:
         poly = poly.buffer(0)
     if poly.is_empty:
@@ -152,7 +182,7 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
             tipo = "fachada"
         p1 = l.get("p1") or [0.0, 0.0]
         p2 = l.get("p2") or [0.0, 0.0]
-        a, b = _lado_a_utm((float(p1[0]), float(p1[1])), (float(p2[0]), float(p2[1])))
+        a, b = _lado_a_utm((float(p1[0]), float(p1[1])), (float(p2[0]), float(p2[1])), a_utm)
         long_m = math.hypot(b[0] - a[0], b[1] - a[1])
         if long_m < 0.10:
             continue
@@ -221,7 +251,7 @@ class CalcularEnvolvente:
             return {
                 "error": str(exc),
                 "envolvente": None,
-                "alertas": [_alerta_dict(Alerta("incumplimiento", "Geometría", str(exc)))],
+                "alertas": [_alerta_dict(Alerta("error", "Geometría", str(exc)))],
                 "indicadores": None,
             }
 
@@ -300,8 +330,12 @@ def _plantas_envolvente_a_dict(envolvente) -> list[dict[str, Any]]:
             "computa_edif": getattr(pl, "computa_edif", True),
             "footprint": ring(pl.footprint),
             "patios": [
-                {"poligono": ring(p.geometry), "area_m2": round(p.area_m2, 2),
-                 "luz_recta_m": round(p.luz_recta_m, 2)}
+                {"id": getattr(p, "id", ""), "poligono": ring(p.geometry),
+                 "base": ring(getattr(p, "base", None) or p.geometry),
+                 "area_m2": round(p.area_m2, 2), "luz_recta_m": round(p.luz_recta_m, 2),
+                 "area_efectiva_m2": round(getattr(p, "area_efectiva_m2", 0.0) or p.area_m2, 2),
+                 "cabe": bool(getattr(p, "cabe", True)),
+                 "bloqueado": bool(getattr(p, "bloqueado", False))}
                 for p in pl.patios
             ],
             "construida_m2": round(pl.area_construida_m2, 2),
@@ -310,10 +344,33 @@ def _plantas_envolvente_a_dict(envolvente) -> list[dict[str, Any]]:
     return out
 
 
+def _resolver_util_objetivo_combo(catalogo_apartamentos, prog, slug: str, cfg=None) -> float:
+    """Objetivo (m² útiles/unidad) de una combinación de dormitorios (§2.5).
+
+    Política ÚNICA compartida por `CalcularLayout` y `CalcularTipologiasDormitorios`
+    (antes duplicada en ambas clases): prioriza la BBDD del Anexo si la combinación
+    está sembrada; si no, compone desde los mínimos del Anexo del motor (`cfg`, §3.8).
+    """
+    from .geometria.combinador_tipologias import slug_a_combo
+    from .geometria.programa_apartamentos import CONFIG_DEFAULT, util_objetivo_combo
+
+    combo = slug_a_combo(slug)
+    cat = prog.categoria_apartamentos.value
+    grupo = prog.grupo_apartamentos.value
+    if catalogo_apartamentos is not None:
+        try:
+            uo = catalogo_apartamentos.util_objetivo_apartamento(cat, combo.slug, grupo)
+            if uo is not None and uo > 0:
+                return uo
+        except Exception:
+            pass
+    return util_objetivo_combo(combo, cat, grupo, cfg if cfg is not None else CONFIG_DEFAULT)
+
+
 # ─── Caso de uso 2: CalcularLayout (§2.4+§2.5 — calculations-first iter. 3) ─
 @dataclass
 class CalcularLayout:
-    """req. 8+12 — capacidad numérica + tablas sintéticas, sin macro_layout.
+    """req. 8+12 — capacidad numérica + tablas sintéticas (sin geometría de polígonos).
 
     Desde iteración 3 la fuente de verdad es `calcular_capacidad()`. El render
     geométrico de unidades queda en backlog; la respuesta lleva `edificio: null`
@@ -322,13 +379,11 @@ class CalcularLayout:
     Inyectables opcionales (si faltan → fallback a constantes del motor):
     - `catalogo_vivienda`: Anexo I.5 (vivienda).
     - `catalogo_apartamentos`: Anexo I.3/I.4 (apartamentos turísticos).
-    - `catalogo_hotel_apartamento`: Anexo I.2 (hoteles-apartamento).
     - `catalogo_hotelero`: Anexo I.1 (hoteles / hostales / pensiones / albergues).
     """
 
     catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
     catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
-    catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
     catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
 
     def ejecutar(
@@ -341,20 +396,20 @@ class CalcularLayout:
         el técnico. Si se indica y el uso es apartamentos turísticos, sustituye la
         tipología por la combinación (toda la unidad, PB y plantas tipo). Selección
         temporal: el caso de uso no la persiste."""
-        # Antes de calcular, vuelca los mínimos editables de BBDD a las constantes
-        # del motor, para que las ediciones del editor de superficies mínimas se
-        # respeten en cada cálculo (Anexo I.1–I.5).
-        self._sincronizar_minimos(params)
+        # §3.8 — construye la config inmutable del motor (mínimos editados de BBDD +
+        # % circulación del panel) para el uso activo y la pasa por la cadena de
+        # cálculo. Sustituye al volcado a globals de módulo (concurrencia/aislamiento).
+        cfg = self._sincronizar_minimos(params)
 
         # R3: error bloqueante si la suma de mínimos de una tipología de vivienda
         # supera su útil máximo editable (antes se infradimensionaba en silencio).
-        err_util_max = self._validar_util_maximo_vivienda(params, combo_override=combo_override)
+        err_util_max = self._validar_util_maximo_vivienda(params, combo_override=combo_override, cfg=cfg)
         if err_util_max:
             return {
                 "error": err_util_max,
                 "edificio": None,
                 "capacidad": None,
-                "alertas": [_alerta_dict(Alerta("incumplimiento", "Normativa", err_util_max))],
+                "alertas": [_alerta_dict(Alerta("error", "Normativa", err_util_max))],
                 "tabla_planta": [],
                 "tabla_unidad": [],
                 "indicadores": None,
@@ -374,7 +429,7 @@ class CalcularLayout:
                 "error": str(exc),
                 "edificio": None,
                 "capacidad": None,
-                "alertas": [_alerta_dict(Alerta("incumplimiento", "Geometría", str(exc)))],
+                "alertas": [_alerta_dict(Alerta("error", "Geometría", str(exc)))],
                 "tabla_planta": [],
                 "tabla_unidad": [],
                 "indicadores": None,
@@ -382,25 +437,29 @@ class CalcularLayout:
             }
 
         # 1) Resolver tamaño objetivo de la tipología principal (PB y plantas tipo).
-        util_objetivo = self._resolver_util_objetivo(params, combo_override=combo_override)
+        util_objetivo = self._resolver_util_objetivo(params, combo_override=combo_override, cfg=cfg)
         util_objetivo_tipo = self._resolver_util_objetivo(
-            params, params.programa_tipo, combo_override=combo_override
+            params, params.programa_tipo, combo_override=combo_override, cfg=cfg
         )
 
         # 2) Descriptores de tipología (principal + extras → mezcla), PB y tipo.
         descriptores = self._construir_descriptores_tipologia(
-            params, util_objetivo, combo_override=combo_override
+            params, util_objetivo, combo_override=combo_override, cfg=cfg
         )
         descriptores_tipo = self._construir_descriptores_tipologia(
-            params, util_objetivo_tipo, params.programa_tipo, combo_override=combo_override
+            params, util_objetivo_tipo, params.programa_tipo, combo_override=combo_override, cfg=cfg
         )
 
         # 3) Construir programa_uso (áreas comunes/sociales obligatorias — de edificio).
         programa_uso = self._construir_programa_uso(
             params, envolvente, params_motor, util_objetivo, descriptores,
-            combo_override=combo_override,
+            combo_override=combo_override, cfg=cfg,
         )
         area_comunes = programa_uso.area_servicios_obligatorios_m2 if programa_uso else 0.0
+
+        # `cfg_vivienda` solo lo consume la vía int-based de vivienda en el motor; en
+        # los demás usos el reparto va por descriptores y `cfg_vivienda` es inerte.
+        cfg_vivienda = cfg if params.programa.uso == UsoEdificio.VIVIENDA else None
 
         # 4) Cálculo puro — diferenciando PB / plantas tipo / ático / sótano.
         cap = calcular_capacidad(
@@ -412,11 +471,19 @@ class CalcularLayout:
             util_objetivo_por_unidad_tipo=util_objetivo_tipo,
             descriptores_tipologia_tipo=descriptores_tipo,
             disenos=_disenos_por_categoria(params),
+            cfg_vivienda=cfg_vivienda,
+        )
+
+        # 4.bis) Accesibilidad (DB-SUA): asignación automática de unidades
+        # adaptadas por tramos. En usos turísticos agranda las adaptadas y reduce
+        # la capacidad; en vivienda no hace nada.
+        cap = aplicar_adaptacion_capacidad(
+            cap, _USO_A_TIPO_UNIDAD.get(params.programa.uso, "vivienda"),
         )
 
         # 4) Tablas sintéticas derivadas del cálculo (no de geometría).
         tabla_planta = tabla_planta_desde_capacidad(cap, programa_uso=programa_uso)
-        tabla_unidad = tabla_unidad_desde_capacidad(cap, params, programa_uso=programa_uso)
+        tabla_unidad = tabla_unidad_desde_capacidad(cap, params, programa_uso=programa_uso, cfg=cfg)
 
         # 5) Indicadores y alertas (sin edificio dispuesto).
         indicadores = _indicadores_disenho(parcela, envolvente.plantas)
@@ -451,61 +518,54 @@ class CalcularLayout:
         }
 
     # ─── Helpers privados de CalcularLayout ────────────────────────────────
-    def _sincronizar_minimos(self, params: ParametrosRender) -> None:
-        """BBDD → constantes del motor antes de calcular (Anexo I.1–I.5).
+    def _sincronizar_minimos(self, params: ParametrosRender):
+        """BBDD → config INMUTABLE del motor para el uso activo (Anexo I.1–I.5, §3.8).
 
-        Hace que las superficies mínimas editadas desde el editor lleguen al
-        dimensionado de estancias en CADA cálculo (no solo vivienda). Es no-op si
-        no hay catálogo inyectado (p. ej. en los tests, que usan las constantes del
-        Anexo). Ante cualquier fallo, el motor mantiene sus constantes por defecto.
+        Devuelve un `Programa*Config` (vivienda/apartamentos/hotelero) con
+        los mínimos editados desde el editor y el % de circulación interior del panel.
+        Antes esto se volcaba a constantes de módulo (`cargar_desde_repo` /
+        `set_pct_circulacion_interior`), lo que cruzaba ediciones entre requests
+        concurrentes y entre tests (Pendiente 3.8). Ahora la config se pasa como
+        argumento por toda la cadena de cálculo: sin estado compartido.
+
+        Si no hay catálogo inyectado (p. ej. tests), `config_desde_repo` cae a los
+        defaults del Anexo (igual que antes), pero respetando el % del panel.
         """
         uso = params.programa.uso
-        # % circulación interior de la unidad (panel de diseño, bloque PB). Único
-        # y compartido por todos los usos; sustituye el 1.15 antes hardcodeado (R4).
-        # Se aplica DESPUÉS de `cargar_desde_repo` para que el valor del panel gane
-        # sobre el persistido por defecto (15%).
+        # % circulación interior de la unidad (panel de diseño, bloque PB). Único y
+        # compartido por todos los usos; prevalece sobre el persistido (R4).
         pct_circ = float(params.diseno.pct_circulacion_interior)
-        try:
-            if uso == UsoEdificio.VIVIENDA:
-                from .geometria import programa
-                if self.catalogo_vivienda is not None:
-                    programa.cargar_desde_repo(self.catalogo_vivienda)
-                programa.set_pct_circulacion_interior(pct_circ)
-            elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
-                from .geometria import programa_apartamentos
-                if self.catalogo_apartamentos is not None:
-                    grupo = params.programa.grupo_apartamentos.value
-                    programa_apartamentos.cargar_desde_repo(self.catalogo_apartamentos, grupo)
-                programa_apartamentos.set_pct_circulacion_interior(pct_circ)
-            elif uso == UsoEdificio.HOTEL_APARTAMENTO:
-                from .geometria import programa_hotel_apartamento
-                if self.catalogo_hotel_apartamento is not None:
-                    programa_hotel_apartamento.cargar_desde_repo(self.catalogo_hotel_apartamento)
-                programa_hotel_apartamento.set_pct_circulacion_interior(pct_circ)
-            elif uso == UsoEdificio.HOTELERO:
-                from .geometria import programa_hotelero
-                if self.catalogo_hotelero is not None:
-                    programa_hotelero.cargar_desde_repo(self.catalogo_hotelero)
-                programa_hotelero.set_pct_circulacion_interior(pct_circ)
-        except Exception:
-            pass
+        if uso == UsoEdificio.VIVIENDA:
+            from .geometria import programa
+            return programa.config_desde_repo(self.catalogo_vivienda, pct_circ)
+        if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+            from .geometria import programa_apartamentos
+            grupo = params.programa.grupo_apartamentos.value
+            return programa_apartamentos.config_desde_repo(self.catalogo_apartamentos, grupo, pct_circ)
+        if uso == UsoEdificio.HOTELERO:
+            from .geometria import programa_hotelero
+            return programa_hotelero.config_desde_repo(self.catalogo_hotelero, pct_circ)
+        return None
 
-    def _validar_util_maximo_vivienda(self, params: ParametrosRender, combo_override=None) -> str | None:
+    def _validar_util_maximo_vivienda(self, params: ParametrosRender, combo_override=None, cfg=None) -> str | None:
         """R3: mensaje de error si Σ mínimos de una tipología supera su útil máximo.
 
         Solo vivienda (único uso con útil máximo editable por tipología). Devuelve
-        None si todo cumple. Se evalúa tras `_sincronizar_minimos`, así que usa los
-        mínimos y el útil máximo YA editados en BBDD. Sin referencias al PDF.
+        None si todo cumple. Se evalúa con la config de `_sincronizar_minimos` (`cfg`,
+        §3.8), así que usa los mínimos y el útil máximo YA editados en BBDD. Sin
+        referencias al PDF.
         """
         prog = params.programa
         if prog.uso != UsoEdificio.VIVIENDA:
             return None
         from .dominio import CATEGORIA_A_NUM_DORMS
         from .geometria.programa import (
+            CONFIG_DEFAULT,
             util_maximo,
             util_minimo_vivienda,
             util_minimo_vivienda_combo,
         )
+        cfg = cfg if cfg is not None else CONFIG_DEFAULT
         sco = bool(prog.salon_cocina_open)
 
         def _mensaje(n: int, umin: float, umax: float) -> str:
@@ -524,21 +584,21 @@ class CalcularLayout:
         if combo_override is not None:
             from .geometria.combinador_tipologias import slug_a_combo
             combo = slug_a_combo(combo_override)
-            umin = util_minimo_vivienda_combo(combo, sco)
-            umax = util_maximo(combo.n_dorms)
+            umin = util_minimo_vivienda_combo(combo, sco, cfg)
+            umax = util_maximo(combo.n_dorms, cfg)
             return _mensaje(combo.n_dorms, umin, umax) if umin > umax + 1e-6 else None
 
         slug_a_n = {"estudio": 0, "1d": 1, "2d": 2, "3d": 3, "4d+": 4}
         ns = [CATEGORIA_A_NUM_DORMS.get(prog.categoria_vivienda, 2)]
         ns += [slug_a_n[s] for s in prog.tipologias_extra if s in slug_a_n]
         for n in ns:
-            umin = util_minimo_vivienda(n, sco)
-            umax = util_maximo(n)
+            umin = util_minimo_vivienda(n, sco, cfg)
+            umax = util_maximo(n, cfg)
             if umin > umax + 1e-6:
                 return _mensaje(n, umin, umax)
         return None
 
-    def _resolver_util_objetivo(self, params: ParametrosRender, prog=None, combo_override=None) -> float | None:
+    def _resolver_util_objetivo(self, params: ParametrosRender, prog=None, combo_override=None, cfg=None) -> float | None:
         """Lee el m² útil objetivo por unidad desde la BBDD del Anexo I.
 
         Vivienda: `anexo_i_vivienda.max_m2_util` para `n_dormitorios`.
@@ -555,19 +615,27 @@ class CalcularLayout:
 
         prog = prog if prog is not None else params.programa
         if prog.uso == UsoEdificio.APARTAMENTOS_TURISTICOS and combo_override is not None:
-            return self._util_objetivo_combo(prog, combo_override)
+            return _resolver_util_objetivo_combo(self.catalogo_apartamentos, prog, combo_override, cfg)
         if prog.uso == UsoEdificio.VIVIENDA and combo_override is not None:
             from .geometria.combinador_tipologias import slug_a_combo
-            from .geometria.programa import util_objetivo_vivienda_combo
+            from .geometria.programa import CONFIG_DEFAULT, util_objetivo_vivienda_combo
             return util_objetivo_vivienda_combo(
-                slug_a_combo(combo_override), bool(prog.salon_cocina_open)
+                slug_a_combo(combo_override), bool(prog.salon_cocina_open),
+                cfg if cfg is not None else CONFIG_DEFAULT,
             )
         if prog.uso == UsoEdificio.VIVIENDA:
-            if self.catalogo_vivienda is None:
+            # El puerto declara `util_objetivo_vivienda` como hook de fallback, pero
+            # el adapter SQLAlchemy aún no lo implementa: hasta entonces la vivienda
+            # simple cae al `util_maximo(n_dorms)` del motor en `calcular_capacidad`.
+            # Se resuelve por `getattr` para no enmascarar un AttributeError de
+            # programación tras el `except` genérico (unificar vivienda con la
+            # política de mínimos editados está pendiente: cambia el nº de unidades).
+            metodo = getattr(self.catalogo_vivienda, "util_objetivo_vivienda", None)
+            if metodo is None:
                 return None
             n_dorms = CATEGORIA_A_NUM_DORMS.get(prog.categoria_vivienda, 2)
             try:
-                return self.catalogo_vivienda.util_objetivo_vivienda(n_dorms)
+                return metodo(n_dorms)
             except Exception:
                 return None
         if prog.uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
@@ -578,16 +646,6 @@ class CalcularLayout:
                     prog.categoria_apartamentos.value,
                     prog.tipologia_apartamento.value,
                     prog.grupo_apartamentos.value,
-                )
-            except Exception:
-                return None
-        if prog.uso == UsoEdificio.HOTEL_APARTAMENTO:
-            if self.catalogo_hotel_apartamento is None:
-                return None
-            try:
-                return self.catalogo_hotel_apartamento.util_objetivo(
-                    prog.categoria_hotel_apartamento.value,
-                    prog.tipologia_apartamento.value,
                 )
             except Exception:
                 return None
@@ -603,45 +661,26 @@ class CalcularLayout:
                 return None
         return None
 
-    def _util_objetivo_combo(self, prog, combo_override: str) -> float:
-        """Objetivo de una combinación de dormitorios (§2.5).
-
-        Prioriza la BBDD si la combinación está sembrada (p. ej. el estudio, que
-        sí tiene fila); en otro caso compone desde las constantes del Anexo.
-        """
-        from .geometria.combinador_tipologias import slug_a_combo
-        from .geometria.programa_apartamentos import util_objetivo_combo
-
-        combo = slug_a_combo(combo_override)
-        cat = prog.categoria_apartamentos.value
-        grupo = prog.grupo_apartamentos.value
-        if self.catalogo_apartamentos is not None:
-            try:
-                uo = self.catalogo_apartamentos.util_objetivo_apartamento(cat, combo.slug, grupo)
-                if uo is not None and uo > 0:
-                    return uo
-            except Exception:
-                pass
-        return util_objetivo_combo(combo, cat, grupo)
-
     # ─── Descriptores de tipología (mezcla multi-tipología por uso) ─────────
-    def _construir_descriptores_tipologia(self, params: ParametrosRender, util_objetivo, prog=None, combo_override=None):
+    def _construir_descriptores_tipologia(self, params: ParametrosRender, util_objetivo, prog=None, combo_override=None, cfg=None):
         """Lista de `TipologiaUnidadDescriptor` del uso activo (principal + extras).
 
         La categoría del proyecto es fija; varía la tipología (igual que en
         vivienda solo varía el nº de dormitorios). `prog` permite construir la lista
         de las plantas tipo (`programa_tipo`); por defecto usa `params.programa`.
         `combo_override` (§2.5) sustituye la tipología por una combinación de
-        dormitorios (edificio homogéneo de esa combinación). Devuelve `None` para
-        vivienda (que sigue la vía int-based del motor) y para usos no soportados.
+        dormitorios (edificio homogéneo de esa combinación). `cfg` (§3.8) son los
+        mínimos editados del uso activo. Devuelve `None` para vivienda (que sigue la
+        vía int-based del motor) y para usos no soportados.
         """
         prog = prog if prog is not None else params.programa
         uso = prog.uso
         if uso == UsoEdificio.VIVIENDA and combo_override is not None:
             from .geometria.combinador_tipologias import slug_a_combo
-            from .geometria.programa import descriptor_tipologia_vivienda_combo
+            from .geometria.programa import CONFIG_DEFAULT, descriptor_tipologia_vivienda_combo
             d = descriptor_tipologia_vivienda_combo(
-                slug_a_combo(combo_override), bool(prog.salon_cocina_open)
+                slug_a_combo(combo_override), bool(prog.salon_cocina_open),
+                cfg if cfg is not None else CONFIG_DEFAULT,
             )
             if util_objetivo is not None and util_objetivo > 0:
                 d = replace(d, util_objetivo=util_objetivo, util_maximo=round(util_objetivo * 1.25, 2))
@@ -651,31 +690,29 @@ class CalcularLayout:
 
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS and combo_override is not None:
             from .geometria.combinador_tipologias import slug_a_combo
-            from .geometria.programa_apartamentos import descriptor_tipologia_combo
+            from .geometria.programa_apartamentos import CONFIG_DEFAULT, descriptor_tipologia_combo
             combo = slug_a_combo(combo_override)
             d = descriptor_tipologia_combo(
-                combo, prog.categoria_apartamentos.value, prog.grupo_apartamentos.value
+                combo, prog.categoria_apartamentos.value, prog.grupo_apartamentos.value,
+                cfg if cfg is not None else CONFIG_DEFAULT,
             )
             if util_objetivo is not None and util_objetivo > 0:
                 d = replace(d, util_objetivo=util_objetivo, util_maximo=round(util_objetivo * 1.25, 2))
             return [d]
 
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
-            from .geometria.programa_apartamentos import descriptor_tipologia_apartamento
+            from .geometria.programa_apartamentos import CONFIG_DEFAULT, descriptor_tipologia_apartamento
+            cfg_uso = cfg if cfg is not None else CONFIG_DEFAULT
             cat = prog.categoria_apartamentos.value
             grupo = prog.grupo_apartamentos.value
             principal = prog.tipologia_apartamento.value
-            constructor = lambda slug: descriptor_tipologia_apartamento(cat, slug, grupo)
-        elif uso == UsoEdificio.HOTEL_APARTAMENTO:
-            from .geometria.programa_hotel_apartamento import descriptor_tipologia_hotel_apartamento
-            cat = prog.categoria_hotel_apartamento.value
-            principal = prog.tipologia_apartamento.value
-            constructor = lambda slug: descriptor_tipologia_hotel_apartamento(cat, slug)
+            constructor = lambda slug: descriptor_tipologia_apartamento(cat, slug, grupo, cfg_uso)
         elif uso == UsoEdificio.HOTELERO:
-            from .geometria.programa_hotelero import descriptor_tipologia_hotelero
+            from .geometria.programa_hotelero import CONFIG_DEFAULT, descriptor_tipologia_hotelero
+            cfg_uso = cfg if cfg is not None else CONFIG_DEFAULT
             cat = prog.categoria_hotelero.value
             principal = prog.tipologia_habitacion.value
-            constructor = lambda slug: descriptor_tipologia_hotelero(cat, slug)
+            constructor = lambda slug: descriptor_tipologia_hotelero(cat, slug, cfg_uso)
         else:
             return None
 
@@ -696,39 +733,39 @@ class CalcularLayout:
         util_objetivo: float | None,
         descriptores,
         combo_override=None,
+        cfg=None,
     ):
         """Construye el descriptor de uso con sus áreas comunes/sociales obligatorias.
 
         Para vivienda: None (calcular_capacidad no necesita programa_uso). Para
-        apartamentos / hotel-apartamento / hotelero hace una iteración de dos
+        apartamentos / hotelero hace una iteración de dos
         pasos para dimensionar las comunes (que escalan con nº de unidades, o de
         plazas en albergue). `combo_override` (§2.5) dimensiona desde la combinación.
+        `cfg` (§3.8) son los mínimos editados del uso activo.
         """
         prog = params.programa
         uso = prog.uso
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS and combo_override is not None:
             from .geometria.combinador_tipologias import slug_a_combo
-            from .geometria.programa_apartamentos import programa_uso_apartamento_combo
+            from .geometria.programa_apartamentos import CONFIG_DEFAULT, programa_uso_apartamento_combo
+            cfg_uso = cfg if cfg is not None else CONFIG_DEFAULT
             combo = slug_a_combo(combo_override)
             cat = prog.categoria_apartamentos.value
             grupo = prog.grupo_apartamentos.value
-            builder = lambda n, p: programa_uso_apartamento_combo(combo, cat, n_unidades_estimado=n, grupo=grupo)
+            builder = lambda n, p: programa_uso_apartamento_combo(combo, cat, n_unidades_estimado=n, grupo=grupo, cfg=cfg_uso)
         elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
-            from .geometria.programa_apartamentos import programa_uso_apartamento
+            from .geometria.programa_apartamentos import CONFIG_DEFAULT, programa_uso_apartamento
+            cfg_uso = cfg if cfg is not None else CONFIG_DEFAULT
             cat = prog.categoria_apartamentos.value
             tip = prog.tipologia_apartamento.value
             grupo = prog.grupo_apartamentos.value
-            builder = lambda n, p: programa_uso_apartamento(cat, tip, n_unidades_estimado=n, grupo=grupo)
-        elif uso == UsoEdificio.HOTEL_APARTAMENTO:
-            from .geometria.programa_hotel_apartamento import programa_uso_hotel_apartamento
-            cat = prog.categoria_hotel_apartamento.value
-            tip = prog.tipologia_apartamento.value
-            builder = lambda n, p: programa_uso_hotel_apartamento(cat, tip, n_unidades_estimado=n)
+            builder = lambda n, p: programa_uso_apartamento(cat, tip, n_unidades_estimado=n, grupo=grupo, cfg=cfg_uso)
         elif uso == UsoEdificio.HOTELERO:
-            from .geometria.programa_hotelero import programa_uso_hotelero
+            from .geometria.programa_hotelero import CONFIG_DEFAULT, programa_uso_hotelero
+            cfg_uso = cfg if cfg is not None else CONFIG_DEFAULT
             cat = prog.categoria_hotelero.value
             tip = prog.tipologia_habitacion.value
-            builder = lambda n, p: programa_uso_hotelero(cat, tip, n_unidades_estimado=n, n_plazas_estimado=p)
+            builder = lambda n, p: programa_uso_hotelero(cat, tip, n_unidades_estimado=n, n_plazas_estimado=p, cfg=cfg_uso)
         else:
             return None
 
@@ -789,12 +826,11 @@ class CalcularTipologiasDormitorios:
     con `combo_override` para que el conteo coincida exactamente con el que se
     obtiene al elegir esa combinación. Aplica a **vivienda** (dormitorios
     individual/doble) y **apartamentos turísticos** (individual/doble/triple/
-    cuádruple); hotelero y hotel-apartamento clasifican por ocupación → error.
+    cuádruple); hotelero clasifica por ocupación → error.
     """
 
     catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
     catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
-    catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
     catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
 
     def ejecutar(
@@ -809,17 +845,19 @@ class CalcularTipologiasDormitorios:
         uso = prog.uso
         n_dorms = max(0, int(n_dorms))
 
-        # Reutiliza el motor de layout (y vuelca los mínimos editables de BBDD a las
-        # constantes ANTES de que las lambdas `objetivo`/`minimo` los lean al ordenar).
+        # Reutiliza el motor de layout y construye la config inmutable del uso activo
+        # (§3.8) ANTES de que las lambdas `objetivo`/`minimo` la usen al ordenar.
         layout = CalcularLayout(
             catalogo_vivienda=self.catalogo_vivienda,
             catalogo_apartamentos=self.catalogo_apartamentos,
-            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
             catalogo_hotelero=self.catalogo_hotelero,
         )
-        layout._sincronizar_minimos(params)
+        cfg = layout._sincronizar_minimos(params)
 
         # Despacho por uso: alfabeto de tamaños, objetivo, mínimo y plazas.
+        # `techo_util_maximo`: solo vivienda tiene útil máximo editable por
+        # tipología (R3); los demás usos no tienen techo del que excluir combos.
+        techo_util_maximo = None
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             from .geometria.programa_apartamentos import (
                 PLAZAS, TAMANOS_DORMITORIO, util_minimo_combo,
@@ -828,22 +866,23 @@ class CalcularTipologiasDormitorios:
             grupo = prog.grupo_apartamentos.value
             tamanos = TAMANOS_DORMITORIO
             plazas_map = PLAZAS
-            objetivo = lambda combo: self._util_objetivo_combo(prog, combo.slug)
-            minimo = lambda combo: util_minimo_combo(combo, cat, grupo)
+            objetivo = lambda combo: _resolver_util_objetivo_combo(self.catalogo_apartamentos, prog, combo.slug, cfg)
+            minimo = lambda combo: util_minimo_combo(combo, cat, grupo, cfg)
             meta = {"categoria": cat, "grupo": grupo}
         elif uso == UsoEdificio.VIVIENDA:
             from .geometria.programa import (
                 PLAZAS_DORMITORIO_VIVIENDA, TAMANOS_DORMITORIO_VIVIENDA,
-                util_minimo_vivienda_combo, util_objetivo_vivienda_combo,
+                util_maximo, util_minimo_vivienda_combo, util_objetivo_vivienda_combo,
             )
             salon_open = bool(prog.salon_cocina_open)
             tamanos = TAMANOS_DORMITORIO_VIVIENDA
             plazas_map = PLAZAS_DORMITORIO_VIVIENDA
-            objetivo = lambda combo: util_objetivo_vivienda_combo(combo, salon_open)
+            objetivo = lambda combo: util_objetivo_vivienda_combo(combo, salon_open, cfg)
             minimo = lambda combo: (
-                util_objetivo_vivienda_combo(combo, salon_open) if combo.es_estudio
-                else util_minimo_vivienda_combo(combo, salon_open)
+                util_objetivo_vivienda_combo(combo, salon_open, cfg) if combo.es_estudio
+                else util_minimo_vivienda_combo(combo, salon_open, cfg)
             )
+            techo_util_maximo = lambda combo: util_maximo(combo.n_dorms, cfg)
             meta = {"categoria": prog.categoria_vivienda.value}
         else:
             return {
@@ -855,10 +894,30 @@ class CalcularTipologiasDormitorios:
         combos = sorted(enumerar_combinaciones(n_dorms, tamanos), key=objetivo)
 
         viables: list[dict[str, Any]] = []
+        excluidas: list[dict[str, Any]] = []
         for combo in combos:
+            # R3 (solo vivienda): si el útil mínimo viable de la combinación supera
+            # su útil máximo editable, esa combinación no se puede construir, pero NO
+            # invalida a las demás → se reporta como excluida, sin abortar la lista
+            # (antes el error de un combo descartaba también los viables anteriores).
+            if techo_util_maximo is not None:
+                umax = techo_util_maximo(combo)
+                umin = minimo(combo)
+                if umin > umax + 1e-6:
+                    excluidas.append({
+                        "slug": combo.slug,
+                        "composicion": dict(combo.composicion),
+                        "etiqueta": _etiqueta_combo(combo.composicion),
+                        "n_dorms": combo.n_dorms,
+                        "plazas": combo.plazas(plazas_map),
+                        "util_minimo_m2": round(umin, 2),
+                        "util_maximo_m2": round(umax, 2),
+                    })
+                    continue
             res = layout.ejecutar(parcela, params, combo_override=combo.slug)
             if res.get("error"):
-                # Envolvente inválida: no depende de la combinación → abortar.
+                # Error real (envolvente inválida): no depende de la combinación →
+                # abortar (el caso de útil máximo ya se filtró arriba sin abortar).
                 return {"error": res["error"], "n_dorms": n_dorms, "combinaciones": []}
             cap = res.get("capacidad") or {}
             n_unidades = int(cap.get("n_viviendas_objetivo", 0) or 0)
@@ -880,33 +939,15 @@ class CalcularTipologiasDormitorios:
             **meta,
             "total_combinaciones": len(combos),
             "viables": len(viables),
-            "podadas": len(combos) - len(viables),
+            "podadas": len(combos) - len(viables) - len(excluidas),
+            "excluidas_util_maximo": excluidas,
             "combinaciones": viables,
         }
-
-    def _util_objetivo_combo(self, prog, slug: str) -> float:
-        """Objetivo de la combinación (BBDD si sembrada, si no constante del Anexo)."""
-        from .geometria.combinador_tipologias import slug_a_combo
-        from .geometria.programa_apartamentos import util_objetivo_combo
-
-        combo = slug_a_combo(slug)
-        cat = prog.categoria_apartamentos.value
-        grupo = prog.grupo_apartamentos.value
-        if self.catalogo_apartamentos is not None:
-            try:
-                uo = self.catalogo_apartamentos.util_objetivo_apartamento(cat, combo.slug, grupo)
-                if uo is not None and uo > 0:
-                    return uo
-            except Exception:
-                pass
-        return util_objetivo_combo(combo, cat, grupo)
-
 
 # Uso del edificio → tipo de unidad que entiende el motor de estancias (Anexo I).
 _USO_A_TIPO_UNIDAD: dict[UsoEdificio, str] = {
     UsoEdificio.VIVIENDA: "vivienda",
     UsoEdificio.APARTAMENTOS_TURISTICOS: "apartamento",
-    UsoEdificio.HOTEL_APARTAMENTO: "hotel_apartamento",
     UsoEdificio.HOTELERO: "habitacion",
 }
 
@@ -926,12 +967,11 @@ class CalcularEstanciasInmueble:
     así que NO se descuenta aquí —se contaría dos veces—.
 
     Reutiliza el motor de estancias por unidad (`_estancias_por_unidad_dorms`), que ya
-    ramifica por uso (vivienda / apartamento / hotel-apartamento / habitación).
+    ramifica por uso (vivienda / apartamento / habitación).
     """
 
     catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
     catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
-    catalogo_hotel_apartamento: CatalogoHotelApartamentoRepositorio | None = None
     catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
 
     def ejecutar(
@@ -946,20 +986,19 @@ class CalcularEstanciasInmueble:
                 "totales": None,
                 "error": "El inmueble no tiene superficie construida con la que calcular sus estancias.",
                 "alertas": [_alerta_dict(Alerta(
-                    "incumplimiento", "Inmueble",
+                    "error", "Inmueble",
                     "Sin superficie construida del inmueble: localízalo y elígelo en §2.1.",
                 ))],
             }
 
-        # Vuelca mínimos editables de BBDD + % circulación interior a las constantes
-        # del motor (igual que CalcularLayout antes de calcular). Reusa su helper.
+        # Construye la config inmutable del motor con los mínimos editados de BBDD +
+        # % circulación interior (igual que CalcularLayout). Reusa su helper (§3.8).
         layout = CalcularLayout(
             catalogo_vivienda=self.catalogo_vivienda,
             catalogo_apartamentos=self.catalogo_apartamentos,
-            catalogo_hotel_apartamento=self.catalogo_hotel_apartamento,
             catalogo_hotelero=self.catalogo_hotelero,
         )
-        layout._sincronizar_minimos(params)
+        cfg = layout._sincronizar_minimos(params)
 
         uso = params.programa.uso
         tipo_unidad = _USO_A_TIPO_UNIDAD.get(uso, "vivienda")
@@ -991,7 +1030,7 @@ class CalcularEstanciasInmueble:
         # El motor de estancias solo lee `tipo_unidad` del programa_uso. Vivienda no lo
         # necesita (su rama no usa programa_uso); el resto, un stub con el tipo basta.
         programa_uso = None if tipo_unidad == "vivienda" else SimpleNamespace(tipo_unidad=tipo_unidad)
-        estancias = _estancias_por_unidad_dorms(params, n_dorms, util, programa_uso, None)
+        estancias = _estancias_por_unidad_dorms(params, n_dorms, util, programa_uso, None, cfg)
 
         # Computable / circulación con el mismo criterio que el detalle por unidad:
         # computa todo salvo la circulación de acceso (vestíbulos/pasillos).
@@ -1001,7 +1040,7 @@ class CalcularEstanciasInmueble:
         )
         circulacion = max(0.0, util - computable)
 
-        alertas = self._alertas(params, uso, n_dorms, util)
+        alertas = self._alertas(params, uso, n_dorms, util, cfg)
 
         return {
             "estancias": estancias,
@@ -1022,13 +1061,16 @@ class CalcularEstanciasInmueble:
             "alertas": [_alerta_dict(a) for a in alertas],
         }
 
-    def _alertas(self, params: ParametrosRender, uso, n_dorms: int, util: float) -> list[Alerta]:
+    def _alertas(self, params: ParametrosRender, uso, n_dorms: int, util: float, cfg=None) -> list[Alerta]:
         """Aviso si el inmueble queda por debajo del útil mínimo viable (solo vivienda)."""
         alertas: list[Alerta] = []
         if uso == UsoEdificio.VIVIENDA:
-            from .geometria.programa import util_minimo_vivienda
+            from .geometria.programa import CONFIG_DEFAULT, util_minimo_vivienda
             try:
-                umin = util_minimo_vivienda(n_dorms, bool(params.programa.salon_cocina_open))
+                umin = util_minimo_vivienda(
+                    n_dorms, bool(params.programa.salon_cocina_open),
+                    cfg if cfg is not None else CONFIG_DEFAULT,
+                )
             except Exception:
                 umin = 0.0
             if umin > 0 and util + 1e-6 < umin:
@@ -1061,11 +1103,31 @@ class ValidarCumplimiento:
         dis_p = params.diseno
         prog_p = params.programa
 
+        # ── Edificabilidad ──
+        # El "techo" (consumo real vs límite) lo vigila `_alertas_envolvente` con el
+        # criterio que el proyecto haya elegido: por coeficiente o —si desmarca la
+        # casilla— por ocupación × nº de plantas. Replicarlo aquí contra el coeficiente
+        # normativo (a) duplicaba el aviso (mismo número cuando el coeficiente del
+        # proyecto es el del PGOU) y (b) seguía saltando aunque el proyecto NO
+        # dimensionara por coeficiente. A nivel de cumplimiento basta contrastar el
+        # PARÁMETRO declarado con el normativo, como el resto de límites SUPERIORES, y
+        # solo cuando el proyecto dimensiona por coeficiente (si lo desmarca, el suelo
+        # se rige por ocupación y altura, validadas aparte más abajo).
+        if (
+            urb_p.usar_coeficiente_edificabilidad
+            and urb_p.coeficiente_edificabilidad > normativa.coeficiente_edificabilidad + 1e-6
+        ):
+            alertas.append(Alerta(
+                "incumplimiento", "Normativa",
+                f"Coeficiente edificabilidad {urb_p.coeficiente_edificabilidad:.2f}m²t/m²s "
+                f"> {normativa.coeficiente_edificabilidad:.2f}m²t/m²s.",
+            ))
+
         # ── Límites SUPERIORES (proyecto > normativa → incumplimiento) ──
         superiores = [
-            ("Coeficiente edificabilidad", urb_p.coeficiente_edificabilidad,
-             normativa.coeficiente_edificabilidad, "m²t/m²s", 2),
-            ("Ocupación máxima", urb_p.ocupacion_maxima_pct,
+            ("Ocupación máxima (PB)", urb_p.ocupacion_maxima_pct,
+             normativa.ocupacion_maxima_pct, "%", 0),
+            ("Ocupación máxima (plantas tipo)", urb_p.ocupacion_maxima_pct_tipo,
              normativa.ocupacion_maxima_pct, "%", 0),
             ("Plantas máximas", urb_p.n_plantas_max,
              normativa.n_plantas_max, "", 0),
@@ -1099,8 +1161,6 @@ class ValidarCumplimiento:
              normativa.luz_recta_patio_min_m, "m", 2),
             ("Área patio mínima", urb_p.area_patio_min_m2,
              normativa.area_patio_min_m2, "m²", 2),
-            ("Unidades adaptadas", prog_p.pct_unidades_adaptadas,
-             normativa.pct_unidades_adaptadas_min, "%", 0),
             ("Ancho total fachada", ancho_fachada_total,
              normativa.ancho_min_fachada_m, "m", 1),
             ("Espesor tabique", dis_p.espesor_tabique_m,
@@ -1296,7 +1356,7 @@ def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proy
             if isinstance(a, (int, float)) and float(a) > 0
         ]
         if areas:
-            params.urbanisticos.patios = areas
+            params.urbanisticos.patios = [PatioDef(area_m2=a) for a in areas]
     elif loc.get("n_patios") == 0:
         params.urbanisticos.patios = []
 
@@ -1394,8 +1454,8 @@ def _indicadores_disenho(
     compacidad = (4 * math.pi * area / (perim ** 2)) if perim > 0 else 0.0
 
     # Estimación gruesa de huecos: 25% de la fachada del edificio (regla de pulgar)
-    # por número de plantas. En iteración posterior puede afinarse desde el
-    # macro_layout (suma de hueco_disp_m2 por unidad).
+    # por número de plantas. En iteración posterior puede afinarse con un
+    # cálculo de huecos por unidad.
     n_plantas = len(plantas) or 1
     altura_total = n_plantas * 3.0
     area_fachada = long_fach * altura_total if long_fach else 1.0
@@ -1459,8 +1519,8 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
     area_patio_min = float(params.urbanisticos.area_patio_min_m2 or 0.0)
     if area_patio_min > 0:
         pequenos = [
-            float(a) for a in params.urbanisticos.patios
-            if 0 < float(a) < area_patio_min - 1e-6
+            area_de_patio(pd) for pd in params.urbanisticos.patios
+            if 0 < area_de_patio(pd) < area_patio_min - 1e-6
         ]
         if pequenos:
             listado = ", ".join(f"{a:.2f}" for a in pequenos)
@@ -1479,20 +1539,16 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
             alertas.append(Alerta(
                 "info", "Capacidad",
                 f"Sobran {sobrante:.2f} m² útiles tras truncar — si reduces el "
-                f"objetivo por unidad (hoy {cap.util_objetivo_viv_m2:.2f} m²) "
-                f"podría caber 1 unidad más.",
+                f"mínimo por estancias podría caber 1 unidad más.",
             ))
 
     if programa_uso is not None and programa_uso.tipo_unidad in (
-        "apartamento", "hotel_apartamento", "habitacion"
+        "apartamento", "habitacion"
     ):
         prog = params.programa
         if programa_uso.tipo_unidad == "apartamento":
             cat, tip = prog.categoria_apartamentos.value, prog.tipologia_apartamento.value
-            etiqueta_area = "áreas comunes y sociales obligatorias"
-        elif programa_uso.tipo_unidad == "hotel_apartamento":
-            cat, tip = prog.categoria_hotel_apartamento.value, prog.tipologia_apartamento.value
-            etiqueta_area = "áreas sociales obligatorias"
+            etiqueta_area = "áreas comunes y sociales obligatorias en la columna de circulación"
         else:  # habitacion
             cat, tip = prog.categoria_hotelero.value, prog.tipologia_habitacion.value
             etiqueta_area = "áreas sociales del establecimiento"

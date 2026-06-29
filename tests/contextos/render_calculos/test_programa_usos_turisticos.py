@@ -1,4 +1,4 @@
-"""Tests de la parte matemática de A1.1, A1.2 y A1.4 + multi-tipología por uso."""
+"""Tests de la parte matemática de A1.1, A1.3 y A1.4 + multi-tipología por uso."""
 from __future__ import annotations
 
 import math
@@ -8,7 +8,6 @@ from shapely.geometry import Polygon
 
 from app.contextos.render_calculos.casos_uso import CalcularLayout, ParcelaMetrica
 from app.contextos.render_calculos.geometria import programa_apartamentos as pa
-from app.contextos.render_calculos.geometria import programa_hotel_apartamento as hap
 from app.contextos.render_calculos.geometria import programa_hotelero as ph
 from app.contextos.render_calculos.geometria.parcelas import (
     LadoParcela,
@@ -45,21 +44,6 @@ def test_hotelero_areas_sociales_por_ua_y_por_plaza():
     assert ph.areas_sociales_obligatorias_hotel(5, 30, "albergue") == {"salon_social": 30.0}
     # Hostal 1* / pensión: sin exigencia por u.a. pero conservan el salón mínimo (8).
     assert ph.areas_sociales_obligatorias_hotel(3, 6, "pension") == {"salon_social": 8.0}
-
-
-# ── A1.2 Hotel-apartamento (por ocupación de dormitorio) ────────────────────
-def test_hotel_apartamento_util_y_estancias():
-    # 3E doble: salón-comedor 12 + dormitorio doble 15 + baño 3.5 = 30.5 base; objetivo ×1.15.
-    base = 12.0 + 15.0 + 3.5
-    assert hap.util_minimo_hotel_apartamento("3E", "doble") == pytest.approx(base, abs=0.01)
-    assert hap.util_objetivo_hotel_apartamento("3E", "doble") == pytest.approx(base * 1.15, abs=0.01)
-    estancias = hap.programa_hotel_apartamento("doble", "3E", 50.0)
-    assert [e.nombre for e in estancias] == ["salon_comedor", "dormitorio_1", "bano"]
-
-
-def test_hotel_apartamento_areas_sociales_como_hotel():
-    # 5E: 4 m² por u.a. (como Hotel del mismo nº de estrellas).
-    assert hap.areas_sociales_obligatorias_hap(4, "5E") == {"areas_sociales": 16.0}
 
 
 # ── Apartamento turístico por ocupación de dormitorio (A1.3) ────────────────
@@ -124,20 +108,20 @@ def test_reparto_generico_vacio_si_no_cabe():
 def test_parametros_roundtrip_campos_nuevos():
     base = {
         "programa": {
-            "uso": "hotel_apartamento",
-            "categoria_hotel_apartamento": "4E",
+            "uso": "apartamentos_turisticos",
+            "categoria_apartamentos": "4L",
             "tipologia_apartamento": "doble",
             "tipologias_extra": ["individual", "estudio"],
         },
     }
     p = parametros_desde_dict(base)
-    assert p.programa.uso.value == "hotel_apartamento"
-    assert p.programa.categoria_hotel_apartamento.value == "4E"
+    assert p.programa.uso.value == "apartamentos_turisticos"
+    assert p.programa.categoria_apartamentos.value == "4L"
     assert p.programa.tipologia_apartamento.value == "doble"
     assert p.programa.tipologias_extra == ["individual", "estudio"]
     # round-trip estable.
     p2 = parametros_desde_dict(parametros_a_dict(p))
-    assert p2.programa.categoria_hotel_apartamento.value == "4E"
+    assert p2.programa.categoria_apartamentos.value == "4L"
     assert p2.programa.tipologia_apartamento.value == "doble"
     assert p2.programa.tipologias_extra == ["individual", "estudio"]
 
