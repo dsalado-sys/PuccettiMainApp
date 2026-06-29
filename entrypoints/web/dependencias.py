@@ -6,6 +6,7 @@ hace falta tocar la URL). Casos de uso y rutas no se enteran.
 from __future__ import annotations
 
 import os
+import secrets
 from collections.abc import Generator
 from functools import lru_cache
 
@@ -14,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.contextos.localizacion.casos_uso import (
     CargarDetalleSubreferencia,
-    CargarTodosLosDetalles,
     CorregirLado,
     CorregirOrientacionLado,
     LocalizarPorCoordenada,
@@ -45,24 +45,70 @@ from app.plataforma.cache.parcelas_en_memoria import ParcelasEnMemoria
 from app.plataforma.catastro.catastro_meh import CatastroMEH
 from app.plataforma.persistencia.proyectos_sqlalchemy import ProyectosSQLAlchemy
 from app.plataforma.persistencia.sqlalchemy_base import SessionLocal
+from sqlalchemy.orm import sessionmaker
 from app.plataforma.persistencia.usuarios_sqlalchemy import UsuariosSQLAlchemy
 
 COOKIE_PROYECTO = "puccetti_proyecto"
 COOKIE_PARCELA = "puccetti_parcela_temp"
-ROL_POR_DEFECTO = Rol.ARQUITECTO
+# Defensa en profundidad: si por algún camino se llegara sin usuario en sesión
+# (el middleware `seguridad_http` ya lo evita), se asume el rol de MENOR
+# privilegio, no el máximo.
+ROL_POR_DEFECTO = Rol.INVERSOR
 
-# Clave de firma de la cookie de sesión. Override por entorno en producción,
-# mismo criterio que PUCCETTI_DB_URL.
-SECRET_KEY = os.environ.get(
-    "PUCCETTI_SECRET_KEY",
-    "puccetti-dev-secret-cambia-esto-en-produccion",
+def _en_produccion() -> bool:
+    """True si la app corre en modo producción (PUCCETTI_ENV=prod)."""
+    return os.environ.get("PUCCETTI_ENV", "dev").strip().lower() in (
+        "prod", "produccion", "production",
+    )
+
+
+def _resolver_secret_key() -> str:
+    """Clave de firma de la cookie de sesión.
+
+    En producción es OBLIGATORIO definir `PUCCETTI_SECRET_KEY`: un literal
+    compartido permitiría a cualquiera con acceso al código falsificar la sesión
+    de cualquier usuario (incl. ARQUITECTO). En desarrollo, si no se define, se
+    genera una aleatoria por arranque (las sesiones no sobreviven a un reinicio,
+    aceptable en dev).
+    """
+    clave = os.environ.get("PUCCETTI_SECRET_KEY")
+    if clave:
+        return clave
+    if _en_produccion():
+        raise RuntimeError(
+            "PUCCETTI_SECRET_KEY no está definida. Es obligatoria en producción "
+            "(PUCCETTI_ENV=prod) para firmar de forma segura las cookies de sesión."
+        )
+    return secrets.token_urlsafe(32)
+
+
+SECRET_KEY = _resolver_secret_key()
+
+# Endurecimiento de la cookie de sesión. `Secure` (https_only) se activa en
+# producción o por env var; `max_age` da expiración (por defecto 1 hora).
+COOKIES_SEGURAS = (
+    os.environ.get("PUCCETTI_SECURE_COOKIES", "").strip().lower() in ("1", "true", "yes")
+    or _en_produccion()
 )
+SESION_MAX_AGE_S = int(os.environ.get("PUCCETTI_SESION_MAX_AGE", "3600"))
 
 
 # ── Sesión BBDD ─────────────────────────────────────────────────────────────
-def sesion_bbdd() -> Generator[Session, None, None]:
+def obtener_session_factory() -> sessionmaker:
+    """Devuelve el sessionmaker activo.
+
+    Punto de indirección único: en producción es el `SessionLocal` de módulo;
+    los tests lo sustituyen con `app.dependency_overrides[obtener_session_factory]`
+    para apuntar a una BBDD en memoria sin tocar `app/data/puccetti.sqlite`.
+    """
+    return SessionLocal
+
+
+def sesion_bbdd(
+    factory: sessionmaker = Depends(obtener_session_factory),
+) -> Generator[Session, None, None]:
     """Cede una sesión SQLAlchemy por request y la cierra al terminar."""
-    session = SessionLocal()
+    session = factory()
     try:
         yield session
     finally:
@@ -109,6 +155,18 @@ def eliminar_proyecto_uc(
     repo: ProyectoRepositorio = Depends(repositorio_proyectos),
 ) -> EliminarProyecto:
     return EliminarProyecto(repo=repo)
+
+
+def carpetas_proyecto_repo(session: Session = Depends(sesion_bbdd)):
+    """Organización de proyectos en carpetas (capa aparte del aggregate Proyecto).
+
+    Comparte la sesión por request con el repositorio de proyectos (FastAPI
+    cachea `sesion_bbdd`), así carpetas y proyectos viven en la misma transacción.
+    """
+    from app.plataforma.persistencia.carpetas_proyecto_sqlalchemy import (
+        CarpetasProyectoSQLAlchemy,
+    )
+    return CarpetasProyectoSQLAlchemy(session)
 
 
 # ── Usuarios / autenticación ───────────────────────────────────────────────
@@ -189,13 +247,6 @@ def cargar_detalle_subref_uc(
     return CargarDetalleSubreferencia(catastro=catastro, repo=repo)
 
 
-def cargar_todos_detalles_uc(
-    catastro: CatastroPort = Depends(catastro_adapter),
-    repo: ParcelaTemporalRepositorio = Depends(parcelas_temporales),
-) -> CargarTodosLosDetalles:
-    return CargarTodosLosDetalles(catastro=catastro, repo=repo)
-
-
 def callejero_adapter(
     session: Session = Depends(sesion_bbdd),
 ) -> CallejeroPort:
@@ -219,14 +270,6 @@ def catalogo_apartamentos_adapter(session: Session = Depends(sesion_bbdd)):
     return CatalogoApartamentosSQLAlchemy(session)
 
 
-def catalogo_hotel_apartamento_adapter(session: Session = Depends(sesion_bbdd)):
-    """Adapter para Anexo I.2 (hoteles-apartamento) editable."""
-    from app.plataforma.persistencia.anexo_i_hotel_apartamento_sqlalchemy import (
-        CatalogoHotelApartamentoSQLAlchemy,
-    )
-    return CatalogoHotelApartamentoSQLAlchemy(session)
-
-
 def catalogo_hotelero_adapter(session: Session = Depends(sesion_bbdd)):
     """Adapter para Anexo I.1 (hoteles / hostales / pensiones / albergues) editable."""
     from app.plataforma.persistencia.anexo_i_hotelero_sqlalchemy import (
@@ -247,7 +290,7 @@ def obtener_parcela_temporal(
 
 # ── Sesión: rol y proyecto activos ─────────────────────────────────────────
 def rol_activo(usuario: Usuario | None = Depends(usuario_actual)) -> Rol:
-    """Rol del usuario conectado. Por defecto, arquitecto si no hay sesión.
+    """Rol del usuario conectado. Sin sesión se asume `ROL_POR_DEFECTO` (el rol de menor privilegio), no arquitecto.
 
     Con autenticación real (§2.11), el rol lo fija el usuario y no la UI; la
     firma sigue devolviendo `Rol`, así que las rutas que dependen de ella no

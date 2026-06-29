@@ -87,9 +87,9 @@ class CatalogoApartamentosSQLAlchemy:
     def consolidadas_apartamentos(self, grupo: str = "edificios") -> dict:
         """Mínimos editables de BBDD en la forma de las constantes del motor.
 
-        Hermano de `consolidadas_vivienda`: `programa_apartamentos.cargar_desde_repo`
-        lo vuelca a sus diccionarios `MIN_*` para que el dimensionado de estancias
-        respete los mínimos editados. Devuelve `{}` si la tabla está vacía.
+        Hermano de `consolidadas_vivienda`: `programa_apartamentos.config_desde_repo`
+        construye con ello un `ProgramaApartamentosConfig` (mínimos editados) que el
+        dimensionado de estancias respeta. Devuelve `{}` si la tabla está vacía.
 
         Mapeo (excluye las filas `comunes_*`):
         - `dormitorio_1` por tipología de ocupación → `MIN_DORMITORIO[tip][cat]`.
@@ -177,12 +177,21 @@ class CatalogoApartamentosSQLAlchemy:
             )
             self._session.add(orm)
         else:
+            # Invariante de fila: el mínimo no puede superar el útil máximo.
+            if valor > orm.max_m2_util:
+                raise ValueError(
+                    f"El mínimo ({valor:g} m²) no puede superar el útil máximo "
+                    f"({orm.max_m2_util:g} m²) de {categoria}/{tipologia}/{estancia}."
+                )
             orm.min_m2 = valor
             orm.editable_por_usuario = 1
             orm.actualizado_en = datetime.now(timezone.utc)
         self._session.commit()
 
     def reset(self) -> None:
+        """Reseed atómico de las dos tablas (edificios + conjuntos): borrado y
+        siembra en una sola transacción; si el seed falla, rollback y nada queda
+        vacío."""
         from .anexo_i_apartamentos_conjuntos_sqlalchemy import (
             AnexoIApartamentosConjuntosORM,
         )
@@ -190,8 +199,12 @@ class CatalogoApartamentosSQLAlchemy:
             sembrar_anexo_i_apartamentos,
             sembrar_anexo_i_apartamentos_conjuntos,
         )
-        self._session.query(AnexoIApartamentosORM).delete()
-        self._session.query(AnexoIApartamentosConjuntosORM).delete()
-        self._session.commit()
-        sembrar_anexo_i_apartamentos(self._session, forzar=True)
-        sembrar_anexo_i_apartamentos_conjuntos(self._session, forzar=True)
+        try:
+            self._session.query(AnexoIApartamentosORM).delete()
+            self._session.query(AnexoIApartamentosConjuntosORM).delete()
+            sembrar_anexo_i_apartamentos(self._session, forzar=True, commit=False)
+            sembrar_anexo_i_apartamentos_conjuntos(self._session, forzar=True, commit=False)
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise

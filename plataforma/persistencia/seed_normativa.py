@@ -125,7 +125,9 @@ def _filas_anexo_i_vivienda() -> list[tuple[int, str, float, float, float | None
     return filas
 
 
-def sembrar_anexo_i_vivienda(session: Session, forzar: bool = False) -> None:
+def sembrar_anexo_i_vivienda(session: Session, forzar: bool = False, commit: bool = True) -> None:
+    """`commit=False` deja la transacción abierta para que el llamante (p. ej.
+    `reset()`) confirme delete+seed de forma atómica."""
     if not forzar:
         existe = session.scalar(select(AnexoIViviendaORM).limit(1))
         if existe is not None:
@@ -147,7 +149,8 @@ def sembrar_anexo_i_vivienda(session: Session, forzar: bool = False) -> None:
                 elif orm.editable_por_usuario == 0:
                     orm.area_target_m2 = target
                     orm.actualizado_en = ahora
-            session.commit()
+            if commit:
+                session.commit()
             return
     ahora = datetime.now(timezone.utc)
     for n_dorms, estancia, min_m2, max_m2, target in _filas_anexo_i_vivienda():
@@ -162,7 +165,8 @@ def sembrar_anexo_i_vivienda(session: Session, forzar: bool = False) -> None:
                 editable_por_usuario=0,
                 actualizado_en=ahora,
             ))
-    session.commit()
+    if commit:
+        session.commit()
 
 
 def sembrar_parametros_motor_vivienda(session: Session, forzar: bool = False) -> None:
@@ -215,7 +219,7 @@ def _filas_anexo_i_apartamentos() -> list[tuple[str, str, str, float, float]]:
     return filas
 
 
-def sembrar_anexo_i_apartamentos(session: Session, forzar: bool = False) -> None:
+def sembrar_anexo_i_apartamentos(session: Session, forzar: bool = False, commit: bool = True) -> None:
     from .anexo_i_apartamentos_sqlalchemy import AnexoIApartamentosORM
     if not forzar:
         existe = session.scalar(select(AnexoIApartamentosORM).limit(1))
@@ -234,7 +238,8 @@ def sembrar_anexo_i_apartamentos(session: Session, forzar: bool = False) -> None
                 editable_por_usuario=0,
                 actualizado_en=ahora,
             ))
-    session.commit()
+    if commit:
+        session.commit()
 
 
 # ─── Anexo I.4 — apartamentos turísticos · grupo "conjuntos" ───────────────
@@ -255,7 +260,7 @@ def _filas_anexo_i_apartamentos_conjuntos() -> list[tuple[str, str, str, float, 
     return filas
 
 
-def sembrar_anexo_i_apartamentos_conjuntos(session: Session, forzar: bool = False) -> None:
+def sembrar_anexo_i_apartamentos_conjuntos(session: Session, forzar: bool = False, commit: bool = True) -> None:
     from .anexo_i_apartamentos_conjuntos_sqlalchemy import AnexoIApartamentosConjuntosORM
     if not forzar:
         existe = session.scalar(select(AnexoIApartamentosConjuntosORM).limit(1))
@@ -274,53 +279,8 @@ def sembrar_anexo_i_apartamentos_conjuntos(session: Session, forzar: bool = Fals
                 editable_por_usuario=0,
                 actualizado_en=ahora,
             ))
-    session.commit()
-
-
-# ─── Anexo I.2 — hoteles-apartamento (categorías por estrellas) ────────────
-def _filas_anexo_i_hotel_apartamento() -> list[tuple[str, str, str, float, float]]:
-    from app.contextos.render_calculos.geometria.programa_hotel_apartamento import (
-        programa_hotel_apartamento,
-        areas_sociales_obligatorias_hap,
-        ESTRELLAS,
-        TIPOLOGIAS,
-    )
-
-    filas: list[tuple[str, str, str, float, float]] = []
-    for star in ESTRELLAS:
-        for tip in TIPOLOGIAS:
-            estancias = programa_hotel_apartamento(tip, star, 0.0)
-            base = round(sum(e.area_min_m2 for e in estancias), 2)
-            for e in estancias:
-                filas.append((star, tip, e.nombre, e.area_min_m2, base))
-
-    # Áreas sociales por u.a. (= Hotel del mismo nº de estrellas).
-    for star in ESTRELLAS:
-        for servicio, m2 in areas_sociales_obligatorias_hap(5, star).items():
-            filas.append((f"comunes_{star}", "comunes", servicio, m2, m2))
-    return filas
-
-
-def sembrar_anexo_i_hotel_apartamento(session: Session, forzar: bool = False) -> None:
-    from .anexo_i_hotel_apartamento_sqlalchemy import AnexoIHotelApartamentoORM
-    if not forzar:
-        existe = session.scalar(select(AnexoIHotelApartamentoORM).limit(1))
-        if existe is not None:
-            return
-    ahora = datetime.now(timezone.utc)
-    for cat, tip, estancia, min_m2, max_m2 in _filas_anexo_i_hotel_apartamento():
-        orm = session.get(AnexoIHotelApartamentoORM, (cat, tip, estancia))
-        if orm is None:
-            session.add(AnexoIHotelApartamentoORM(
-                categoria=cat,
-                tipologia=tip,
-                estancia=estancia,
-                min_m2=min_m2,
-                max_m2_util=max_m2,
-                editable_por_usuario=0,
-                actualizado_en=ahora,
-            ))
-    session.commit()
+    if commit:
+        session.commit()
 
 
 # ─── Anexo I.1 — hoteles / hostales / pensiones / albergues ────────────────
@@ -357,7 +317,7 @@ def _filas_anexo_i_hotelero() -> list[tuple[str, str, str, float, float]]:
     return filas
 
 
-def sembrar_anexo_i_hotelero(session: Session, forzar: bool = False) -> None:
+def sembrar_anexo_i_hotelero(session: Session, forzar: bool = False, commit: bool = True) -> None:
     from .anexo_i_hotelero_sqlalchemy import AnexoIHoteleroORM
     if not forzar:
         existe = session.scalar(select(AnexoIHoteleroORM).limit(1))
@@ -376,7 +336,8 @@ def sembrar_anexo_i_hotelero(session: Session, forzar: bool = False) -> None:
                 editable_por_usuario=0,
                 actualizado_en=ahora,
             ))
-    session.commit()
+    if commit:
+        session.commit()
 
 
 def sembrar_todo(session: Session) -> None:
@@ -385,6 +346,5 @@ def sembrar_todo(session: Session) -> None:
     sembrar_anexo_i_vivienda(session)
     sembrar_anexo_i_apartamentos(session)
     sembrar_anexo_i_apartamentos_conjuntos(session)
-    sembrar_anexo_i_hotel_apartamento(session)
     sembrar_anexo_i_hotelero(session)
     sembrar_parametros_motor_vivienda(session)

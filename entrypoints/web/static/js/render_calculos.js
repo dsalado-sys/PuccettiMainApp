@@ -5,10 +5,19 @@
      /estancias). Debounce 300 ms. Repinta capacidad, tablas por planta/unidad,
      KPIs, alertas y canvas, sin spinner ni toasts.
    - el botón «Calcular capacidad» queda RESERVADO para pintar el render
-     (macro_layout: unidades, núcleo, pasillos) en una próxima iteración.
+     geométrico (unidades, núcleo, pasillos) en una próxima iteración.
 */
 (function () {
   "use strict";
+
+  // Escapa texto antes de interpolarlo en innerHTML. Cubre nombres editables de
+  // carpeta/normativa, etiquetas de estancias y mensajes de error del servidor:
+  // sin esto, un valor con HTML (p. ej. `<img src=x onerror=...>`) se ejecutaría.
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
 
   const form = document.getElementById("rc-form");
   if (!form) return;
@@ -45,6 +54,19 @@
 
   // En modo inmueble no hay canvas → no se instancia el renderer.
   const renderer = canvasEl ? new window.RenderCanvas(canvasEl) : null;
+
+  // Editor interactivo de patios (mover/estirar/girar/reformar). Solo activo sobre
+  // la planta baja, donde se definen los patios. Sus callbacks (declaraciones
+  // hoisteadas) sincronizan la edición con el formulario y el recálculo.
+  const patioEditor = (renderer && window.PatioEditor) ? new window.PatioEditor(renderer, {
+    onCommit: (id, vertices) => commitPatioGeom(id, vertices),
+    onFijarGeom: (id, vertices) => fijarPatioGeom(id, vertices),
+    onSelect: (id) => resaltarFilaPatio(id),
+    onMerge: (idA, idB) => fusionarPatios(idA, idB),
+  }) : null;
+  if (renderer && patioEditor) renderer.setOverlay(() => patioEditor.dibujarOverlay());
+
+  let _patioSeq = 0;   // contador para ids temporales de patios nuevos
 
   const fmt = {
     m2: new Intl.NumberFormat("es-ES", { maximumFractionDigits: 1, minimumFractionDigits: 1 }),
@@ -116,9 +138,22 @@
           bloques[bloque][nombre] = inp.value;
         }
       } else if (nombre === "patios") {
-        // Lista de superficies de patio (una por input). Vacíos se saltan.
+        // Patios: un objeto por fila { id, area_m2, vertices? }. La geometría
+        // (polígono UTM) viaja en data-vertices de la fila; las filas nuevas sin
+        // posición se envían sin vertices → el backend las auto-coloca. Vacíos se saltan.
         if (!Array.isArray(bloques[bloque].patios)) bloques[bloque].patios = [];
-        if (inp.value !== "") bloques[bloque].patios.push(Number(inp.value));
+        if (inp.value !== "") {
+          const fila = inp.closest(".rc-patio-fila");
+          const obj = { id: (fila && fila.dataset.patioId) || "", area_m2: Number(inp.value) };
+          if (fila && fila.dataset.vertices) {
+            try {
+              const vs = JSON.parse(fila.dataset.vertices);
+              if (Array.isArray(vs) && vs.length >= 3) obj.vertices = vs;
+            } catch (e) { /* geometría corrupta → se auto-coloca */ }
+          }
+          if (fila && fila.dataset.bloqueado === "true") obj.bloqueado = true;
+          bloques[bloque].patios.push(obj);
+        }
       } else {
         const valor = inp.value === "" ? null : (inp.type === "number" ? Number(inp.value) : inp.value);
         bloques[bloque][nombre] = valor;
@@ -141,7 +176,6 @@
     set("edif", bloques.urbanisticos.edificabilidad_m2t_m2s ?? "—");
     set("plantas", bloques.urbanisticos.n_plantas_max ?? "—");
     set("ocupacion", bloques.urbanisticos.ocupacion_maxima_pct ?? "—");
-    set("adapt", bloques.programa.pct_unidades_adaptadas ?? "—");
   }
 
   // ─── Toast y spinner ──────────────────────────────────────────────────
@@ -163,15 +197,19 @@
     const env = payload?.envolvente;
     const cap = payload?.capacidad;
     const parcelaArea = payload?.parcela?.area_m2;
+    // Área REAL del polígono (geometría), distinta de la superficie catastral (area_m2):
+    // es la que se muestra en el KPI «Superficie del polígono». La catastral sigue
+    // gobernando edificabilidad/ocupación (cap.*), solo cambia lo que se ENSEÑA aquí.
+    const parcelaGeom = payload?.parcela?.area_geometrica_m2;
     // Fuente de verdad iter. 4: data.capacidad. Fallback a envolvente del preview.
     if (cap) {
       set("construida_total_m2", fmt.m2.format(cap.construida_total_m2) + " m²");
-      set("superficie_parcela_m2", fmt.m2.format(cap.superficie_parcela_m2) + " m²");
+      set("superficie_poligono_m2", fmt.m2.format(parcelaGeom ?? cap.superficie_parcela_m2) + " m²");
       set("edificabilidad_m2", fmt.m2.format(cap.edificabilidad_m2) + " m²");
       set("n_viviendas", fmt.int.format(cap.n_viviendas_objetivo));
     } else if (env) {
       set("construida_total_m2", fmt.m2.format(env.edificabilidad_consumida_m2) + " m²");
-      set("superficie_parcela_m2", fmt.m2.format(parcelaArea ?? 0) + " m²");
+      set("superficie_poligono_m2", fmt.m2.format(parcelaGeom ?? parcelaArea ?? 0) + " m²");
       set("edificabilidad_m2", fmt.m2.format(env.edificabilidad_max_m2) + " m²");
       set("n_viviendas", fmt.int.format(env.n_viviendas_objetivo) + " obj.");
     }
@@ -266,6 +304,7 @@
         ESTADO.plantaActiva = i;
         dibujarTabsPlantas(payload);
         renderer.dibujar(payload, i);
+        if (patioEditor) patioEditor.setActivo(puedeEditar && categoriaPlantaActiva(payload) === "pb");
         aplicarVisibilidad(payload);
       });
       tabsPlantasEl.appendChild(b);
@@ -318,8 +357,7 @@
       tablaPlantaBody.appendChild(tr);
     });
     const trTot = document.createElement("tr");
-    trTot.style.fontWeight = "600";
-    trTot.style.background = "var(--gris-suave)";
+    trTot.className = "rc-fila-total";
     trTot.innerHTML = `
       <td>Total</td>
       <td>${fmt.int.format(tot.viv)}</td>
@@ -358,6 +396,7 @@
       const tr = document.createElement("tr");
       const esReserva = r.tipo === "local" || r.tipo === "otros" || r.tipo === "usos_comunes";
       tr.className = esReserva ? "rc-fila-unidad-local" : "rc-fila-unidad-clicable";
+      if (!esReserva && r.adaptada) tr.classList.add("rc-fila-unidad-adaptada");
       tr.dataset.id = r.vivienda;
       tr.dataset.planta = r.planta;
       tr.dataset.tipo = r.tipo || "vivienda";
@@ -413,7 +452,7 @@
     // La columna/fila "Computable" (útil − circulación) se muestra en vivienda y
     // en usos turísticos; en local (sin estancias) se oculta. La nota turística y
     // el matiz "de acceso" de la circulación solo aplican a usos turísticos.
-    const esTurismo = ["apartamento", "hotel_apartamento", "habitacion"].includes(ds.tipo);
+    const esTurismo = ["apartamento", "habitacion"].includes(ds.tipo);
     const mostrarComputable = esTurismo || ds.tipo === "vivienda";
     modalEl.classList.toggle("rc-mu-no-turismo", !esTurismo);
     modalEl.classList.toggle("rc-mu-no-comp", !mostrarComputable);
@@ -455,8 +494,8 @@
           const compCelda = computa
             ? `${fmt.m2.format(util)} m²`
             : '<span class="rc-mu-nocomp">no computa</span>';
-          tr.innerHTML = `<td class="rc-mu-est-nombre">${warn}${e.etiqueta || e.nombre}</td>
-            <td class="rc-mu-est-cat">${e.categoria || ""}</td>
+          tr.innerHTML = `<td class="rc-mu-est-nombre">${warn}${escapeHtml(e.etiqueta || e.nombre)}</td>
+            <td class="rc-mu-est-cat">${escapeHtml(e.categoria || "")}</td>
             <td class="rc-num rc-mu-col-comp">${compCelda}</td>`;
           tbody.appendChild(tr);
         });
@@ -479,7 +518,10 @@
   }
 
   // ─── Alertas — agrupadas por regla en acordeón ────────────────────────
-  const NIVEL_PESO = { error: 0, aviso: 1, info: 2 };
+  // Debe contener EXACTAMENTE los literales de NivelAlerta del backend
+  // (dominio.py): antes faltaba "incumplimiento" e inventaba un "error" no emitido,
+  // y por el fallback `?? 1` todo incumplimiento se degradaba al peso de "aviso".
+  const NIVEL_PESO = { error: 0, incumplimiento: 1, aviso: 2, info: 3 };
   function repintarAlertas(alertas) {
     if (!alertasBox || !alertasUl) return;
     if (!alertas || !alertas.length) {
@@ -498,15 +540,15 @@
     });
 
     const reglas = Array.from(grupos.keys()).sort((a, b) => {
-      const pa = Math.min(...grupos.get(a).map(x => NIVEL_PESO[x.nivel] ?? 1));
-      const pb = Math.min(...grupos.get(b).map(x => NIVEL_PESO[x.nivel] ?? 1));
+      const pa = Math.min(...grupos.get(a).map(x => NIVEL_PESO[x.nivel] ?? NIVEL_PESO.info));
+      const pb = Math.min(...grupos.get(b).map(x => NIVEL_PESO[x.nivel] ?? NIVEL_PESO.info));
       return pa - pb;
     });
 
     reglas.forEach(regla => {
       const items = grupos.get(regla);
       const nivelTop = items.reduce(
-        (acc, x) => (NIVEL_PESO[x.nivel] ?? 1) < (NIVEL_PESO[acc] ?? 1) ? x.nivel : acc,
+        (acc, x) => (NIVEL_PESO[x.nivel] ?? NIVEL_PESO.info) < (NIVEL_PESO[acc] ?? NIVEL_PESO.info) ? x.nivel : acc,
         "info"
       );
       const li = document.createElement("li");
@@ -522,7 +564,7 @@
         const det = document.createElement("details");
         det.className = "rc-alerta-detalles";
         const sum = document.createElement("summary");
-        sum.innerHTML = `<span class="rc-alerta-regla">${regla}</span>
+        sum.innerHTML = `<span class="rc-alerta-regla">${escapeHtml(regla)}</span>
           <span class="rc-alerta-contador">${items.length} avisos</span>`;
         det.appendChild(sum);
         const ul = document.createElement("ul");
@@ -549,6 +591,10 @@
   // ─── Payload con normativa de referencia ──────────────────────────────
   function payloadConNormativa(bloques) {
     const p = { ...bloques };
+    // El modo permite al backend aplicar reglas propias del modo: en rehabilitación,
+    // los parámetros urbanísticos ocultos del panel (edificabilidad, ocupación,
+    // retranqueos) se toman de la normativa en vez de los defaults del motor.
+    p.modo = modoActivo;
     if (ESTADO_NORM.aplicada && ESTADO_NORM.aplicada.urbanisticos) {
       p.normativa_referencia = { urbanisticos: ESTADO_NORM.aplicada.urbanisticos };
     }
@@ -604,11 +650,15 @@
         return;
       }
       ESTADO.fullPayload = data;
+      // Re-sella cada fila de patio con el polígono devuelto (identidad por id): así
+      // un patio auto-colocado «se queda» donde el backend lo puso y se puede arrastrar.
+      sincronizarPatiosDesdePayload(data);
       // Iter. 3: edificio = null. Usamos envolvente.plantas para los tabs.
       const n_plantas = (data.envolvente?.plantas?.length) || (data.edificio?.plantas?.length) || 1;
       ESTADO.plantaActiva = Math.min(ESTADO.plantaActiva, n_plantas - 1);
       dibujarTabsPlantas(data);
       if (renderer) renderer.dibujar(data, ESTADO.plantaActiva);
+      if (patioEditor) patioEditor.setActivo(puedeEditar && categoriaPlantaActiva(data) === "pb");
       actualizarBrujula(data);
       repintarKpis(data);
       repintarAlertas(data.alertas);
@@ -674,8 +724,8 @@
         warn = `<span class="rc-mu-est-warn rc-mu-est-warn-amarillo" title="El círculo de Ø ${e.diametro_min_m} m solo cabe en planta cuadrada; no con proporción 1:1.5">⚠</span>`;
       }
       tr.innerHTML = `
-        <td class="rc-mu-est-nombre">${warn}${e.etiqueta || e.nombre}</td>
-        <td class="rc-mu-est-cat">${e.categoria || ""}</td>
+        <td class="rc-mu-est-nombre">${warn}${escapeHtml(e.etiqueta || e.nombre)}</td>
+        <td class="rc-mu-est-cat">${escapeHtml(e.categoria || "")}</td>
         <td class="rc-num">${fmt.m2.format(sup)} m²</td>
         <td class="rc-num">${fmt.m2.format(e.area_min_m2 || 0)} m²</td>`;
       tablaEstanciasBody.appendChild(tr);
@@ -724,16 +774,19 @@
   }
 
   // ─── Guardar parámetros ───────────────────────────────────────────────
+  let guardando = false;   // anti-doble-click: evita POST /guardar concurrentes
   async function guardar() {
-    if (!puedeEditar) return;
-    const bloques = leerFormulario();
-    // Iter. 3: el resumen ahora viene de data.capacidad (no de edificio.totales).
-    const resumen = ESTADO.fullPayload?.capacidad
-      || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
-      || ESTADO.fullPayload?.edificio?.totales
-      || ESTADO.previewPayload?.envolvente
-      || {};
+    if (!puedeEditar || guardando) return;
+    guardando = true;
+    if (btnGuardar) btnGuardar.disabled = true;
     try {
+      const bloques = leerFormulario();
+      // Iter. 3: el resumen ahora viene de data.capacidad (no de edificio.totales).
+      const resumen = ESTADO.fullPayload?.capacidad
+        || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
+        || ESTADO.fullPayload?.edificio?.totales
+        || ESTADO.previewPayload?.envolvente
+        || {};
       const resp = await fetch("/modulos/render-calculos/guardar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -747,6 +800,10 @@
       }
       mostrarToast("Guardado en el proyecto");
     } catch (e) { mostrarToast("Error de red", true); }
+    finally {
+      guardando = false;
+      if (btnGuardar) btnGuardar.disabled = false;
+    }
   }
 
   // ─── Export CSV ───────────────────────────────────────────────────────
@@ -806,6 +863,7 @@
       if (typeof modal.showModal === "function") modal.showModal();
       else modal.setAttribute("open", "");
       ocultarResumenNormativa();
+      pintarNormativaActual();
       refrescarCarpetasNormativa();
     });
     document.getElementById("rc-modal-cerrar").addEventListener("click", () => modal.close());
@@ -868,7 +926,7 @@
       det.className = "rc-carpeta";
       det.dataset.id = c.id;
       const sum = document.createElement("summary");
-      sum.innerHTML = `<span class="rc-carpeta-nombre">${c.nombre}</span>`;
+      sum.innerHTML = `<span class="rc-carpeta-nombre">${escapeHtml(c.nombre)}</span>`;
       det.appendChild(sum);
       const ul = document.createElement("ul");
       ul.className = "rc-carpeta-normativas";
@@ -900,8 +958,8 @@
         }
         li.dataset.id = n.id;
         li.innerHTML = `<button type="button" class="rc-carpeta-cargar">
-            <strong>${n.nombre}</strong>
-            <small>${n.direccion || "—"}</small>
+            <strong>${escapeHtml(n.nombre)}</strong>
+            <small>${escapeHtml(n.direccion || "—")}</small>
           </button>`;
         li.querySelector(".rc-carpeta-cargar").addEventListener("click", () =>
           seleccionarNormativa(n.id)
@@ -941,6 +999,63 @@
     ESTADO_NORM.seleccionada = null;
     const r = document.getElementById("rc-norm-resumen");
     if (r) r.hidden = true;
+  }
+
+  // Etiqueta + unidad de cada parámetro urbanístico de una normativa, en orden de
+  // lectura. Cubre todos los campos que captura el editor de Normativa municipal.
+  const NORM_CAMPOS = [
+    ["coeficiente_edificabilidad", "Coef. edificabilidad", " m²t/m²s"],
+    ["ocupacion_maxima_pct", "Ocupación máx.", " %"],
+    ["n_plantas_max", "Plantas máx.", ""],
+    ["retranqueo_fachada_m", "Retranq. fachada", " m"],
+    ["retranqueo_linderos_m", "Retranq. linderos", " m"],
+    ["retranqueo_atico_m", "Retranq. ático", " m"],
+    ["ancho_min_fachada_m", "Fachada mín.", " m"],
+    ["luz_recta_patio_min_m", "Luz mín. patio", " m"],
+    ["area_patio_min_m2", "Área mín. patio", " m²"],
+    ["diametro_max_vestibulo_m", "Ø máx. vestíbulo", " m"],
+    ["espesor_muro_medianero_max_m", "Muro medianero máx.", " m"],
+    ["espesor_separacion_unidades_max_m", "Separación uds. máx.", " m"],
+    ["espesor_tabique_min_m", "Tabique mín.", " m"],
+    ["ancho_min_pasillo_comun_m", "Pasillo común mín.", " m"],
+    ["ancho_min_pasillo_vivienda_m", "Pasillo vivienda mín.", " m"],
+    ["ancho_min_puerta_m", "Puerta mín.", " m"],
+  ];
+
+  // Pinta (solo lectura) la normativa que el proyecto ya tiene aplicada al abrir
+  // el modal, para ver de un vistazo cuál está aplicada y con TODOS sus parámetros.
+  // Es informativo: muestra todo lo que define la normativa, sin filtrar por modo
+  // (a diferencia del panel de cálculo). Si no hay ninguna aplicada, oculta el bloque.
+  function pintarNormativaActual() {
+    const box = document.getElementById("rc-norm-actual");
+    if (!box) return;
+    const a = ESTADO_NORM.aplicada;
+    if (!a) { box.hidden = true; return; }
+    const urb = a.urbanisticos || {};
+    const nombreEl = document.getElementById("rc-norm-actual-nombre");
+    if (nombreEl) nombreEl.textContent = a.nombre || "—";
+    const cont = document.getElementById("rc-norm-actual-lista");
+    if (cont) {
+      cont.innerHTML = "";
+      for (const [clave, label, unidad] of NORM_CAMPOS) {
+        const v = urb[clave];
+        if (v == null || v === "") continue;
+        const div = document.createElement("div");
+        div.innerHTML = `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(v))}${escapeHtml(unidad)}</dd>`;
+        cont.appendChild(div);
+      }
+      const usos = urb.usos_permitidos;
+      if (Array.isArray(usos) && usos.length) {
+        const div = document.createElement("div");
+        div.className = "rc-norm-actual-usos";
+        div.innerHTML = `<dt>Usos permitidos</dt><dd>${escapeHtml(usos.join(", "))}</dd>`;
+        cont.appendChild(div);
+      }
+      if (!cont.children.length) {
+        cont.innerHTML = '<div class="rc-norm-actual-usos"><dd class="rc-vacio">Sin parámetros registrados.</dd></div>';
+      }
+    }
+    box.hidden = false;
   }
 
   function aplicarNormativaAlProyecto(data) {
@@ -1018,9 +1133,11 @@
     const body = document.getElementById("rc-modal-tip-body");
     const vacio = document.getElementById("rc-modal-tip-vacio");
     const podadas = document.getElementById("rc-modal-tip-podadas");
+    const excluidasEl = document.getElementById("rc-modal-tip-excluidas");
     body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Calculando…</td></tr>';
     vacio.hidden = true;
     podadas.hidden = true;
+    if (excluidasEl) excluidasEl.hidden = true;
     if (typeof modalTip.showModal === "function") modalTip.showModal();
     else modalTip.setAttribute("open", "");
     try {
@@ -1035,20 +1152,38 @@
       }
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${err.detail || "Error"}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(err.detail || "Error")}</td></tr>`;
         return;
       }
       const data = await resp.json();
       if (data.error) {
-        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${data.error}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(data.error)}</td></tr>`;
         return;
       }
       const lbl = nDorms === 0 ? "estudio (0 dormitorios)" : `${nDorms} dormitorio${nDorms > 1 ? "s" : ""}`;
       sub.textContent = `Combinaciones para ${lbl} · categoría ${data.categoria}.`;
       const combos = data.combinaciones || [];
+      const excluidas = data.excluidas_util_maximo || [];
+
+      // Combinaciones que no caben en el útil máximo de la tipología (R3): se
+      // muestran las viables y se avisa de las excluidas, en vez de bloquear todo.
+      if (excluidasEl && excluidas.length) {
+        excluidasEl.hidden = false;
+        const techo = excluidas[0].util_maximo_m2;
+        const detalle = excluidas
+          .map(e => `«${e.etiqueta}» (necesita ${fmt.m2.format(e.util_minimo_m2)} m²)`)
+          .join(", ");
+        excluidasEl.textContent =
+          `${excluidas.length} combinación(es) no caben en el útil máximo de la tipología ` +
+          `(${fmt.m2.format(techo)} m²): ${detalle}. Sube el útil máximo de esa tipología ` +
+          `o reduce sus superficies mínimas.`;
+      }
+
       body.innerHTML = "";
       if (!combos.length) {
-        vacio.hidden = false;
+        // Si todas se excluyeron por útil máximo, la nota de arriba ya lo explica;
+        // si no, el vacío genérico (no caben en la envolvente).
+        if (!excluidas.length) vacio.hidden = false;
         return;
       }
       for (const c of combos) {
@@ -1268,18 +1403,18 @@
 
   // ─── Modal "Superficies mínimas" para usos turístico/hoteleros ────────
   // Réplica del editor de vivienda, acotado a la categoría seleccionada en el
-  // panel (apartamentos turísticos · hotel-apartamento · hotelero).
+  // panel (apartamentos turísticos · hotelero).
   const API_MIN = "/modulos/render-calculos/minimos";
   const modalMin = document.getElementById("rc-modal-minimos");
   const LBL_TIP_MIN = {
     estudio: "Estudio", "1d": "1 dormitorio", "2d": "2 dormitorios",
     "3d": "3 dormitorios", "4d": "4 o más dormitorios",
     individual: "Individual", doble: "Doble", triple: "Triple",
-    cuadruple: "Cuádruple", multiple: "Múltiple (albergue)", comunes: "Áreas comunes",
+    cuadruple: "Cuádruple", multiple: "Múltiple (albergue)",
+    salon_comedor: "Salón-comedor (común de la unidad)", comunes: "Áreas comunes",
   };
   const SELECT_CATEGORIA_MIN = {
     apartamentos_turisticos: "categoria_apartamentos",
-    hotel_apartamento: "categoria_hotel_apartamento",
     hotelero: "categoria_hotelero",
   };
   let MIN_CTX = { uso: null, categoria: "", grupo: "edificios" };
@@ -1481,6 +1616,171 @@
     _filtrarTipologiaHotelero();
   }
 
+  // ─── Edición de patios: enlace lienzo ↔ panel ─────────────────────────
+  function filaPorPatioId(id) {
+    if (!id) return null;
+    try { return form.querySelector(`.rc-patio-fila[data-patio-id="${CSS.escape(id)}"]`); }
+    catch (e) { return null; }
+  }
+
+  // Tras editar un patio en el lienzo: guarda su polígono en la fila y recalcula
+  // UNA vez (sin debounce). `abortCalcular` cancela cualquier cálculo en vuelo.
+  function commitPatioGeom(id, vertices) {
+    const fila = filaPorPatioId(id);
+    if (fila) {
+      fila.dataset.vertices = JSON.stringify(vertices);
+      // El patio recién editado pasa a tener la prioridad MÁS BAJA del reparto (último
+      // de la lista): así es ÉL quien se adapta a los demás patios al borde, dejándolos
+      // donde estaban. El backend cede solo ante los patios anteriores (ver colocar_patios).
+      const lista = document.getElementById("rc-patios-lista");
+      if (lista && fila.parentElement === lista) lista.appendChild(fila);
+    }
+    pedirCalculo();
+  }
+
+  // Fija la geometría de un patio EN SITIO (doble-clic «volver a cuadrado»): solo persiste el
+  // polígono en la fila. NO reordena (conserva su prioridad de reparto) y NO recalcula —
+  // cuadrar conserva el área asignada, así que la capacidad no cambia y el backend no necesita
+  // tocar nada. El lienzo ya se ha repintado localmente; así el patio NO se mueve. El cuadrado
+  // viaja al backend en el próximo recálculo real (otra edición) o al guardar.
+  function fijarPatioGeom(id, vertices) {
+    const fila = filaPorPatioId(id);
+    if (fila) fila.dataset.vertices = JSON.stringify(vertices);
+  }
+
+  // Resalta la fila del panel correspondiente al patio seleccionado en el lienzo.
+  function resaltarFilaPatio(id) {
+    form.querySelectorAll(".rc-patio-fila-activa").forEach(f => f.classList.remove("rc-patio-fila-activa"));
+    const fila = filaPorPatioId(id);
+    if (fila) fila.classList.add("rc-patio-fila-activa");
+  }
+
+  // ─── Fusión de patios próximos (≤ 0,1 m) ──────────────────────────────
+  // Anillo efectivo de un patio (por id) del último payload pintado; cae a data-vertices.
+  function ringPatioPorId(id) {
+    if (renderer && renderer._lastPayload) {
+      const pls = (renderer._lastPayload.envolvente && renderer._lastPayload.envolvente.plantas)
+        || (renderer._lastPayload.edificio && renderer._lastPayload.edificio.plantas) || [];
+      for (const planta of pls) {
+        for (const p of (planta.patios || [])) {
+          if (p.id === id && (p.poligono || p.base)) return p.poligono || p.base;
+        }
+      }
+    }
+    const fila = filaPorPatioId(id);
+    if (fila && fila.dataset.vertices) {
+      try { const v = JSON.parse(fila.dataset.vertices); if (Array.isArray(v) && v.length >= 3) return v; }
+      catch (e) { /* corrupto */ }
+    }
+    return null;
+  }
+
+  // Fusiona dos patios en uno conservando AMBAS formas exactas: el backend une los dos
+  // anillos con un cuello finísimo (sin envolvente convexa ni relleno). Superficie = SUMA
+  // de las dos áreas. El patio A se reutiliza como fusionado (al final de la lista, para
+  // que sea él quien se adapte); el B se elimina.
+  async function fusionarPatios(idA, idB) {
+    const filaA = filaPorPatioId(idA), filaB = filaPorPatioId(idB);
+    if (!filaA || !filaB) return;
+    // Un patio bloqueado no participa en la fusión.
+    if (filaA.dataset.bloqueado === "true" || filaB.dataset.bloqueado === "true") return;
+    const inA = filaA.querySelector('input[name="patios"]');
+    const inB = filaB.querySelector('input[name="patios"]');
+    const areaA = inA ? Number(inA.value) || 0 : 0;
+    const areaB = inB ? Number(inB.value) || 0 : 0;
+    const suma = areaA + areaB;
+    if (suma <= 0) return;
+    const ringA = ringPatioPorId(idA), ringB = ringPatioPorId(idB);
+    if (!ringA || !ringB) return;
+    // El backend (shapely) calcula la unión con cuello fino: conserva las dos formas.
+    let fused = null;
+    try {
+      const resp = await fetch("/modulos/render-calculos/fusionar-patios", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ a: ringA, b: ringB }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        mostrarToast(err.detail || "No se pudieron fusionar los patios", true);
+        return;
+      }
+      fused = (await resp.json()).poligono;
+    } catch (e) {
+      mostrarToast("No se pudieron fusionar los patios", true);
+      return;
+    }
+    if (!Array.isArray(fused) || fused.length < 3) return;
+    // El patio A se queda como el fusionado (anillo unido + área = suma).
+    filaA.dataset.vertices = JSON.stringify(fused);
+    if (inA) inA.value = String(Math.round(suma * 100) / 100);
+    // Limpia el aviso «no cabe» heredado y baja la prioridad (al final de la lista).
+    filaA.classList.remove("rc-patio-fila-nocabe");
+    const avisoA = filaA.querySelector(".rc-patio-aviso");
+    if (avisoA) { avisoA.hidden = true; avisoA.textContent = ""; }
+    const lista = document.getElementById("rc-patios-lista");
+    if (lista && filaA.parentElement === lista) lista.appendChild(filaA);
+    // Elimina el patio B.
+    filaB.remove();
+    if (patioEditor) patioEditor.olvidar(idB);
+    pedirCalculo();
+  }
+
+  // Margen de seguridad (m²) que «Adaptar» resta al área efectiva: el polígono que
+  // serializa el backend es aproximado (ring() simplifica + redondea a cm y descarta
+  // agujeros), así que pedir el área efectiva EXACTA puede quedar un pelo por encima de
+  // lo que cabe y no encajar. Restar este margen garantiza el encaje perdiendo m²
+  // imperceptibles. (Reproducido y verificado: con −0.05 encaja en todos los casos.)
+  const MARGEN_ADAPTAR_M2 = 0.05;
+
+  // Sincroniza cada fila de patio (por id) con lo devuelto por el backend (PB):
+  //  - `data-vertices` = forma EFECTIVA (la adaptada y visible), para editar/persistir
+  //    desde ella; así al re-seleccionar NO se revierte a la ideal que asomaba fuera.
+  //  - aviso «no cabe»: si la efectiva no alcanza el área asignada, marca la fila en
+  //    rojo con el texto del área real lograda + botón «Adaptar».
+  function sincronizarPatiosDesdePayload(payload) {
+    const plantas = payload?.envolvente?.plantas || payload?.edificio?.plantas || [];
+    let patios = [];
+    for (const pl of plantas) { if (pl.tipo === "regular") { patios = pl.patios || []; break; } }
+    patios.forEach(p => {
+      if (!p.id) return;
+      const fila = filaPorPatioId(p.id);
+      if (!fila) return;
+      // Refleja el estado de bloqueo que confirma el backend (persiste entre recálculos).
+      aplicarEstadoBloqueo(fila, !!p.bloqueado);
+      const forma = p.poligono || p.base;
+      if (forma) fila.dataset.vertices = JSON.stringify(forma);
+      const cabe = p.cabe !== false;
+      fila.classList.toggle("rc-patio-fila-nocabe", !cabe);
+      let aviso = fila.querySelector(".rc-patio-aviso");
+      if (!cabe) {
+        if (!aviso) {
+          aviso = document.createElement("span");
+          aviso.className = "rc-patio-aviso";
+          fila.appendChild(aviso);
+        }
+        const xx = fmt.m2.format(p.area_m2 || 0), yy = fmt.m2.format(p.area_efectiva_m2 || 0);
+        aviso.textContent = `El patio de ${xx} m² ahora tiene ${yy} m² y no cabe en esa zona. `;
+        // Botón «Adaptar»: adopta la forma EFECTIVA (la que cupo) y fija el área a la que
+        // de verdad cabe (la efectiva que calculó el backend, NO la recalculada en JS sobre
+        // el polígono aproximado). Los datos viajan en el dataset del botón.
+        const efectiva = p.poligono || p.base;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "rc-patio-adaptar";
+        btn.textContent = "Adaptar";
+        btn.title = `Ajustar el patio a ${yy} m² para que quepa en este hueco`;
+        if (efectiva) btn.dataset.vertices = JSON.stringify(efectiva);
+        btn.dataset.area = String(p.area_efectiva_m2 || 0);
+        aviso.appendChild(btn);
+        aviso.hidden = false;
+      } else if (aviso) {
+        aviso.hidden = true;
+        aviso.textContent = "";
+      }
+    });
+  }
+
   // ─── Categoría de la planta activa (pb / tipo / atico / sotano) ───────
   function categoriaPlantaActiva(payload) {
     const plantas = payload?.envolvente?.plantas
@@ -1523,7 +1823,7 @@
     const inicial = DEFAULT_TIPOLOGIA[opciones] || Object.keys(OPCIONES_TIPOLOGIA[opciones])[0];
     const wrap = document.createElement("div");
     wrap.className = "rc-tipologia-extra";
-    wrap.innerHTML = `<select name="tipologias_extra" data-bloque="${bloque}">${_opcionesTipologia(opciones, inicial)}</select>
+    wrap.innerHTML = `<select name="tipologias_extra" class="select" data-bloque="${bloque}">${_opcionesTipologia(opciones, inicial)}</select>
       <button type="button" class="rc-tip-quitar" aria-label="Eliminar tipología">−</button>`;
     contenedor.appendChild(wrap);
   }
@@ -1552,9 +1852,14 @@
     btnPatioAdd.addEventListener("click", () => {
       const fila = document.createElement("div");
       fila.className = "rc-patio-fila";
+      // Id temporal estable: el patio nuevo se envía sin geometría → el backend lo
+      // auto-coloca y devuelve su polígono, que adoptamos por este mismo id.
+      fila.dataset.patioId = "tmp-" + (++_patioSeq);
       fila.innerHTML =
         '<input type="number" name="patios" min="0" step="0.5" placeholder="m²"' +
         ' data-bloque="urbanisticos" aria-label="Área del patio (m²)">' +
+        '<button type="button" class="rc-patio-bloquear" aria-pressed="false"' +
+        ' aria-label="Bloquear patio" title="Bloquear patio (no se podrá editar)">🔓</button>' +
         '<button type="button" class="rc-patio-quitar" aria-label="Quitar patio">×</button>';
       listaPatios.appendChild(fila);
       fila.querySelector("input").focus();
@@ -1566,8 +1871,86 @@
     const btn = ev.target.closest(".rc-patio-quitar");
     if (!btn) return;
     const fila = btn.closest(".rc-patio-fila");
+    // Un patio bloqueado no se puede borrar: hay que desbloquearlo primero.
+    if (fila && fila.dataset.bloqueado === "true") return;
+    const id = fila && fila.dataset.patioId;
     if (fila) fila.remove();
+    if (patioEditor && id) patioEditor.olvidar(id);
     calcularConDebounce();
+  });
+
+  // ─── Bloqueo de patios ────────────────────────────────────────────────
+  // Fija el estado bloqueado/desbloqueado de una fila (clase, dataset, input
+  // readonly, × deshabilitado, candado) y lo refleja en el objeto del payload
+  // (para que el editor del lienzo lo respete en vivo, sin esperar al recálculo).
+  function aplicarEstadoBloqueo(fila, bloqueado) {
+    if (!fila) return;
+    bloqueado = !!bloqueado;
+    fila.dataset.bloqueado = bloqueado ? "true" : "";
+    if (!bloqueado) delete fila.dataset.bloqueado;
+    fila.classList.toggle("rc-patio-fila-bloqueada", bloqueado);
+    const input = fila.querySelector('input[name="patios"]');
+    if (input) input.readOnly = bloqueado;
+    const quitar = fila.querySelector(".rc-patio-quitar");
+    if (quitar) quitar.disabled = bloqueado;
+    const candado = fila.querySelector(".rc-patio-bloquear");
+    if (candado) {
+      candado.setAttribute("aria-pressed", bloqueado ? "true" : "false");
+      candado.setAttribute("aria-label", bloqueado ? "Desbloquear patio" : "Bloquear patio");
+      candado.title = bloqueado ? "Desbloquear patio" : "Bloquear patio (no se podrá editar)";
+      candado.textContent = bloqueado ? "🔒" : "🔓";
+    }
+    // Refleja el estado en el patio del payload activo (el editor lo lee en vivo).
+    marcarPatioPayloadBloqueado(fila.dataset.patioId, bloqueado);
+  }
+
+  // Marca `bloqueado` en el objeto de patio del último payload pintado (por id), en
+  // todas las plantas, para que el editor del lienzo lo respete inmediatamente.
+  function marcarPatioPayloadBloqueado(id, bloqueado) {
+    if (!id || !renderer || !renderer._lastPayload) return;
+    const pl = (renderer._lastPayload.envolvente && renderer._lastPayload.envolvente.plantas)
+      || (renderer._lastPayload.edificio && renderer._lastPayload.edificio.plantas) || [];
+    for (const planta of pl) {
+      for (const p of (planta.patios || [])) {
+        if (p.id === id) p.bloqueado = !!bloqueado;
+      }
+    }
+  }
+
+  // Delegación global: click en 🔒/🔓 alterna el bloqueo del patio.
+  form.addEventListener("click", ev => {
+    const btn = ev.target.closest(".rc-patio-bloquear");
+    if (!btn) return;
+    const fila = btn.closest(".rc-patio-fila");
+    if (!fila) return;
+    const bloqueado = fila.dataset.bloqueado !== "true";
+    aplicarEstadoBloqueo(fila, bloqueado);
+    // Al bloquear, suelta la selección del lienzo y repinta para quitar tiradores.
+    if (bloqueado && patioEditor) patioEditor.olvidar(fila.dataset.patioId);
+    if (renderer) renderer.repintar();
+    // Recalcula: el backend re-prioriza (un bloqueado congela su zona y los vecinos
+    // se adaptan alrededor) y persiste el estado en los parámetros del proyecto.
+    pedirCalculo();
+  });
+
+  // Delegación global: «Adaptar» fija el patio a la forma/área que CABEN en su hueco.
+  // Adopta la forma efectiva como nueva base y su área efectiva menos un pequeño margen
+  // (MARGEN_ADAPTAR_M2), para que al re-conformar encaje seguro y desaparezca el aviso.
+  form.addEventListener("click", ev => {
+    const btn = ev.target.closest(".rc-patio-adaptar");
+    if (!btn) return;
+    const fila = btn.closest(".rc-patio-fila");
+    if (!fila) return;
+    const input = fila.querySelector('input[name="patios"]');
+    if (btn.dataset.vertices) fila.dataset.vertices = btn.dataset.vertices;
+    const area = Number(btn.dataset.area) || 0;
+    const objetivo = Math.max(0, Math.round((area - MARGEN_ADAPTAR_M2) * 100) / 100);
+    if (input && objetivo > 0) input.value = String(objetivo);
+    // Limpia el estado de error mientras recalcula (el backend confirmará el encaje).
+    fila.classList.remove("rc-patio-fila-nocabe");
+    const aviso = fila.querySelector(".rc-patio-aviso");
+    if (aviso) { aviso.hidden = true; aviso.textContent = ""; }
+    pedirCalculo();
   });
 
   // ─── Bindings ─────────────────────────────────────────────────────────

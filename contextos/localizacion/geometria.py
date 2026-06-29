@@ -43,6 +43,24 @@ def _crear_transformers(lon_ref: float, lat_ref: float):
     return a_utm, a_wgs
 
 
+def _contorno_finito(contorno) -> list[tuple[float, float]]:
+    """Descarta vértices con coordenadas no finitas (NaN/inf) o no numéricas.
+
+    Un solo vértice envenenado convertiría longitudes, áreas y azimuts en NaN y los
+    propagaría a toda la clasificación de lados. Se saneja en la frontera (donde
+    entran datos del Catastro/usuario) en vez de defenderse en cada cálculo.
+    """
+    out: list[tuple[float, float]] = []
+    for punto in contorno or []:
+        try:
+            x, y = float(punto[0]), float(punto[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if math.isfinite(x) and math.isfinite(y):
+            out.append((x, y))
+    return out
+
+
 def simplificar_dp_utm(
     contorno_wgs84: list[tuple[float, float]],
     tolerancia_m: float,
@@ -51,6 +69,7 @@ def simplificar_dp_utm(
 
     Si tolerancia_m <= 0 devuelve el contorno tal cual. Garantiza polígono cerrado.
     """
+    contorno_wgs84 = _contorno_finito(contorno_wgs84)
     if len(contorno_wgs84) < 4:
         return list(contorno_wgs84)
     if tolerancia_m <= 0:
@@ -62,6 +81,12 @@ def simplificar_dp_utm(
     poly_utm = shp_transform(a_utm, poly_wgs)
     simplificado_utm = poly_utm.simplify(tolerancia_m, preserve_topology=True)
     if simplificado_utm.is_empty:
+        return list(contorno_wgs84)
+    # La simplificación topológica puede partir el polígono en MultiPolygon: nos
+    # quedamos con la pieza mayor y abortamos a passthrough si no queda un Polygon.
+    if simplificado_utm.geom_type == "MultiPolygon":
+        simplificado_utm = max(simplificado_utm.geoms, key=lambda p: p.area)
+    if simplificado_utm.geom_type != "Polygon":
         return list(contorno_wgs84)
     simplificado_wgs = shp_transform(a_wgs, simplificado_utm)
     coords = list(simplificado_wgs.exterior.coords)
@@ -77,6 +102,7 @@ def extraer_lados(contorno_wgs84: list[tuple[float, float]]) -> list[Lado]:
     Todos los lados se inicializan como FACHADA; la clasificación es luego
     responsabilidad de `clasificar_por_sondeo`.
     """
+    contorno_wgs84 = _contorno_finito(contorno_wgs84)
     if len(contorno_wgs84) < 4:
         return []
 
@@ -96,7 +122,7 @@ def extraer_lados(contorno_wgs84: list[tuple[float, float]]) -> list[Lado]:
         x2, y2 = a_utm(p2[0], p2[1])
         dx, dy = x2 - x1, y2 - y1
         longitud = math.hypot(dx, dy)
-        if longitud < 0.1:
+        if not (longitud >= 0.1):   # excluye también NaN (compara con `not >=`)
             continue
         # Azimut del lado (dirección del vector p1→p2). 0° = Norte, 90° = Este.
         azimut = (math.degrees(math.atan2(dx, dy)) + 360.0) % 360.0
@@ -140,6 +166,7 @@ def clasificar_por_sondeo(
     3. Si el punto exterior cae dentro de la unión de parcelas vecinas →
        MEDIANERA. En otro caso → FACHADA.
     """
+    contorno_propio_wgs84 = _contorno_finito(contorno_propio_wgs84)
     if not lados or not contornos_vecinos_wgs84 or len(contorno_propio_wgs84) < 3:
         return lados
 
@@ -174,7 +201,7 @@ def clasificar_por_sondeo(
         x2, y2 = a_utm(lado.p2[0], lado.p2[1])
         dx, dy = x2 - x1, y2 - y1
         norma = math.hypot(dx, dy)
-        if norma < 1e-6:
+        if not (norma >= 1e-6):   # excluye también NaN
             resultado.append(lado)
             continue
         # Rotación 90° (sentido antihorario en plano UTM); si cae dentro de la
@@ -204,6 +231,7 @@ def clasificar_por_sondeo(
 
 def area_m2_utm(contorno_wgs84: list[tuple[float, float]]) -> float:
     """Área del polígono reproyectado a UTM (m²). 0 si el polígono es inválido."""
+    contorno_wgs84 = _contorno_finito(contorno_wgs84)
     if len(contorno_wgs84) < 4:
         return 0.0
     lon_ref, lat_ref = contorno_wgs84[0]

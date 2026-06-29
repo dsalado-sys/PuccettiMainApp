@@ -1,20 +1,37 @@
 /* Buscar parcela — full-screen split sidebar + Leaflet */
 
+/* Esta vista es a pantalla completa: anula el padding vertical del .contenido
+   (que en el resto de páginas separa del pie) para que el mapa llegue hasta el
+   pie sin hueco ni scroll. El ancho se rompe con los márgenes negativos de abajo. */
+/* Bloquear la página a viewport height y dejar que flex distribuya el espacio
+   real entre cabecera, contenido y pie — más robusto que un calc() con px fijos. */
+body:has(.loc-layout) { height: 100vh; overflow: hidden; }
+.contenido:has(.loc-layout) {
+  padding-top: 0;
+  padding-bottom: 0;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .loc-layout {
   position: relative;
   display: grid;
   grid-template-columns: 360px 1fr;
-  /* Romper el max-width del .contenido padre para ocupar la pantalla a lo ancho. */
-  margin-left: calc(-50vw + 50%);
-  margin-right: calc(-50vw + 50%);
-  /* Altura fija para que el mapa nunca se pierda al aparecer la columna de cards.
-     ~230px = cabecera + pie + padding vertical del .contenido. */
-  height: calc(100vh - 230px);
-  min-height: 540px;
+  /* Romper el max-width del .contenido para ocupar el ancho útil (100vw − rail).
+     Localización es siempre un módulo → el rail colapsado está siempre presente y
+     body.vista-modulo añade su padding-left; el +rail/2 ancla el split al borde
+     derecho del rail en lugar de meterlo debajo. Ver puccetti.css §rail. */
+  margin-left: calc(-50vw + 50% + var(--rail-ancho) / 2);
+  margin-right: calc(-50vw + 50% + var(--rail-ancho) / 2);
+  /* Altura derivada de flex (body bloqueado a 100vh); ya no necesita calc(). */
+  flex: 1;
+  min-height: 0;
   border: none;
   border-radius: 0;
   overflow: hidden;
-  background: var(--blanco);
+  background: var(--surface);
   transition: grid-template-columns 200ms ease;
 }
 
@@ -29,83 +46,73 @@
 .loc-layout.sidebar-oculto .loc-sidebar { width: 0; padding: 0; border-right: 0; overflow: hidden; }
 .loc-layout.sidebar-oculto #toggle-sidebar { left: 0; transform: rotate(180deg); }
 
-/* Toggle de cards */
-.loc-layout.cards-oculto:has(.loc-subref:not(.oculto)) { grid-template-columns: 360px 0 1fr; }
-.loc-layout.cards-oculto .loc-subref { width: 0; padding: 0; border-right: 0; overflow: hidden; }
-
-/* Botones de toggle anclados al borde derecho de su panel respectivo */
+/* Botón de toggle anclado al borde derecho del sidebar */
 .loc-toggle {
   position: absolute;
   top: 10px;
   z-index: 1100;
   width: 26px;
   height: 36px;
-  border: 1px solid var(--negro);
-  background: var(--blanco);
-  color: var(--negro);
-  font-size: 14px;
+  border: 1px solid var(--outline-input);
+  background: var(--surface);
+  color: var(--on-surface);
+  font-size: var(--text-md);
   cursor: pointer;
-  border-radius: 0 4px 4px 0;
-  box-shadow: 2px 2px 6px rgba(0,0,0,0.15);
+  border-radius: 0 var(--radio-inner) var(--radio-inner) 0;
+  box-shadow: var(--shadow-soft);
   display: flex;
   align-items: center;
   justify-content: center;
   transition: transform 200ms ease, left 200ms ease;
 }
-.loc-toggle:hover { background: var(--negro); color: var(--dorado); }
+.loc-toggle:hover { background: var(--surface-inverse); color: var(--dorado); }
 
 /* Sidebar a la izquierda → su toggle al borde derecho del sidebar */
 .loc-toggle-sidebar { left: 360px; }
 .loc-layout.sidebar-oculto .loc-toggle-sidebar { left: 0; transform: rotate(180deg); }
 
-/* Cards a la derecha del sidebar → su toggle al borde derecho de cards */
-.loc-toggle-cards { left: 700px; }                                 /* 360 + 340 */
-.loc-layout.sidebar-oculto .loc-toggle-cards { left: 340px; }
-.loc-layout.cards-oculto .loc-toggle-cards { left: 360px; transform: rotate(180deg); }
-.loc-layout.sidebar-oculto.cards-oculto .loc-toggle-cards { left: 0; transform: rotate(180deg); }
-
 .loc-sidebar {
   padding: 18px;
   overflow-y: auto;
-  border-right: 1px solid #E4DFCC;
-  background: var(--blanco);
+  border-right: 1px solid var(--outline);
+  background: var(--surface);
 }
 
-.loc-mapa { width: 100%; height: 100%; min-height: 540px; }
+.loc-mapa { width: 100%; height: 100%; }
 
 /* Tabs */
 .loc-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
 .loc-tab {
   flex: 1;
   background: var(--gris-suave);
-  border: 1px solid #DDD7C2;
+  border: 1px solid var(--outline-input);
   border-radius: var(--radio);
   padding: 8px 6px;
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 600;
-  color: #555;
+  color: var(--on-surface-secondary);
   cursor: pointer;
 }
-.loc-tab.activo { background: var(--negro); color: var(--dorado); border-color: var(--negro); }
+.loc-tab.activo { background: var(--surface-inverse); color: var(--dorado); border-color: var(--surface-inverse); }
 
 .loc-panel { display: block; margin-bottom: 14px; }
 .loc-panel.oculto { display: none; }
 .loc-panel label {
   display: flex; flex-direction: column; gap: 4px;
-  font-size: 12px; color: #444; margin-bottom: 8px;
+  font-size: var(--text-sm); color: var(--on-surface-body); margin-bottom: 8px;
 }
 .loc-panel input, .loc-panel select, .loc-panel .cb-input {
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: var(--text-base);
   font-family: inherit;
-  border: 1px solid #C9C5B5;
+  border: 1px solid var(--outline-input);
   border-radius: var(--radio);
-  background: var(--blanco);
+  background: var(--surface);
   width: 100%;
   box-sizing: border-box;
 }
 .loc-panel input:focus, .loc-panel select:focus, .loc-panel .cb-input:focus {
-  outline: 2px solid var(--dorado);
+  outline: var(--focus-ring);
   outline-offset: 1px;
 }
 .loc-panel input:disabled, .loc-panel .cb-input:disabled {
@@ -113,7 +120,7 @@
   cursor: not-allowed;
 }
 
-/* Combobox custom (provincia, municipio, vía) */
+/* Combobox custom (provincia, municipio, vía) — único combobox propio de la app */
 .cb { position: relative; }
 .cb-via { display: flex; gap: 4px; }
 .cb-via .cb-input { flex: 1 1 auto; }
@@ -121,16 +128,16 @@
   flex: 0 0 auto;
   width: 32px;
   height: 32px;
-  border: 1px solid var(--negro);
-  background: var(--blanco);
-  color: var(--negro);
+  border: 1px solid var(--outline-input);
+  background: var(--surface);
+  color: var(--on-surface);
   border-radius: var(--radio);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-.cb-lupa:hover:not(:disabled) { background: var(--negro); color: var(--dorado); }
+.cb-lupa:hover:not(:disabled) { background: var(--surface-inverse); color: var(--dorado); }
 .cb-lupa:disabled { opacity: 0.4; cursor: not-allowed; }
 .cb-lupa.cargando { opacity: 0.6; }
 
@@ -142,50 +149,52 @@
   margin: 2px 0 0;
   padding: 0;
   list-style: none;
-  background: var(--blanco);
-  border: 1px solid var(--negro);
+  background: var(--surface);
+  border: 1px solid var(--outline-input);
   border-radius: var(--radio);
   max-height: 240px;
   overflow-y: auto;
   z-index: 1200;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+  box-shadow: var(--shadow-soft);
 }
 .cb-list[hidden] { display: none; }
 .cb-list li {
   padding: 6px 10px;
   font-size: 12.5px;
   cursor: pointer;
-  border-bottom: 1px solid #F1ECD8;
+  border-bottom: 1px solid var(--outline-subtle);
 }
 .cb-list li:last-child { border-bottom: none; }
-.cb-list li:hover, .cb-list li.activo { background: rgba(184, 150, 12, 0.15); }
+.cb-list li:hover, .cb-list li.activo { background: var(--tint-primary-16); }
 .cb-list .cb-vacio { color: var(--gris-medio); font-style: italic; cursor: default; }
 
-.loc-hint { color: var(--gris-medio); font-size: 13px; line-height: 1.4; margin: 0; }
+.loc-hint { color: var(--gris-medio); font-size: var(--text-base); line-height: 1.4; margin: 0; }
 
 /* Mensajes */
 .loc-mensaje {
   padding: 10px 12px;
   border-radius: var(--radio);
-  font-size: 13px;
+  font-size: var(--text-base);
   margin-bottom: 12px;
 }
 .loc-mensaje.oculto { display: none; }
-.loc-mensaje.error { background: rgba(140, 42, 31, 0.08); color: var(--error); border: 1px solid var(--error); }
-.loc-mensaje.info  { background: rgba(184, 150, 12, 0.08); color: var(--negro); border: 1px solid var(--dorado); }
+.loc-mensaje.error { background: var(--tint-error-8); color: var(--error); border: 1px solid var(--error); }
+.loc-mensaje.info  { background: var(--tint-primary-8); color: var(--on-surface); border: 1px solid var(--dorado); }
 
 /* Ficha */
 .loc-ficha.oculto, .loc-agregados.oculto, .loc-subref.oculto { display: none; }
-.loc-ficha h2 { font-size: 16px; margin: 0 0 8px; }
-.loc-ficha h3 { font-size: 13px; margin: 14px 0 8px; text-transform: uppercase; letter-spacing: 0.08em; color: #555; }
+.loc-ficha h2 { font-size: var(--text-lg); margin: 0 0 8px; }
+/* Cabeceras de sección — espejo de .eyebrow (clase añadida en plantilla). */
+.loc-ficha h3 { font-size: var(--text-base); margin: 14px 0 8px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--on-surface-secondary); }
 .loc-ficha dl {
   display: grid; grid-template-columns: 1fr 2fr; gap: 4px 8px;
-  font-size: 13px; margin: 0;
+  font-size: var(--text-base); margin: 0;
 }
-.loc-ficha dt { color: var(--gris-medio); text-transform: uppercase; font-size: 10px; letter-spacing: 0.1em; align-self: center; }
+/* dt espeja .eyebrow (sigue siendo dt por estructura semántica dl/dt/dd). */
+.loc-ficha dt { color: var(--gris-medio); text-transform: uppercase; font-size: var(--text-2xs); letter-spacing: 0.1em; align-self: center; }
 .loc-ficha dd { margin: 0; }
 
-.loc-agregados { background: rgba(184, 150, 12, 0.06); border: 1px solid #E4DFCC; padding: 10px 12px; border-radius: var(--radio); margin-top: 14px; }
+.loc-agregados { background: var(--tint-primary-6); border: 1px solid var(--outline); padding: 10px 12px; border-radius: var(--radio); margin-top: 14px; }
 .loc-agregados h3 { margin-top: 0; }
 
 /* Subreferencias — columna lateral con cards */
@@ -194,16 +203,17 @@
   flex-direction: column;
   padding: 16px;
   background: var(--gris-suave);
-  border-right: 1px solid #E4DFCC;
+  border-right: 1px solid var(--outline);
   overflow: hidden;
 }
 .loc-subref.oculto { display: none; }
+/* Título de la columna — espejo de .eyebrow (clase añadida en plantilla). */
 .loc-subref-titulo {
   margin: 0 0 12px;
-  font-size: 11px;
+  font-size: var(--text-eyebrow);
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #555;
+  color: var(--on-surface-secondary);
 }
 
 .loc-cards {
@@ -215,8 +225,8 @@
 }
 
 .loc-card {
-  background: var(--blanco);
-  border: 1px solid #E4DFCC;
+  background: var(--surface);
+  border: 1px solid var(--outline);
   border-radius: var(--radio);
   padding: 10px 12px;
   cursor: pointer;
@@ -224,19 +234,19 @@
 }
 .loc-card:hover, .loc-card:focus {
   border-color: var(--dorado);
-  box-shadow: 0 4px 12px rgba(184, 150, 12, 0.22);
+  box-shadow: var(--shadow-glow-soft);
   transform: translateY(-1px);
   outline: none;
 }
 .loc-card:active { transform: translateY(0); }
 /* Anillo de foco accesible al navegar por teclado (coherente con inputs/botones). */
-.loc-card:focus-visible { outline: 2px solid var(--dorado); outline-offset: 2px; }
+.loc-card:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 /* Inmueble elegido dentro de la metaparcela. */
 .loc-card-elegida {
   border-color: var(--dorado);
   border-left: 4px solid var(--dorado);
-  background: rgba(184, 150, 12, 0.08);
-  box-shadow: 0 2px 8px rgba(184, 150, 12, 0.18);
+  background: var(--tint-primary-8);
+  box-shadow: var(--shadow-glow-soft);
 }
 
 .loc-card-head {
@@ -245,13 +255,13 @@
   gap: 12px;
   min-width: 0;
   margin-bottom: 6px;
-  border-bottom: 1px solid #F1ECD8;
+  border-bottom: 1px solid var(--outline-subtle);
   padding-bottom: 6px;
 }
 .loc-card-rc {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11px;
-  color: var(--negro);
+  font-family: var(--fuente-mono);
+  font-size: var(--text-eyebrow);
+  color: var(--on-surface);
   font-weight: 600;
   flex: 1 1 auto;
   white-space: nowrap;
@@ -274,8 +284,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
-  font-size: 12px;
-  color: #333;
+  font-size: var(--text-sm);
+  color: var(--on-surface-body);
 }
 .loc-card-body span {
   cursor: help;
@@ -289,26 +299,27 @@
 
 /* Slider */
 .loc-slider { margin: 16px 0; }
-.loc-slider label { display: block; font-size: 12px; margin-bottom: 6px; color: #444; }
+.loc-slider label { display: block; font-size: var(--text-sm); margin-bottom: 6px; color: var(--on-surface-body); }
 .loc-slider input[type="range"] { width: 100%; accent-color: var(--dorado); }
 
 /* Tabla lados */
-.loc-tabla-lados { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.loc-tabla-lados { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin-top: 8px; }
 .loc-tabla-lados th, .loc-tabla-lados td {
-  padding: 6px 4px; text-align: left; border-bottom: 1px solid #EEE9D5;
+  padding: 6px 4px; text-align: left; border-bottom: 1px solid var(--outline-subtle);
 }
-.loc-tabla-lados th { text-transform: uppercase; font-size: 10px; color: #666; letter-spacing: 0.1em; }
+/* th espeja .eyebrow (clase añadida en plantilla). */
+.loc-tabla-lados th { text-transform: uppercase; font-size: var(--text-2xs); color: var(--on-surface-muted); letter-spacing: 0.1em; }
 .loc-tabla-lados select {
-  padding: 4px 6px; font-size: 12px; border-radius: var(--radio); border: 1px solid #C9C5B5; background: var(--blanco);
+  padding: 4px 6px; font-size: var(--text-sm); border-radius: var(--radio); border: 1px solid var(--outline-input); background: var(--surface);
 }
-.loc-tabla-lados tr.activo { background: rgba(184, 150, 12, 0.12); }
+.loc-tabla-lados tr.activo { background: var(--tint-primary-12); }
 .loc-tabla-lados tr.deshabilitada select { pointer-events: none; opacity: 0.6; }
 
 .loc-asociar, .loc-acciones { margin-top: 16px; }
 .loc-acciones button[disabled] { opacity: 0.55; cursor: not-allowed; }
 .loc-acciones .loc-hint { margin-top: 6px; font-size: 11.5px; }
 
-/* ── Modal "Guardar como proyecto" ──────────────────────────────────────── */
+/* ── Modal "Guardar como proyecto" (overlay propio, no <dialog>) ─────────── */
 .loc-modal-overlay {
   position: fixed;
   inset: 0;
@@ -317,57 +328,57 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(10, 10, 10, 0.55);
+  background: var(--scrim);
   backdrop-filter: blur(2px);
 }
 .loc-modal-overlay.oculto { display: none; }
 .loc-modal {
   width: 100%;
   max-width: 420px;
-  background: var(--blanco);
-  border: 1px solid var(--negro);
+  background: var(--surface);
+  border: 1px solid var(--outline-input);
   border-top: 4px solid var(--dorado);
   border-radius: var(--radio);
   padding: 22px 24px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-elevated);
 }
-.loc-modal h3 { margin: 0 0 8px; font-size: 16px; color: var(--negro); }
+.loc-modal h3 { margin: 0 0 8px; font-size: var(--text-lg); color: var(--on-surface); }
 .loc-modal .loc-hint { margin-bottom: 16px; }
 .loc-modal-campo {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  font-size: 12px;
-  color: #444;
+  font-size: var(--text-sm);
+  color: var(--on-surface-body);
   margin-bottom: 18px;
 }
 .loc-modal-campo input {
   padding: 9px 11px;
-  font-size: 14px;
+  font-size: var(--text-md);
   font-family: inherit;
-  border: 1px solid #C9C5B5;
+  border: 1px solid var(--outline-input);
   border-radius: var(--radio);
-  background: var(--blanco);
+  background: var(--surface);
   box-sizing: border-box;
 }
-.loc-modal-campo input:focus { outline: 2px solid var(--dorado); outline-offset: 1px; }
+.loc-modal-campo input:focus { outline: var(--focus-ring); outline-offset: 1px; }
 .loc-modal-acciones { display: flex; justify-content: flex-end; gap: 10px; }
 
 /* Pestaña colapsable de simplificación + lados */
 .loc-detalles {
   margin-top: 16px;
-  border: 1px solid #E4DFCC;
+  border: 1px solid var(--outline);
   border-radius: var(--radio);
-  background: rgba(184, 150, 12, 0.03);
+  background: var(--tint-primary-3);
 }
-.loc-detalles[open] { background: var(--blanco); }
+.loc-detalles[open] { background: var(--surface); }
 .loc-detalles > summary {
   cursor: pointer;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--negro);
+  color: var(--on-surface);
   list-style: none;
   user-select: none;
   position: relative;
@@ -387,14 +398,14 @@
 .loc-orientacion-tag {
   display: inline-block;
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: var(--text-eyebrow);
   font-weight: 700;
   letter-spacing: 0.05em;
-  border-radius: 999px;
+  border-radius: var(--radio-pill);
   border: 1.5px solid var(--dorado);
   background: var(--blanco);
   color: var(--negro);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-soft);
   text-align: center;
   white-space: nowrap;
   pointer-events: none;
@@ -417,7 +428,7 @@
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--veil);
   backdrop-filter: blur(2px);
   pointer-events: all;
 }
@@ -426,23 +437,23 @@
   width: 72px;
   height: 72px;
   border-radius: 50%;
-  border: 6px solid rgba(184, 150, 12, 0.18);
+  border: 6px solid var(--tint-primary-16);
   border-top-color: var(--dorado);
   animation: loc-spin 0.9s linear infinite;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-soft);
 }
 .loc-spinner-texto {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--negro);
   background: var(--blanco);
   padding: 6px 14px;
-  border-radius: 999px;
+  border-radius: var(--radio-pill);
   border: 1px solid var(--dorado);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-soft);
 }
 @keyframes loc-spin {
   from { transform: rotate(0deg); }
@@ -455,10 +466,10 @@
   border-radius: var(--radio);
   background: var(--blanco);
   font-family: var(--fuente);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .leaflet-control-layers-expanded { padding: 8px 12px; }
 .leaflet-control-layers-base label, .leaflet-control-layers-overlays label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }

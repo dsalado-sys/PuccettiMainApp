@@ -1,6 +1,6 @@
 """Roles y matriz de permisos (§2.11).
 
-El sistema de autenticación real se implementará más adelante; este módulo define
+El sistema de autenticación real vive en `contextos/usuarios`; este módulo define
 el lenguaje y la matriz para que cualquier punto de la app pueda preguntar
 "¿este rol puede entrar a este módulo?" sin acoplarse a la UI.
 """

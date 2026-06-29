@@ -25,12 +25,23 @@ Planta tipo / ático:
 Sótanos: viv=0 forzado. Ático: si computa_edif=False no consume techo.
 Reparto multi-tipología: si hay tipologías_extra, se asigna ≥1 unidad de
 cada y se rellena el sobrante con la más pequeña.
+
+Edificabilidad: el exceso sobre el techo (`construida_computable_total >
+edificabilidad_m2`) marca el factor limitante y dispara el aviso de incumplimiento,
+pero NO retira plantas del reparto. Todas las plantas habitables con útil alojan
+unidades, también las que superan el techo (p. ej. una planta consolidada/legalizada
+por antigüedad en rehabilitación, que se usa como una planta más).
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .config import Parametros
-from .programa import reparto_multi_tipologia, util_maximo
+from .programa import (
+    CONFIG_DEFAULT as CONFIG_VIVIENDA_DEFAULT,
+    ProgramaViviendaConfig,
+    reparto_multi_tipologia,
+    util_maximo,
+)
 from .programa_uso import TipologiaUnidadDescriptor, reparto_multi_tipologia_generico
 
 
@@ -111,7 +122,7 @@ class Capacidad:
     # Detalle por unidad de cada planta: lista [(n_dorms, util_m2), ...].
     # Permite a `tabla_unidad_desde_capacidad` generar una fila por unidad con
     # su tipología y útil real (sin promediar). Las plantas sin viviendas
-    # (sotano, ático no admitido…) guardan lista vacía.
+    # (sótano, o una planta sin útil tras descuentos) guardan lista vacía.
     unidades_por_planta: list[list[tuple[int, float]]] = field(default_factory=list)
     # Slug de tipología de cada unidad (paralelo a `unidades_por_planta`). Permite
     # a la serialización regenerar las estancias por unidad cuando la planta mezcla
@@ -125,6 +136,10 @@ class Capacidad:
     # núcleo, `patio_sin_espacio` queda en True para emitir el aviso correspondiente.
     area_patio_min_m2: float = 0.0
     patio_sin_espacio: bool = False
+    # Accesibilidad (DB-SUA): nº de unidades adaptadas asignadas automáticamente
+    # por tramos (0 en vivienda) y modo de adaptación ("total" o "parcial").
+    n_unidades_adaptadas: int = 0
+    modo_adaptacion: str = "total"
 
 
 def _nombre_planta(idx_visual: int, tipo: str) -> str:
@@ -144,7 +159,10 @@ def _categoria_planta(p, es_primera_regular: bool) -> str:
     return "pb" if es_primera_regular else "tipo"
 
 
-def _construir_perfil(prog_motor, descriptores, util_objetivo) -> _PerfilTipologia:
+def _construir_perfil(
+    prog_motor, descriptores, util_objetivo,
+    cfg_vivienda: ProgramaViviendaConfig = CONFIG_VIVIENDA_DEFAULT,
+) -> _PerfilTipologia:
     """Perfil de reparto en unidades a partir del programa (motor) de una categoría."""
     n_dorms = prog_motor.n_dormitorios
     if descriptores:
@@ -152,14 +170,17 @@ def _construir_perfil(prog_motor, descriptores, util_objetivo) -> _PerfilTipolog
     elif util_objetivo is not None:
         util_viv = util_objetivo
     else:
-        util_viv = util_maximo(n_dorms)
+        util_viv = util_maximo(n_dorms, cfg_vivienda)
     extras = list(getattr(prog_motor, "tipologias_extra", []) or [])
     tipologias_set = [n_dorms] + [int(t) for t in extras]
     salon_open = bool(getattr(prog_motor, "salon_cocina_open", False))
     return _PerfilTipologia(descriptores, n_dorms, util_viv, tipologias_set, salon_open)
 
 
-def _reparto_planta(util_disponible: float, perfil: _PerfilTipologia):
+def _reparto_planta(
+    util_disponible: float, perfil: _PerfilTipologia,
+    cfg_vivienda: ProgramaViviendaConfig = CONFIG_VIVIENDA_DEFAULT,
+):
     """Reparte el útil de una planta en unidades según su perfil de tipología.
 
     Devuelve `(unidades, tipologias)` con `unidades=[(n_dorms_label, util_m2)…]`
@@ -177,7 +198,8 @@ def _reparto_planta(util_disponible: float, perfil: _PerfilTipologia):
             unidades = [(d0.n_dorms_label, d0.util_objetivo) for _ in range(n_viv)]
             tipologias = [d0.slug for _ in range(n_viv)]
     elif len(set(perfil.tipologias_set)) > 1:
-        unidades = reparto_multi_tipologia(util_disponible, perfil.tipologias_set, perfil.salon_open)
+        unidades = reparto_multi_tipologia(
+            util_disponible, perfil.tipologias_set, perfil.salon_open, cfg_vivienda)
         tipologias = [str(n) for n, _ in unidades]
     else:
         n_viv = _truncar(util_disponible / perfil.util_viv) if perfil.util_viv > 0 else 0
@@ -197,6 +219,7 @@ def calcular_capacidad(
     util_objetivo_por_unidad_tipo: float | None = None,
     descriptores_tipologia_tipo: list[TipologiaUnidadDescriptor] | None = None,
     disenos: dict[str, DisenoPlanta] | None = None,
+    cfg_vivienda: ProgramaViviendaConfig | None = None,
 ) -> Capacidad:
     """Deriva la capacidad numérica del edificio (sin geometría de unidades).
 
@@ -216,6 +239,10 @@ def calcular_capacidad(
     - descriptores con 1 entrada → tantas unidades como quepan al `util_objetivo`.
     - sin descriptores → vía int-based histórica (preview de vivienda).
     """
+    # §3.8 — mínimos/política de vivienda editados (panel/BBDD). Solo se usa en la
+    # vía int-based de vivienda (sin descriptores); para el resto de usos llega None.
+    cfg_vivienda = cfg_vivienda if cfg_vivienda is not None else CONFIG_VIVIENDA_DEFAULT
+
     # Superficie de suelo para los límites legales (edificabilidad / ocupación):
     # la catastral real si la envolvente la conoce; si no, el área geométrica.
     parcela_area = getattr(envolvente, "superficie_referencia_m2", 0.0) or envolvente.parcela.area
@@ -263,21 +290,28 @@ def calcular_capacidad(
 
     huella = envolvente.plantas[0].footprint.area if envolvente.plantas else parcela_area
     coef = urb.coeficiente_edificabilidad
+    # `ocup_area` = ocupación de PB (KPI `ocupacion_area_m2`, huella efectiva y factor
+    # limitante, todos referidos a la planta baja). El TECHO por ocupación, en cambio,
+    # usa la MAYOR de PB/tipo: la planta de mayor huella puede ser la tipo, y el consumo
+    # (suma de huellas por planta) debe caber bajo el techo sin falsear el exceso.
     ocup_area = urb.ocupacion_maxima * parcela_area
+    ocup_max = max(urb.ocupacion_maxima, getattr(urb, "ocupacion_maxima_tipo", urb.ocupacion_maxima))
     if getattr(urb, "usar_coeficiente_edificabilidad", True):
         edificabilidad_m2 = coef * parcela_area
     else:
-        edificabilidad_m2 = ocup_area * max(1, urb.n_plantas_max)
+        edificabilidad_m2 = ocup_max * parcela_area * max(1, urb.n_plantas_max)
     huella_efectiva = min(huella, ocup_area) if ocup_area > 0 else huella
 
     # Perfiles de tipología: PB (params) y plantas tipo (params_tipo). El ático
     # usa el perfil tipo; el sótano no aloja unidades. Sin params_tipo, tipo = PB.
-    perfil_pb = _construir_perfil(params.programa, descriptores_tipologia, util_objetivo_por_unidad)
+    perfil_pb = _construir_perfil(
+        params.programa, descriptores_tipologia, util_objetivo_por_unidad, cfg_vivienda)
     if params_tipo is None:
         perfil_tipo = perfil_pb
     else:
         perfil_tipo = _construir_perfil(
-            params_tipo.programa, descriptores_tipologia_tipo, util_objetivo_por_unidad_tipo
+            params_tipo.programa, descriptores_tipologia_tipo, util_objetivo_por_unidad_tipo,
+            cfg_vivienda,
         )
     n_dorms = perfil_pb.n_dorms        # KPI: tipología principal de PB
     util_viv = perfil_pb.util_viv      # KPI
@@ -291,23 +325,20 @@ def calcular_capacidad(
 
     descuento_por_planta = area_servicios_comunes_m2 / n_plantas_habitables
 
-    construida_computable_total = sum(p.footprint.area for p in plantas if p.computa_edif)
+    construida_computable_total = sum(
+        getattr(p, "area_construida_m2", p.footprint.area) for p in plantas if p.computa_edif
+    )
     n_plantas_edif_max = (
         max(1, int(edificabilidad_m2 // huella_efectiva)) if huella_efectiva else 1
     )
 
-    # Recorte por techo: si la suma de plantas computables excede, las de arriba
-    # quedan sin admitir (generan 0 unidades).
+    # El exceso de edificabilidad NO retira plantas del reparto: solo alimenta el factor
+    # limitante y el aviso de incumplimiento (`_alertas_envolvente` / `ValidarCumplimiento`,
+    # ambos independientes de aquí). Todas las plantas habitables con útil reparten unidades,
+    # también las que superan el techo (p. ej. una planta consolidada/legalizada por
+    # antigüedad en rehabilitación, que se usa como una planta más). El sótano no aloja
+    # unidades por su propia rama (`cat == "sotano"`), no por el techo.
     excede_techo = construida_computable_total > edificabilidad_m2 + 1e-3
-    techo_restante = edificabilidad_m2
-    plantas_admitidas_idx: set[int] = set()
-    for i, p in enumerate(plantas):
-        if not p.computa_edif:
-            plantas_admitidas_idx.add(i)
-            continue
-        if techo_restante + 1e-3 >= p.footprint.area:
-            plantas_admitidas_idx.add(i)
-            techo_restante -= p.footprint.area
 
     factor_limitante = "ninguno (cumple holgado)"
     if pct_total_max >= 100.0:
@@ -352,11 +383,12 @@ def calcular_capacidad(
         # construida que se REPORTA (sin patio) se calcula más abajo, una vez
         # conocido `patio_i`.
         construida_i = p.footprint.area
-        admitida = i in plantas_admitidas_idx
-        if p.computa_edif and admitida:
-            # La edificabilidad (techo consumido) se sigue midiendo sobre la
-            # huella completa; es un concepto distinto del construido.
-            construida_computable_efectiva += construida_i
+        if p.computa_edif:
+            # La edificabilidad (techo consumido) suma la superficie CONSTRUIDA de las
+            # plantas que computan: la huella menos los patios (vacíos a cielo abierto,
+            # que no son techo). `construida_i` (huella completa) se reserva como base de
+            # los % de muros/circulación/núcleo de más abajo.
+            construida_computable_efectiva += getattr(p, "area_construida_m2", construida_i)
 
         cat = _categoria_planta(p, es_primera_regular)
         dis = disenos.get(cat, dis_tipo)
@@ -447,8 +479,8 @@ def calcular_capacidad(
             util_disponible_planta = util_disponible_i
             util_total += util_disponible_planta
 
-            if admitida and util_disponible_i > 0 and perfil.util_viv > 0:
-                unidades_i, tipologias_i = _reparto_planta(util_disponible_i, perfil)
+            if util_disponible_i > 0 and perfil.util_viv > 0:
+                unidades_i, tipologias_i = _reparto_planta(util_disponible_i, perfil, cfg_vivienda)
                 viv_i = len(unidades_i)
                 mix_counts: dict[str, int] = {}
                 for slug in tipologias_i:
@@ -613,5 +645,7 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "area_servicios_comunes_m2": round(cap.area_servicios_comunes_m2, 2),
         "area_patio_min_m2": round(cap.area_patio_min_m2, 2),
         "patio_sin_espacio": cap.patio_sin_espacio,
+        "n_unidades_adaptadas": cap.n_unidades_adaptadas,
+        "modo_adaptacion": cap.modo_adaptacion,
         "factor_limitante": cap.factor_limitante,
     }

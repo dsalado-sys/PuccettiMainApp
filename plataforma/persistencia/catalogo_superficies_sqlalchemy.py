@@ -23,6 +23,17 @@ _ESTANCIAS_NO_EDITABLES = {"circulacion_interior"}
 _UTIL_MAXIMO_ESTANCIA = "_util_maximo"
 
 
+def _exigir_min_le_max(valor_min: float, maximo: float, ref: str) -> None:
+    """Invariante de fila `min_m2 ≤ max_m2_util`: rechaza romperlo antes de
+    persistir (un mínimo por encima del útil máximo dejaría la tipología en
+    estado imposible para el dimensionado)."""
+    if valor_min > maximo:
+        raise ValueError(
+            f"El mínimo ({valor_min:g} m²) no puede superar el útil máximo "
+            f"({maximo:g} m²) de {ref}."
+        )
+
+
 def _clave_global_estancia(estancia: str) -> str | None:
     """Clave de agrupación de las estancias cuyo mínimo es GLOBAL (no varía por
     nº de dormitorios): dormitorio principal/mínimo, cocina, baño, aseo. Las
@@ -267,12 +278,19 @@ class CatalogoSuperficiesSQLAlchemy:
         # y editar la cocina de una tipología no se pierde (resuelve R1).
         clave = _clave_global_estancia(estancia)
         if clave is not None:
+            # Mínimo propagado a todas las tipologías: validar el invariante
+            # contra el útil máximo de CADA fila afectada ANTES de mutar ninguna.
+            afectadas = [
+                orm for orm in self._session.scalars(select(AnexoIViviendaORM)).all()
+                if _clave_global_estancia(orm.estancia) == clave
+            ]
+            for orm in afectadas:
+                _exigir_min_le_max(valor, orm.max_m2_util, f"{orm.n_dormitorios}d/{orm.estancia}")
             ahora = datetime.now(timezone.utc)
-            for orm in self._session.scalars(select(AnexoIViviendaORM)).all():
-                if _clave_global_estancia(orm.estancia) == clave:
-                    orm.min_m2 = valor
-                    orm.editable_por_usuario = 1
-                    orm.actualizado_en = ahora
+            for orm in afectadas:
+                orm.min_m2 = valor
+                orm.editable_por_usuario = 1
+                orm.actualizado_en = ahora
             self._session.commit()
             return
 
@@ -285,10 +303,20 @@ class CatalogoSuperficiesSQLAlchemy:
         # unidad. Se escribe en `max_m2_util` de TODAS las estancias de la
         # tipología (consolidadas_vivienda toma el máximo → UTIL_MAX[n]).
         if estancia == _UTIL_MAXIMO_ESTANCIA:
-            ahora = datetime.now(timezone.utc)
-            for orm in self._session.scalars(
+            filas = self._session.scalars(
                 select(AnexoIViviendaORM).where(AnexoIViviendaORM.n_dormitorios == n_dorms)
-            ).all():
+            ).all()
+            # No bajar el techo por debajo del mayor mínimo de estancia: rompería
+            # el invariante (min ≤ max) en esa fila.
+            if filas:
+                min_mayor = max(f.min_m2 for f in filas)
+                if valor < min_mayor:
+                    raise ValueError(
+                        f"El útil máximo ({valor:g} m²) no puede ser menor que el mayor "
+                        f"mínimo de estancia ({min_mayor:g} m²) de la tipología {n_dorms}d."
+                    )
+            ahora = datetime.now(timezone.utc)
+            for orm in filas:
                 orm.max_m2_util = valor
                 orm.editable_por_usuario = 1
                 orm.actualizado_en = ahora
@@ -307,14 +335,23 @@ class CatalogoSuperficiesSQLAlchemy:
             )
             self._session.add(orm)
         else:
+            _exigir_min_le_max(valor, orm.max_m2_util, f"{n_dorms}d/{estancia}")
             orm.min_m2 = valor
             orm.editable_por_usuario = 1
             orm.actualizado_en = datetime.now(timezone.utc)
         self._session.commit()
 
     def reset(self) -> None:
-        """Reseed completo desde las constantes de `geometria.programa`."""
+        """Reseed completo desde las constantes de `geometria.programa`.
+
+        Atómico: borrado + siembra se confirman en una sola transacción. Si la
+        siembra falla, el rollback restaura las filas previas (antes, el commit
+        intermedio dejaba el catálogo vacío ante un fallo del seed)."""
         from .seed_normativa import sembrar_anexo_i_vivienda
-        self._session.query(AnexoIViviendaORM).delete()
-        self._session.commit()
-        sembrar_anexo_i_vivienda(self._session, forzar=True)
+        try:
+            self._session.query(AnexoIViviendaORM).delete()
+            sembrar_anexo_i_vivienda(self._session, forzar=True, commit=False)
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise

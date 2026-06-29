@@ -54,8 +54,7 @@ MODOS: dict[str, ModoRender] = {
         slug="obra-nueva",
         titulo="Obra nueva",
         descripcion=(
-            "Edificio de nueva planta: envolvente paramétrica, distribución y "
-            "tabla de superficies calculadas desde cero sobre la parcela."
+            " "
         ),
         badge="Obra nueva",
     ),
@@ -63,8 +62,7 @@ MODOS: dict[str, ModoRender] = {
         slug="rehabilitacion",
         titulo="Rehabilitación",
         descripcion=(
-            "Intervención sobre el edificio existente de la parcela, partiendo "
-            "de su estado actual."
+            " "
         ),
         badge="Rehabilitación",
         nota=(

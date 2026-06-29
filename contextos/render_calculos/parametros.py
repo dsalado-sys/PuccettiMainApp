@@ -14,12 +14,12 @@ Iteración 4 (2026-06-04):
 """
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 from .dominio import (
     CategoriaApartamentos,
-    CategoriaHotelApartamento,
     CategoriaHotelero,
     CategoriaVivienda,
     GrupoApartamentos,
@@ -32,10 +32,78 @@ from .geometria.config import (
     ParametrosDiseno as DisenoMotor,
     ParametrosPrograma as ProgramaMotor,
     ParametrosUrbanisticos as UrbMotor,
+    PatioPlacement as PatioPlacementMotor,
 )
 
 
 USOS_PGOU_VALIDOS: tuple[str, ...] = ("residencial", "hotelero", "terciario", "mixto")
+
+
+@dataclass
+class PatioDef:
+    """Definición de un patio del edificio (entrada del usuario / frontend).
+
+    `area_m2` es el invariante sagrado: se preserva siempre (capacidad deduce su
+    suma; la geometría se construye para tenerlo). `vertices` es el polígono libre
+    en coordenadas UTM tal como lo editó el usuario en el lienzo (None = patio sin
+    posición → el motor lo auto-coloca, comportamiento histórico). `id` da identidad
+    estable para que el frontend siga cada patio entre recálculos y ediciones.
+    """
+    area_m2: float
+    id: str = ""
+    vertices: list | None = None
+    bloqueado: bool = False   # patio congelado: el usuario no puede editarlo y el motor lo prioriza
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            self.id = uuid.uuid4().hex[:8]
+
+
+def area_de_patio(pd: Any) -> float:
+    """Área asignada de un patio, tolerante a `PatioDef` o a un `float` legado."""
+    if isinstance(pd, PatioDef):
+        return max(0.0, float(pd.area_m2))
+    try:
+        return max(0.0, float(pd))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _parse_patio(item: Any) -> PatioDef | None:
+    """Parsea una entrada de `patios` del JSON: número suelto (solo área) u objeto
+    `{area_m2|area, id?, vertices?}`. Devuelve None si el área no es positiva."""
+    if isinstance(item, bool):
+        return None
+    if isinstance(item, (int, float)):
+        a = float(item)
+        return PatioDef(area_m2=a) if a > 0 else None
+    if isinstance(item, dict):
+        try:
+            a = float(item.get("area_m2", item.get("area", 0.0)))
+        except (TypeError, ValueError):
+            return None
+        if a <= 0:
+            return None
+        verts: list | None = None
+        raw = item.get("vertices")
+        if isinstance(raw, (list, tuple)):
+            pts: list[list[float]] = []
+            for v in raw:
+                if isinstance(v, (list, tuple)) and len(v) >= 2:
+                    try:
+                        pts.append([float(v[0]), float(v[1])])
+                    except (TypeError, ValueError):
+                        pts = []
+                        break
+            if len(pts) >= 3:
+                verts = pts
+        return PatioDef(
+            area_m2=a,
+            id=str(item.get("id") or ""),
+            vertices=verts,
+            bloqueado=bool(item.get("bloqueado", False)),
+        )
+    return None
 
 
 @dataclass
@@ -50,7 +118,8 @@ class ParametrosUrbanisticos:
     # ── límites SUPERIORES ──
     coeficiente_edificabilidad: float = 2.5
     usar_coeficiente_edificabilidad: bool = True
-    ocupacion_maxima_pct: float = 100.0     # 0..100
+    ocupacion_maxima_pct: float = 100.0      # 0..100 — ocupación de la PLANTA BAJA (y sótano)
+    ocupacion_maxima_pct_tipo: float = 100.0  # 0..100 — ocupación de las PLANTAS TIPO (y ático)
     n_plantas_max: int = 3
     diametro_max_vestibulo_m: float = 1.50  # SUPERIOR
     espesor_muro_medianero_max_m: float = 0.25      # SUPERIOR
@@ -63,13 +132,12 @@ class ParametrosUrbanisticos:
     retranqueo_atico_m: float = 3.0         # INFERIOR (mínimo normativo)
     luz_recta_patio_min_m: float = 3.0      # INFERIOR (nombre legacy)
     area_patio_min_m2: float = 12.0                 # INFERIOR
-    # Patios reales del edificio: una superficie (m²) por patio. Atraviesan todas
-    # las plantas (patinejos de luz); el cálculo descuenta su SUMA en cada planta.
-    # `area_patio_min_m2`/`luz_recta_patio_min_m` quedan solo como referencia
-    # normativa (validación de cumplimiento). Default = un patio de 12 m² (= el
-    # comportamiento histórico de patio único).
-    patios: list[float] = field(default_factory=lambda: [12.0])
-    pct_unidades_adaptadas_min: float = 5.0         # INFERIOR
+    # Patios reales del edificio: un `PatioDef` por patio (área asignada + polígono
+    # libre opcional). Atraviesan todas las plantas (patinejos de luz); el cálculo
+    # descuenta su SUMA de áreas en cada planta. `area_patio_min_m2`/`luz_recta_patio_min_m`
+    # quedan solo como referencia normativa (validación de cumplimiento). Default = un
+    # patio de 12 m² sin posición (auto-colocado = comportamiento histórico).
+    patios: list[PatioDef] = field(default_factory=lambda: [PatioDef(area_m2=12.0)])
     ancho_min_fachada_m: float = 5.0                # INFERIOR (sobre la parcela)
     espesor_tabique_min_m: float = 0.10             # INFERIOR
     ancho_min_pasillo_comun_m: float = 1.20         # INFERIOR
@@ -124,18 +192,15 @@ class ParametrosPrograma:
     tipologia_habitacion: TipologiaHabitacion = TipologiaHabitacion.DOBLE      # Anexo I.1
     categoria_apartamentos: CategoriaApartamentos = CategoriaApartamentos.DOS_LLAVES
     tipologia_apartamento: TipologiaApartamento = TipologiaApartamento.DOBLE
-    categoria_hotel_apartamento: CategoriaHotelApartamento = CategoriaHotelApartamento.TRES_E  # Anexo I.2
     grupo_apartamentos: GrupoApartamentos = GrupoApartamentos.EDIFICIOS        # A1.3 vs A1.4
     salon_cocina_open: bool = False
     # Tipologías adicionales para la mezcla multi-tipología. Los slugs válidos
-    # dependen del uso activo (vivienda: estudio/1d/2d/3d/4d+; apartamentos y
-    # hotel-apartamento: estudio/1d/2d/3d; hotelero: individual/doble/triple/
-    # cuadruple/multiple).
+    # dependen del uso activo (vivienda: estudio/1d/2d/3d/4d+; apartamentos:
+    # estudio/1d/2d/3d; hotelero: individual/doble/triple/cuadruple/multiple).
     tipologias_extra: list[str] = field(default_factory=list)
     pct_local_pb: float = 0.0                       # % útil PB destinado a local no residencial
     pct_otros_pb: float = 0.0                       # % útil PB destinado a otros usos
     pct_usos_comunes_pb: float = 0.0                # % útil PB para usos comunes (AT / hoteles)
-    pct_unidades_adaptadas: float = 5.0
 
 
 @dataclass
@@ -175,16 +240,12 @@ class ParametrosRender:
             CATEGORIA_A_NUM_DORMS,
             TIPOLOGIA_APT_A_NUM_DORMS,
             TIPOLOGIA_HABITACION_A_PLAZAS,
-            TIPOLOGIA_HAP_A_NUM_DORMS,
         )
 
         uso = programa.uso
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             n_dorms = TIPOLOGIA_APT_A_NUM_DORMS.get(programa.tipologia_apartamento, 1)
             categoria_label = programa.categoria_apartamentos.value
-        elif uso == UsoEdificio.HOTEL_APARTAMENTO:
-            n_dorms = TIPOLOGIA_HAP_A_NUM_DORMS.get(programa.tipologia_apartamento, 1)
-            categoria_label = programa.categoria_hotel_apartamento.value
         elif uso == UsoEdificio.HOTELERO:
             # "n_dorms" para hotelero es solo etiqueta (plazas de la habitación);
             # el reparto real usa el útil objetivo inyectado por casos_uso.
@@ -232,7 +293,7 @@ class ParametrosRender:
                 # El motor descuenta la SUMA de los patios definidos por planta;
                 # el mínimo normativo (`area_patio_min_m2`) queda solo como
                 # referencia para la validación de cumplimiento.
-                area_patio_min=sum(max(0.0, float(a)) for a in self.urbanisticos.patios),
+                area_patio_min=sum(area_de_patio(pd) for pd in self.urbanisticos.patios),
                 pct_muros=pct_muros,
                 pct_muros_interior=pct_muros_interior,
                 pct_circulacion_pb=pct_circulacion_pb,
@@ -244,6 +305,7 @@ class ParametrosRender:
                 coeficiente_edificabilidad=self.urbanisticos.coeficiente_edificabilidad,
                 usar_coeficiente_edificabilidad=self.urbanisticos.usar_coeficiente_edificabilidad,
                 ocupacion_maxima=max(0.0, min(1.0, self.urbanisticos.ocupacion_maxima_pct / 100.0)),
+                ocupacion_maxima_tipo=max(0.0, min(1.0, self.urbanisticos.ocupacion_maxima_pct_tipo / 100.0)),
                 n_plantas_max=self.urbanisticos.n_plantas_max,
                 retranqueo_fachada=self.urbanisticos.retranqueo_fachada_m,
                 retranqueo_linderos=self.urbanisticos.retranqueo_linderos_m,
@@ -259,17 +321,42 @@ class ParametrosRender:
                 n_dormitorios=n_dorms,
                 salon_cocina_open=programa.salon_cocina_open,
                 n_plantas=self.urbanisticos.n_plantas_max,
-                pct_unidades_adaptadas=programa.pct_unidades_adaptadas,
                 tipologias_extra=tipologias_extra_n,
                 pct_local_pb=max(0.0, min(100.0, float(programa.pct_local_pb))),
                 pct_otros_pb=max(0.0, min(100.0, float(programa.pct_otros_pb))),
                 pct_usos_comunes_pb=max(0.0, min(100.0, float(programa.pct_usos_comunes_pb))),
             ),
+            # Colocación individual de cada patio (polígono libre opcional). El motor
+            # los dibuja uno a uno y los resta del interior; capacidad sigue usando solo
+            # la SUMA de áreas (`area_patio_min`), así los números no se mueven.
+            patios=[
+                PatioPlacementMotor(
+                    area_m2=area_de_patio(pd),
+                    id=(pd.id if isinstance(pd, PatioDef) else ""),
+                    vertices=(pd.vertices if isinstance(pd, PatioDef) else None),
+                    bloqueado=(pd.bloqueado if isinstance(pd, PatioDef) else False),
+                )
+                for pd in self.urbanisticos.patios
+                if area_de_patio(pd) > 0
+            ],
             seed=self.seed,
         )
 
 
 # ─── Serialización JSON ─────────────────────────────────────────────────────
+def _patio_def_a_dict(pd: Any) -> dict[str, Any]:
+    """Serializa un patio para el frontend / persistencia. Emite siempre `id` +
+    `area_m2`, y `vertices` (polígono libre UTM) cuando los hay. Tolera floats legados."""
+    if isinstance(pd, PatioDef):
+        out: dict[str, Any] = {"id": pd.id or "", "area_m2": float(pd.area_m2)}
+        if pd.vertices:
+            out["vertices"] = [[float(x), float(y)] for x, y in pd.vertices]
+        if pd.bloqueado:
+            out["bloqueado"] = True
+        return out
+    return {"id": "", "area_m2": float(pd)}
+
+
 def _diseno_a_dict(d: ParametrosDiseno) -> dict[str, Any]:
     return {
         "espesor_muro_fachada_m": d.espesor_muro_fachada_m,
@@ -297,14 +384,12 @@ def _programa_a_dict(prog: ParametrosPrograma) -> dict[str, Any]:
         "tipologia_habitacion": prog.tipologia_habitacion.value,
         "categoria_apartamentos": prog.categoria_apartamentos.value,
         "tipologia_apartamento": prog.tipologia_apartamento.value,
-        "categoria_hotel_apartamento": prog.categoria_hotel_apartamento.value,
         "grupo_apartamentos": prog.grupo_apartamentos.value,
         "salon_cocina_open": prog.salon_cocina_open,
         "tipologias_extra": list(prog.tipologias_extra),
         "pct_local_pb": prog.pct_local_pb,
         "pct_otros_pb": prog.pct_otros_pb,
         "pct_usos_comunes_pb": prog.pct_usos_comunes_pb,
-        "pct_unidades_adaptadas": prog.pct_unidades_adaptadas,
     }
 
 
@@ -314,17 +399,17 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
             "coeficiente_edificabilidad": p.urbanisticos.coeficiente_edificabilidad,
             "usar_coeficiente_edificabilidad": p.urbanisticos.usar_coeficiente_edificabilidad,
             "ocupacion_maxima_pct": p.urbanisticos.ocupacion_maxima_pct,
+            "ocupacion_maxima_pct_tipo": p.urbanisticos.ocupacion_maxima_pct_tipo,
             "n_plantas_max": p.urbanisticos.n_plantas_max,
             "retranqueo_fachada_m": p.urbanisticos.retranqueo_fachada_m,
             "retranqueo_linderos_m": p.urbanisticos.retranqueo_linderos_m,
             "usos_permitidos": list(p.urbanisticos.usos_permitidos),
             "luz_recta_patio_min_m": p.urbanisticos.luz_recta_patio_min_m,
             "area_patio_min_m2": p.urbanisticos.area_patio_min_m2,
-            "patios": [float(a) for a in p.urbanisticos.patios],
+            "patios": [_patio_def_a_dict(pd) for pd in p.urbanisticos.patios],
             "diametro_max_vestibulo_m": p.urbanisticos.diametro_max_vestibulo_m,
             "espesor_muro_medianero_max_m": p.urbanisticos.espesor_muro_medianero_max_m,
             "espesor_separacion_unidades_max_m": p.urbanisticos.espesor_separacion_unidades_max_m,
-            "pct_unidades_adaptadas_min": p.urbanisticos.pct_unidades_adaptadas_min,
             "ancho_min_fachada_m": p.urbanisticos.ancho_min_fachada_m,
             "espesor_tabique_min_m": p.urbanisticos.espesor_tabique_min_m,
             "ancho_min_pasillo_comun_m": p.urbanisticos.ancho_min_pasillo_comun_m,
@@ -345,6 +430,12 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
         "programa_tipo": _programa_a_dict(p.programa_tipo),
         "seed": p.seed,
     }
+
+
+# Cota dura de plantas: el motor recorre `range(n_plantas)` construyendo geometría
+# con Shapely, así que un POST con un valor enorme colgaría el worker (DoS). 60
+# plantas cubre cualquier edificio real con margen.
+N_PLANTAS_LIMITE = 60
 
 
 def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
@@ -426,14 +517,13 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         tip_apt = _enum(TipologiaApartamento, "tipologia_apartamento", base_prog.tipologia_apartamento)
         cat_hot = _enum(CategoriaHotelero, "categoria_hotelero", base_prog.categoria_hotelero)
         tip_hab = _enum(TipologiaHabitacion, "tipologia_habitacion", base_prog.tipologia_habitacion)
-        cat_hap = _enum(CategoriaHotelApartamento, "categoria_hotel_apartamento", base_prog.categoria_hotel_apartamento)
         # Default tolerante "edificios": JSON antiguos sin el campo no cambian de resultado.
         grupo_apt = _enum(GrupoApartamentos, "grupo_apartamentos", base_prog.grupo_apartamentos)
 
         # Los slugs válidos de la mezcla dependen del uso activo.
         if uso == UsoEdificio.HOTELERO:
             slugs_validos = {"individual", "doble", "triple", "cuadruple", "multiple"}
-        elif uso in (UsoEdificio.APARTAMENTOS_TURISTICOS, UsoEdificio.HOTEL_APARTAMENTO):
+        elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             slugs_validos = {"estudio", "individual", "doble", "triple", "cuadruple"}
         else:  # VIVIENDA
             slugs_validos = {"estudio", "1d", "2d", "3d", "4d+"}
@@ -450,14 +540,12 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             tipologia_habitacion=tip_hab,
             categoria_apartamentos=cat_apt,
             tipologia_apartamento=tip_apt,
-            categoria_hotel_apartamento=cat_hap,
             grupo_apartamentos=grupo_apt,
             salon_cocina_open=_b(node, "salon_cocina_open", base_prog.salon_cocina_open),
             tipologias_extra=tip_extra,
             pct_local_pb=max(0.0, min(100.0, _f(node, "pct_local_pb", base_prog.pct_local_pb))),
             pct_otros_pb=max(0.0, min(100.0, _f(node, "pct_otros_pb", base_prog.pct_otros_pb))),
             pct_usos_comunes_pb=max(0.0, min(100.0, _f(node, "pct_usos_comunes_pb", base_prog.pct_usos_comunes_pb))),
-            pct_unidades_adaptadas=_f(node, "pct_unidades_adaptadas", base_prog.pct_unidades_adaptadas),
         )
 
     urb_in = d.get("urbanisticos") or {}
@@ -479,33 +567,38 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         retr_fachada = 0.0
         retr_linderos = r_old
 
+    # Ocupación máxima: PB y plantas tipo. Si el JSON no trae la clave de tipo,
+    # HEREDA la de PB → un proyecto con una sola ocupación da la misma huella en
+    # todas las plantas (comportamiento idéntico al histórico).
+    ocup_pb = _f(urb_in, "ocupacion_maxima_pct", base.urbanisticos.ocupacion_maxima_pct)
+    ocup_tipo = _f(urb_in, "ocupacion_maxima_pct_tipo", ocup_pb)
+
     usos_raw = urb_in.get("usos_permitidos") or list(base.urbanisticos.usos_permitidos)
     usos_validos = [str(v) for v in usos_raw if isinstance(v, str) and v in USOS_PGOU_VALIDOS]
     if not usos_validos:
         usos_validos = list(base.urbanisticos.usos_permitidos)
 
-    # Patios reales del edificio (lista de áreas en m²). Si la clave está presente
-    # se respeta tal cual (lista vacía = sin patios, intencional). JSON legado sin
-    # la clave → un patio del área mínima normativa, preservando el patio único
-    # histórico.
+    # Patios reales del edificio. Cada entrada admite un número suelto (= solo área,
+    # auto-colocado, formato histórico) o un objeto `{area_m2|area, id?, vertices?}`
+    # (polígono libre editado en el lienzo). Si la clave está presente se respeta tal
+    # cual (lista vacía = sin patios, intencional). JSON legado sin la clave → un patio
+    # del área mínima normativa, preservando el patio único histórico.
     area_patio_min = _f(urb_in, "area_patio_min_m2", base.urbanisticos.area_patio_min_m2)
     if "patios" in urb_in:
-        patios: list[float] = []
-        for a in (urb_in.get("patios") or []):
-            try:
-                v = float(a)
-            except (TypeError, ValueError):
-                continue
-            if v > 0:
-                patios.append(v)
+        patios: list[PatioDef] = []
+        for item in (urb_in.get("patios") or []):
+            pd = _parse_patio(item)
+            if pd is not None:
+                patios.append(pd)
     else:
-        patios = [area_patio_min] if area_patio_min > 0 else []
+        patios = [PatioDef(area_m2=area_patio_min)] if area_patio_min > 0 else []
 
     urb = ParametrosUrbanisticos(
         coeficiente_edificabilidad=coef,
         usar_coeficiente_edificabilidad=_b(urb_in, "usar_coeficiente_edificabilidad", base.urbanisticos.usar_coeficiente_edificabilidad),
-        ocupacion_maxima_pct=_f(urb_in, "ocupacion_maxima_pct", base.urbanisticos.ocupacion_maxima_pct),
-        n_plantas_max=_i(urb_in, "n_plantas_max", base.urbanisticos.n_plantas_max),
+        ocupacion_maxima_pct=ocup_pb,
+        ocupacion_maxima_pct_tipo=ocup_tipo,
+        n_plantas_max=max(1, min(_i(urb_in, "n_plantas_max", base.urbanisticos.n_plantas_max), N_PLANTAS_LIMITE)),
         retranqueo_fachada_m=retr_fachada,
         retranqueo_linderos_m=retr_linderos,
         usos_permitidos=usos_validos,
@@ -515,7 +608,6 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         diametro_max_vestibulo_m=_f(urb_in, "diametro_max_vestibulo_m", base.urbanisticos.diametro_max_vestibulo_m),
         espesor_muro_medianero_max_m=_f(urb_in, "espesor_muro_medianero_max_m", base.urbanisticos.espesor_muro_medianero_max_m),
         espesor_separacion_unidades_max_m=_f(urb_in, "espesor_separacion_unidades_max_m", base.urbanisticos.espesor_separacion_unidades_max_m),
-        pct_unidades_adaptadas_min=_f(urb_in, "pct_unidades_adaptadas_min", base.urbanisticos.pct_unidades_adaptadas_min),
         ancho_min_fachada_m=_f(urb_in, "ancho_min_fachada_m", base.urbanisticos.ancho_min_fachada_m),
         espesor_tabique_min_m=_f(urb_in, "espesor_tabique_min_m", base.urbanisticos.espesor_tabique_min_m),
         ancho_min_pasillo_comun_m=_f(urb_in, "ancho_min_pasillo_comun_m", base.urbanisticos.ancho_min_pasillo_comun_m),
@@ -546,13 +638,11 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             "uso": programa.uso.value,
             "categoria_apartamentos": programa.categoria_apartamentos.value,
             "grupo_apartamentos": programa.grupo_apartamentos.value,
-            "categoria_hotel_apartamento": programa.categoria_hotel_apartamento.value,
             "categoria_hotelero": programa.categoria_hotelero.value,
             "salon_cocina_open": programa.salon_cocina_open,
             "pct_local_pb": programa.pct_local_pb,
             "pct_otros_pb": programa.pct_otros_pb,
             "pct_usos_comunes_pb": programa.pct_usos_comunes_pb,
-            "pct_unidades_adaptadas": programa.pct_unidades_adaptadas,
             "categoria_vivienda": prog_tipo_node.get("categoria_vivienda", programa.categoria_vivienda.value),
             "tipologia_apartamento": prog_tipo_node.get("tipologia_apartamento", programa.tipologia_apartamento.value),
             "tipologia_habitacion": prog_tipo_node.get("tipologia_habitacion", programa.tipologia_habitacion.value),

@@ -85,7 +85,7 @@ def test_parametros_patios_round_trip():
     p = ParametrosRender()
     p.urbanisticos.patios = [10.0, 8.0]
     p2 = parametros_desde_dict(parametros_a_dict(p))
-    assert p2.urbanisticos.patios == [10.0, 8.0]
+    assert [pd.area_m2 for pd in p2.urbanisticos.patios] == [10.0, 8.0]
     p3 = parametros_desde_dict({"urbanisticos": {"patios": []}})
     assert p3.urbanisticos.patios == []
 
@@ -95,7 +95,7 @@ def test_parametros_patios_migracion_legado():
     se siembra `[area_patio_min_m2]`."""
     legado = {"urbanisticos": {"area_patio_min_m2": 12.0}}  # sin "patios"
     p = parametros_desde_dict(legado)
-    assert p.urbanisticos.patios == [12.0]
+    assert [pd.area_m2 for pd in p.urbanisticos.patios] == [12.0]
 
 
 def test_aviso_cuando_un_patio_no_alcanza_el_area_minima():
