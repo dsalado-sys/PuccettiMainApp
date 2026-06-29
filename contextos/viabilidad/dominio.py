@@ -39,7 +39,6 @@ class FuenteSuperficie(str, Enum):
 # Defaults económicos para Sevilla 2026 — heredados del módulo
 # Modulos/restricciones_app/restricciones/modelo.py:83-96.
 PRECIO_VENTA_DEFAULT_EUR_M2 = 3200.0
-PRECIO_RENTA_DEFAULT_EUR_M2_MES = 15.0
 COSTE_DEFAULT_OBRA_NUEVA_EUR_M2 = 1400.0
 COSTE_DEFAULT_REHABILITACION_EUR_M2 = 900.0
 PCT_INDIRECTOS_DEFAULT = 0.18

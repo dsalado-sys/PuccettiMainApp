@@ -3,8 +3,11 @@
 (function () {
   "use strict";
 
-  const COLOR_FACHADA = "#B8960C";
-  const COLOR_MEDIANERA = "#0A0A0A";
+  // Colores de fachada/medianera leídos de los tokens corporativos en runtime
+  // (una sola fuente de verdad en puccetti.css); literal como fallback.
+  const css = getComputedStyle(document.documentElement);
+  const COLOR_FACHADA = css.getPropertyValue("--dorado").trim() || "#B8960C";
+  const COLOR_MEDIANERA = css.getPropertyValue("--negro").trim() || "#0A0A0A";
   const PESO_LADO = 4;
 
   const cfg = window.PUCCETTI_LOC || {};
@@ -74,8 +77,12 @@
   // ── Tabs ─────────────────────────────────────────────────────────────────
   document.querySelectorAll(".loc-tab").forEach(function (btn) {
     btn.addEventListener("click", function () {
-      document.querySelectorAll(".loc-tab").forEach(function (b) { b.classList.remove("activo"); });
+      document.querySelectorAll(".loc-tab").forEach(function (b) {
+        b.classList.remove("activo");
+        b.setAttribute("aria-selected", "false");
+      });
       btn.classList.add("activo");
+      btn.setAttribute("aria-selected", "true");
       const tab = btn.dataset.tab;
       document.querySelectorAll(".loc-panel").forEach(function (p) {
         p.classList.toggle("oculto", p.dataset.panel !== tab);
@@ -390,7 +397,6 @@
     pintarCardsSubref(parcela);
     pintarAgregados(parcela);
     pintarDatosCatastrales(parcela);
-    actualizarToggleCards();
 
     bloquearSlider = true;
     slider.value = parcela.tolerancia_simplificacion_m || 0;
@@ -592,6 +598,7 @@
       // Orientación cardinal — editable
       const tdOri = document.createElement("td");
       const selOri = document.createElement("select");
+      selOri.className = "select";
       ["N", "NE", "E", "SE", "S", "SO", "O", "NO"].forEach(function (o) {
         const opt = document.createElement("option");
         opt.value = o;
@@ -609,6 +616,7 @@
 
       const tdTipo = document.createElement("td");
       const sel = document.createElement("select");
+      sel.className = "select";
       ["fachada", "medianera"].forEach(function (t) {
         const opt = document.createElement("option");
         opt.value = t;
@@ -676,28 +684,14 @@
     box.className = "loc-mensaje oculto";
   }
 
-  // ── Toggles de sidebar y de columna de cards ─────────────────────────────
+  // ── Toggle del sidebar ───────────────────────────────────────────────────
   const layout = document.getElementById("loc-layout");
   const btnToggleSidebar = document.getElementById("toggle-sidebar");
-  const btnToggleCards = document.getElementById("toggle-cards");
   if (btnToggleSidebar) {
     btnToggleSidebar.addEventListener("click", function () {
       layout.classList.toggle("sidebar-oculto");
       setTimeout(function () { if (mapa) mapa.invalidateSize(); }, 220);
     });
-  }
-  if (btnToggleCards) {
-    btnToggleCards.addEventListener("click", function () {
-      layout.classList.toggle("cards-oculto");
-      setTimeout(function () { if (mapa) mapa.invalidateSize(); }, 220);
-    });
-  }
-
-  // Mostrar/ocultar el botón de cards según haya o no subreferencias.
-  function actualizarToggleCards() {
-    if (!btnToggleCards) return;
-    const subref = document.getElementById("loc-subref");
-    btnToggleCards.hidden = subref.classList.contains("oculto");
   }
 
   // ── Guardar como proyecto: spinner + bloqueo al enviar ──────────────────

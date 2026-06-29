@@ -5,6 +5,18 @@ __pycache__/
 # Base de datos local (solo backups; puccetti.sqlite se trackea)
 app/data/*.db
 
+# SQLite: artefactos volátiles y BBDD temporales/de verificación (no trackear)
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+_verify_*.sqlite
+tmptmp.*.sqlite
+
+# Copias de seguridad
+*.bak
+*~
+app/data/*backup*.json
+
 # Entornos virtuales
 .venv/
 venv/

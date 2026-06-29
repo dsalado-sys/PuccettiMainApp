@@ -23,6 +23,10 @@
     error: "#8C2A1F",
   };
 
+  const ZOOM_MIN = 1;     // encaje a la bbox = lo más alejado
+  const ZOOM_MAX = 12;
+  const ZOOM_PASO = 1.1;  // factor por muesca de rueda
+
   class RenderCanvas {
     constructor(canvasEl) {
       this.cv = canvasEl;
@@ -35,12 +39,62 @@
       this.rotationDeg = 0;
       this._lastPayload = null;
       this._lastIndicePlanta = 0;
+      this._overlay = null;   // capa de edición (patios): fn(renderer) en ctx ya rotado
+      // Vista del usuario (zoom). Persiste entre repintados mientras la parcela (bbox)
+      // no cambie; al cambiar de parcela, `_calcViewport` re-encaja.
+      this._vistaUsuario = false;
+      this._fitBbox = null;
+      this._zoom = 1;         // multiplicador relativo al encaje
+      this._bindZoom();
+    }
+
+    // Zoom con Ctrl + rueda del ratón, centrado en el cursor.
+    _bindZoom() {
+      this.cv.addEventListener("wheel", (e) => {
+        if (!e.ctrlKey) return;        // sin Ctrl → scroll normal de la página
+        e.preventDefault();            // Ctrl+rueda = zoom de página; lo capturamos aquí
+        const r = this.cv.getBoundingClientRect();
+        this.zoomEn(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? ZOOM_PASO : 1 / ZOOM_PASO);
+      }, { passive: false });
+    }
+
+    // Acerca/aleja fijando bajo el cursor el mismo punto del mundo (respeta la rotación
+    // de la brújula, igual que `_pantallaAMundo`).
+    zoomEn(px, py, factor) {
+      const nuevo = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, this._zoom * factor));
+      if (nuevo <= ZOOM_MIN) { this.resetVista(); return; }   // al mínimo, encaje limpio
+      const ef = nuevo / this._zoom;                          // factor efectivo tras el clamp
+      if (ef === 1) return;
+      const [rx, ry] = this._rotarPunto(px, py, -this.rotationDeg);   // píxel sin rotar
+      const wx = (rx - this.origenX) / this.scale;
+      const wy = (this.origenY - ry) / this.scale;            // mundo bajo el cursor
+      this.scale *= ef;
+      this.origenX = rx - wx * this.scale;                    // recoloca para fijar (wx,wy)
+      this.origenY = ry + wy * this.scale;
+      this._zoom = nuevo;
+      this._vistaUsuario = true;
+      this.repintar();
+    }
+
+    // Vuelve al encaje a la bbox en el próximo dibujado.
+    resetVista() {
+      this._vistaUsuario = false;
+      this._zoom = 1;
+      this.repintar();
     }
 
     setRotation(deg) {
       this.rotationDeg = ((deg % 360) + 360) % 360;
+      this.repintar();
+    }
+
+    repintar() {
       if (this._lastPayload) this.dibujar(this._lastPayload, this._lastIndicePlanta);
     }
+
+    // Capa de edición opcional, dibujada al final de `dibujar` dentro del contexto
+    // YA rotado (así los tiradores se pegan a la geometría girada por la brújula).
+    setOverlay(fn) { this._overlay = fn; }
 
     _ajustarTamano() {
       const dpr = window.devicePixelRatio || 1;
@@ -56,7 +110,19 @@
       this.hPx = h;
     }
 
+    _mismaBbox(a, b) {
+      if (!a || !b || a.length < 4 || b.length < 4) return false;
+      for (let i = 0; i < 4; i++) if (Math.abs(a[i] - b[i]) > 1e-6) return false;
+      return true;
+    }
+
     _calcViewport(bbox) {
+      // Si el usuario tiene zoom y la parcela (bbox) no cambió, conservamos su vista
+      // (scale/origen) para que el zoom persista entre repintados y pestañas de planta.
+      if (this._vistaUsuario && this._mismaBbox(bbox, this._fitBbox)) {
+        this.bbox = bbox;
+        return;
+      }
       const [mnx, mny, mxx, mxy] = bbox;
       const W = mxx - mnx, H = mxy - mny;
       if (W <= 0 || H <= 0) { this.scale = 1; this.origenX = 0; this.origenY = 0; return; }
@@ -67,10 +133,35 @@
       this.origenX = this.padPx + (dispW - W * this.scale) / 2 - mnx * this.scale;
       this.origenY = this.padPx + (dispH - H * this.scale) / 2 + mxy * this.scale; // invertimos Y
       this.bbox = bbox;
+      // Nuevo encaje (parcela distinta o primera vez): resetea la vista del usuario.
+      this._fitBbox = bbox;
+      this._vistaUsuario = false;
+      this._zoom = 1;
     }
 
     _x(x) { return this.origenX + x * this.scale; }
     _y(y) { return this.origenY - y * this.scale; }
+
+    // --- Inversas pantalla→mundo (edición interactiva de patios) ---
+    // Rota (px,py) `deg` grados alrededor del centro del lienzo (igual que `dibujar`).
+    _rotarPunto(px, py, deg) {
+      if (!deg) return [px, py];
+      const rad = deg * Math.PI / 180;
+      const cx = this.wPx / 2, cy = this.hPx / 2;
+      const dx = px - cx, dy = py - cy;
+      const c = Math.cos(rad), s = Math.sin(rad);
+      return [cx + dx * c - dy * s, cy + dx * s + dy * c];
+    }
+    // Pixel de lienzo (CSS px, ya restado el getBoundingClientRect) → coordenada UTM.
+    // Primero deshace la rotación global de la brújula, luego invierte _x/_y.
+    _pantallaAMundo(px, py) {
+      const [rx, ry] = this._rotarPunto(px, py, -this.rotationDeg);
+      return [(rx - this.origenX) / this.scale, (this.origenY - ry) / this.scale];
+    }
+    // Inverso exacto de _pantallaAMundo: UTM → pixel de lienzo (hit-test de tiradores).
+    _mundoAPantalla(x, y) {
+      return this._rotarPunto(this.origenX + x * this.scale, this.origenY - y * this.scale, this.rotationDeg);
+    }
 
     _trazarPoligono(ring, fill, stroke, lineWidth) {
       if (!ring || ring.length < 2) return;
@@ -184,7 +275,8 @@
       ctx.fillText(unidad.id, this._x(cx), this._y(cy) - 6);
       ctx.font = "10px Helvetica Neue, Inter, sans-serif";
       ctx.fillStyle = unidad.cumple_minimos ? "#2a2a2a" : COLOR.error;
-      ctx.fillText(unidad.area_util_m2.toFixed(1) + " m²", this._x(cx), this._y(cy) + 7);
+      // es-ES: coma decimal en la etiqueta de superficie del canvas.
+      ctx.fillText(unidad.area_util_m2.toFixed(1).replace(".", ",") + " m²", this._x(cx), this._y(cy) + 7);
       if (unidad.es_adaptada) {
         ctx.fillStyle = COLOR.dorado;
         ctx.font = "9px Helvetica Neue, Inter, sans-serif";
@@ -320,6 +412,10 @@
         this._dibujarLado(l);
         this._etiquetaOrientacion(l);
       });
+
+      // Capa de edición de patios (tiradores, selección, arrastre en vivo). Se
+      // dibuja en el contexto YA rotado para pegarse a la geometría de la planta.
+      if (this._overlay) this._overlay(this);
     }
   }
 

@@ -11,6 +11,8 @@ como geometría en el MVP — se restan del techo útil repartible.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field, replace
+
 from .programa import Estancia
 from .programa_uso import ProgramaUso, TipologiaUnidadDescriptor
 
@@ -69,59 +71,84 @@ TIPOLOGIA_HABITACION_A_PLAZAS = {
 }
 
 
-def cargar_desde_repo(catalogo) -> bool:
-    """Vuelca los mínimos editables de BBDD (Anexo I.1) a las constantes del módulo.
+# % de circulación interior de la unidad, editable y compartido con los demás usos.
+PCT_CIRCULACION_INTERIOR = 15.0
 
-    Hermano de `programa.cargar_desde_repo` (vivienda): hace que las ediciones del
-    editor de mínimos lleguen al dimensionado de habitación/baño. Devuelve True si
-    aplicó algún override; False si la BBDD está vacía o falta el método.
+
+# ─── Configuración inmutable del programa (§3.8 — sin globals mutables) ──────
+# Los mínimos editables del Anexo I.1 (habitación + baño derivado) viven en una
+# instancia FROZEN que se pasa como argumento; antes se volcaban a globals
+# (`cargar_desde_repo` / `set_pct_circulacion_interior`), cruzando ediciones entre
+# requests concurrentes y tests (Pendiente 3.8).
+@dataclass(frozen=True)
+class ProgramaHoteleroConfig:
+    min_habitacion: dict[tuple[str, str], float] = field(default_factory=lambda: dict(MIN_HABITACION))
+    min_bano: dict[str, float] = field(default_factory=lambda: dict(MIN_BANO_HOTELERO))
+    pct_circulacion_interior: float = PCT_CIRCULACION_INTERIOR
+
+
+CONFIG_DEFAULT = ProgramaHoteleroConfig()
+
+
+def config_desde_repo(
+    catalogo=None, pct_circulacion_interior: float | None = None,
+) -> ProgramaHoteleroConfig:
+    """Construye un `ProgramaHoteleroConfig` desde la BBDD (Anexo I.1).
+
+    Sustituye a `cargar_desde_repo` (que mutaba globals). Claves ausentes conservan
+    el default; `pct_circulacion_interior`, si se indica (panel), prevalece.
     """
-    obtener = getattr(catalogo, "consolidadas_hotelero", None)
-    if obtener is None:
-        return False
-    datos = obtener() or {}
-    if not datos:
-        return False
-    g = globals()
+    base = CONFIG_DEFAULT
+    obtener = getattr(catalogo, "consolidadas_hotelero", None) if catalogo is not None else None
+    try:
+        datos = (obtener() or {}) if obtener is not None else {}
+    except Exception:
+        datos = {}
+    campos: dict = {}
     hab = datos.get("MIN_HABITACION")
     if isinstance(hab, dict):
-        # Claves tupla (categoria, tipologia); update in-place conserva la referencia.
-        g["MIN_HABITACION"].update({tuple(k): float(v) for k, v in hab.items()})
+        # Claves tupla (categoria, tipologia).
+        nuevo = dict(base.min_habitacion)
+        nuevo.update({tuple(k): float(v) for k, v in hab.items()})
+        campos["min_habitacion"] = nuevo
     banos = datos.get("MIN_BANO_HOTELERO")
     if isinstance(banos, dict):
-        g["MIN_BANO_HOTELERO"].update({str(k): float(v) for k, v in banos.items()})
-    return True
+        nuevo = dict(base.min_bano)
+        nuevo.update({str(k): float(v) for k, v in banos.items()})
+        campos["min_bano"] = nuevo
+    if pct_circulacion_interior is not None:
+        campos["pct_circulacion_interior"] = max(0.0, float(pct_circulacion_interior))
+    return replace(base, **campos) if campos else base
 
 
 def _cat_validada(categoria: str) -> str:
     return categoria if categoria in SALON_SOCIAL_MIN else "hotel_3"
 
 
-def tipologias_validas(categoria: str) -> list[str]:
-    """Tipos de habitación ofrecidos por la categoría (según el Anexo I.1)."""
+def _habitacion_min(
+    categoria: str, tipo: str, cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT,
+) -> float:
     cat = _cat_validada(categoria)
-    return [tipo for (c, tipo) in MIN_HABITACION if c == cat]
-
-
-def _habitacion_min(categoria: str, tipo: str) -> float:
-    cat = _cat_validada(categoria)
-    if (cat, tipo) in MIN_HABITACION:
-        return MIN_HABITACION[(cat, tipo)]
+    if (cat, tipo) in cfg.min_habitacion:
+        return cfg.min_habitacion[(cat, tipo)]
     # Fallback: la doble de la categoría, o 12 m².
-    return MIN_HABITACION.get((cat, "doble"), 12.0)
+    return cfg.min_habitacion.get((cat, "doble"), 12.0)
 
 
-def _bano_target(categoria: str) -> float:
+def _bano_target(categoria: str, cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT) -> float:
     cat = _cat_validada(categoria)
-    return (MIN_BANO_HOTELERO[cat] + 0.5) if BANO_INTERIOR_OBLIGATORIO[cat] else 0.0
+    return (cfg.min_bano[cat] + 0.5) if BANO_INTERIOR_OBLIGATORIO[cat] else 0.0
 
 
-def programa_habitacion(tipo: str, categoria: str, util_disponible: float) -> list[Estancia]:
+def programa_habitacion(
+    tipo: str, categoria: str, util_disponible: float,
+    cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT,
+) -> list[Estancia]:
     """Estancias de una unidad de alojamiento hotelera (habitación + baño opcional)."""
     cat = _cat_validada(categoria)
-    room_min = _habitacion_min(cat, tipo)
-    bano_min = MIN_BANO_HOTELERO[cat]
-    bano_tgt = _bano_target(cat)
+    room_min = _habitacion_min(cat, tipo, cfg)
+    bano_min = cfg.min_bano[cat]
+    bano_tgt = _bano_target(cat, cfg)
 
     room_target = max(room_min, util_disponible - bano_tgt)
     estancias = [Estancia("habitacion", "privada", room_min, room_target)]
@@ -130,29 +157,22 @@ def programa_habitacion(tipo: str, categoria: str, util_disponible: float) -> li
     return estancias
 
 
-# % de circulación interior de la unidad, editable y compartido con los demás
-# usos (antes 1.15 fijo). `casos_uso` lo fija con `set_pct_circulacion_interior`.
-PCT_CIRCULACION_INTERIOR = 15.0
+def _factor_circulacion(cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT) -> float:
+    return 1.0 + cfg.pct_circulacion_interior / 100.0
 
 
-def set_pct_circulacion_interior(pct: float) -> None:
-    """Fija el % de circulación interior (panel de diseño → motor)."""
-    global PCT_CIRCULACION_INTERIOR
-    PCT_CIRCULACION_INTERIOR = max(0.0, float(pct))
-
-
-def _factor_circulacion() -> float:
-    return 1.0 + PCT_CIRCULACION_INTERIOR / 100.0
-
-
-def util_minimo_habitacion(categoria: str, tipo: str) -> float:
+def util_minimo_habitacion(
+    categoria: str, tipo: str, cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT,
+) -> float:
     cat = _cat_validada(categoria)
-    return round(_habitacion_min(cat, tipo) + _bano_target(cat), 2)
+    return round(_habitacion_min(cat, tipo, cfg) + _bano_target(cat, cfg), 2)
 
 
-def util_objetivo_habitacion(categoria: str, tipo: str) -> float:
+def util_objetivo_habitacion(
+    categoria: str, tipo: str, cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT,
+) -> float:
     """Objetivo de m² útil por unidad: mínimo + % circulación interior."""
-    return round(util_minimo_habitacion(categoria, tipo) * _factor_circulacion(), 2)
+    return round(util_minimo_habitacion(categoria, tipo, cfg) * _factor_circulacion(cfg), 2)
 
 
 def areas_sociales_obligatorias_hotel(
@@ -179,8 +199,10 @@ def total_sociales_obligatorias_m2(
     return sum(areas_sociales_obligatorias_hotel(n_unidades_estimado, n_plazas_estimado, categoria).values())
 
 
-def descriptor_tipologia_hotelero(categoria: str, tipo: str) -> TipologiaUnidadDescriptor:
-    util_obj = util_objetivo_habitacion(categoria, tipo)
+def descriptor_tipologia_hotelero(
+    categoria: str, tipo: str, cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT,
+) -> TipologiaUnidadDescriptor:
+    util_obj = util_objetivo_habitacion(categoria, tipo, cfg)
     plazas = TIPOLOGIA_HABITACION_A_PLAZAS.get(tipo, 2)
     return TipologiaUnidadDescriptor(
         slug=tipo,
@@ -199,9 +221,10 @@ def programa_uso_hotelero(
     tipo: str,
     n_unidades_estimado: int = 1,
     n_plazas_estimado: int = 1,
+    cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT,
 ) -> ProgramaUso:
-    util_obj = util_objetivo_habitacion(categoria, tipo)
-    util_min = util_minimo_habitacion(categoria, tipo)
+    util_obj = util_objetivo_habitacion(categoria, tipo, cfg)
+    util_min = util_minimo_habitacion(categoria, tipo, cfg)
     sociales = total_sociales_obligatorias_m2(n_unidades_estimado, n_plazas_estimado, categoria)
     return ProgramaUso(
         util_objetivo_unidad_m2=util_obj,

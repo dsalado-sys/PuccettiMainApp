@@ -1,71 +1,164 @@
 {% extends "base.html" %}
 {% block titulo %}Puccetti · Proyectos{% endblock %}
 
+{% block head %}
+<link rel="stylesheet" href="/static/css/proyectos.css?v={{ estaticos_version }}" />
+{% endblock %}
+
 {% block contenido %}
+
 <section class="hero">
-  <h1>Proyectos</h1>
-  <p>Un proyecto es la unidad que comparten los módulos: localización, viabilidad, render e informe leen y escriben sobre él.</p>
+  <div class="hero-titulo">
+    <span class="eyebrow eyebrow--oro">Espacio de trabajo</span>
+    <h1>Proyectos</h1>
+  </div>
+  <div class="hero-acciones">
+    <span id="pr-toast" class="toast" role="status" aria-live="polite"></span>
+  </div>
 </section>
 
-{% if puede_editar %}
-<section class="formulario-bloque">
-  <h2>Crear nuevo proyecto</h2>
-  <p class="loc-hint">
-    La referencia catastral y la dirección se completarán automáticamente al
-    guardar una parcela en este proyecto desde el módulo «Buscar parcela».
-  </p>
-  <form method="post" action="/proyectos" class="form-vertical">
-    <label>
-      Nombre
-      <input type="text" name="nombre" required placeholder="Ej. Residencial Macarena 12" />
-    </label>
-    <button type="submit" class="boton-primario">Crear y abrir</button>
-  </form>
+<section class="pr-layout"
+         data-puede-editar="{{ 'true' if puede_editar else 'false' }}"
+         data-activo-id="{{ proyecto_activo.id if proyecto_activo else '' }}">
+
+  <!-- ─── Columna izquierda: carpetas + proyectos ─── -->
+  <aside class="pr-col-carpetas card" aria-label="Carpetas de proyectos">
+    <header class="pr-col-header">
+      <h2 class="eyebrow">Carpetas</h2>
+      <div class="pr-col-acciones">
+        <label class="buscador" aria-label="Buscar proyecto o carpeta">
+          <span class="icono-lupa" aria-hidden="true">⌕</span>
+          <input type="text" id="pr-buscar" placeholder="Buscar…" autocomplete="off">
+        </label>
+        {% if puede_editar %}
+        <button type="button" id="pr-btn-nueva-carpeta" class="boton-secundario">+ Carpeta</button>
+        <button type="button" id="pr-btn-nuevo-proyecto" class="boton-primario">+ Proyecto</button>
+        {% endif %}
+      </div>
+    </header>
+    <div id="pr-lista" class="pr-lista">
+      <p class="pr-vacio">Cargando…</p>
+    </div>
+  </aside>
+
+  <!-- ─── Columna derecha: detalle del proyecto seleccionado ─── -->
+  <section class="pr-col-datos card" aria-label="Detalle del proyecto">
+    <header class="pr-col-header">
+      <h2 id="pr-detalle-titulo">Selecciona un proyecto</h2>
+    </header>
+
+    <div id="pr-detalle" class="pr-detalle" hidden>
+      <div class="pr-bloque">
+        <h3 class="eyebrow">Estado de sesión</h3>
+        <p id="pr-activo-aviso" class="pr-activo-aviso"></p>
+        <div class="pr-detalle-acciones">
+          <button type="button" id="pr-btn-activar" class="boton-primario">Abrir proyecto</button>
+          <button type="button" id="pr-btn-desactivar" class="boton-secundario" hidden>
+            Deseleccionar proyecto
+          </button>
+        </div>
+      </div>
+
+      <div class="pr-bloque">
+        <h3 class="eyebrow">Datos</h3>
+        <dl class="pr-datos-lista">
+          <div><dt class="eyebrow">Referencia catastral</dt><dd id="pr-d-rc">—</dd></div>
+          <div><dt class="eyebrow">Dirección</dt><dd id="pr-d-direccion">—</dd></div>
+          <div><dt class="eyebrow">Estado</dt><dd><span id="pr-d-estado" class="status-pill badge--gris">—</span></dd></div>
+          <div><dt class="eyebrow">Actualizado</dt><dd id="pr-d-actualizado">—</dd></div>
+        </dl>
+      </div>
+
+      {% if puede_editar %}
+      <div class="pr-bloque">
+        <h3 class="eyebrow">Organización</h3>
+        <label class="pr-campo">
+          <span class="pr-campo-label">Carpeta</span>
+          <select id="pr-d-carpeta" class="select"></select>
+        </label>
+      </div>
+
+      <div class="pr-bloque pr-bloque-peligro">
+        <h3 class="eyebrow">Zona de peligro</h3>
+        <button type="button" id="pr-btn-eliminar" class="boton-peligro">Eliminar proyecto</button>
+      </div>
+      {% endif %}
+    </div>
+  </section>
 </section>
-{% else %}
-<section class="aviso aviso-info">
-  Tu rol <strong>{{ rol_activo.value }}</strong> puede consultar proyectos pero no crearlos ni eliminarlos.
+
+{% if not puede_editar %}
+<section class="aviso aviso-info pr-aviso-rol">
+  Tu rol <strong>{{ rol_activo.value }}</strong> puede consultar proyectos pero no crearlos, moverlos ni eliminarlos.
 </section>
 {% endif %}
 
-<section class="tabla-proyectos">
-  <h2>Proyectos existentes</h2>
-  {% if proyectos %}
-    <table>
-      <thead>
-        <tr>
-          <th>Nombre</th>
-          <th>RC</th>
-          <th>Estado</th>
-          <th>Actualizado</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in proyectos %}
-          <tr {% if proyecto_activo and proyecto_activo.id == p.id %}class="activo"{% endif %}>
-            <td>{{ p.nombre }}</td>
-            <td>{{ p.referencia_catastral or "—" }}</td>
-            <td>{{ p.estado.value }}</td>
-            <td>{{ p.actualizado_en.strftime("%Y-%m-%d %H:%M") }}</td>
-            <td class="acciones">
-              <form method="post" action="/sesion/proyecto">
-                <input type="hidden" name="proyecto_id" value="{{ p.id }}" />
-                <button type="submit" class="boton-secundario">Abrir</button>
-              </form>
-              {% if puede_editar %}
-                <form method="post" action="/proyectos/{{ p.id }}/eliminar"
-                      onsubmit="return confirm('¿Eliminar el proyecto «{{ p.nombre }}»?');">
-                  <button type="submit" class="boton-peligro">Eliminar</button>
-                </form>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p class="vacio">Aún no hay proyectos. Crea el primero para empezar.</p>
-  {% endif %}
-</section>
+{# Submodal: crear carpeta #}
+<dialog id="pr-submodal-carpeta" class="modal modal--sm">
+  <article class="modal-card">
+    <header class="modal-header">
+      <h3>Nueva carpeta</h3>
+      <button type="button" class="modal-cerrar" data-cerrar="pr-submodal-carpeta" aria-label="Cerrar">×</button>
+    </header>
+    <div class="modal-cuerpo">
+      <label class="pr-campo">
+        <span class="pr-campo-label">Nombre</span>
+        <input type="text" id="pr-submodal-carpeta-nombre" class="campo-input" maxlength="120" autocomplete="off"
+               placeholder="Ej. Sevilla 2026">
+      </label>
+    </div>
+    <footer class="modal-acciones">
+      <button type="button" class="boton-secundario" data-cerrar="pr-submodal-carpeta">Cancelar</button>
+      <button type="button" id="pr-submodal-carpeta-guardar" class="boton-primario">Guardar</button>
+    </footer>
+  </article>
+</dialog>
+
+{# Submodal: nuevo proyecto #}
+<dialog id="pr-submodal-proyecto" class="modal modal--sm">
+  <article class="modal-card">
+    <header class="modal-header">
+      <h3>Nuevo proyecto</h3>
+      <button type="button" class="modal-cerrar" data-cerrar="pr-submodal-proyecto" aria-label="Cerrar">×</button>
+    </header>
+    <div class="modal-cuerpo">
+      <label class="pr-campo">
+        <span class="pr-campo-label">Nombre</span>
+        <input type="text" id="pr-submodal-proyecto-nombre" class="campo-input" maxlength="200" autocomplete="off"
+               placeholder="Ej. Residencial Macarena 12">
+      </label>
+      <label class="pr-campo">
+        <span class="pr-campo-label">Carpeta</span>
+        <select id="pr-submodal-proyecto-carpeta" class="select"></select>
+      </label>
+      <p class="modal-sub">
+        La referencia catastral y la dirección se completan solas al guardar una
+        parcela en el proyecto desde «Buscar parcela».
+      </p>
+    </div>
+    <footer class="modal-acciones">
+      <button type="button" class="boton-secundario" data-cerrar="pr-submodal-proyecto">Cancelar</button>
+      <button type="button" id="pr-submodal-proyecto-guardar" class="boton-primario">Crear</button>
+    </footer>
+  </article>
+</dialog>
+
+{# Submodal: confirmar eliminación #}
+<dialog id="pr-submodal-confirmar" class="modal modal--sm">
+  <article class="modal-card">
+    <header class="modal-header">
+      <h3>Confirmar eliminación</h3>
+      <button type="button" class="modal-cerrar" data-cerrar="pr-submodal-confirmar" aria-label="Cerrar">×</button>
+    </header>
+    <div class="modal-cuerpo">
+      <p id="pr-submodal-confirmar-msg">¿Estás seguro?</p>
+    </div>
+    <footer class="modal-acciones">
+      <button type="button" class="boton-secundario" data-cerrar="pr-submodal-confirmar">Cancelar</button>
+      <button type="button" id="pr-submodal-confirmar-ok" class="boton-peligro--solido">Eliminar</button>
+    </footer>
+  </article>
+</dialog>
+
+<script src="/static/js/proyectos.js?v={{ estaticos_version }}" defer></script>
 {% endblock %}

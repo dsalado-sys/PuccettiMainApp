@@ -53,7 +53,8 @@ class ParametrosUrbanisticos:
     """
     coeficiente_edificabilidad: float = 2.5
     usar_coeficiente_edificabilidad: bool = True
-    ocupacion_maxima: float = 1.00
+    ocupacion_maxima: float = 1.00       # ocupación de la PLANTA BAJA (y sótano)
+    ocupacion_maxima_tipo: float = 1.00  # ocupación de las PLANTAS TIPO (y ático)
     n_plantas_max: int = 3
     retranqueo_fachada: float = 0.0
     retranqueo_linderos: float = 0.0
@@ -73,11 +74,24 @@ class ParametrosPrograma:
     n_dormitorios: int = 2                    # 0 = estudio
     salon_cocina_open: bool = False
     n_plantas: int = 3
-    pct_unidades_adaptadas: float = 5.0       # mínimo accesibilidad
     tipologias_extra: list[int] = field(default_factory=list)  # nº dormitorios adicionales
     pct_local_pb: float = 0.0                 # % útil PB destinado a local no residencial
     pct_otros_pb: float = 0.0                 # % útil PB destinado a otros usos
     pct_usos_comunes_pb: float = 0.0          # % útil PB destinado a usos comunes (AT / hoteles)
+
+
+@dataclass
+class PatioPlacement:
+    """Colocación de un patio para el motor de geometría (neutral, sin dependencias del contexto).
+
+    `area_m2` es el área ASIGNADA (invariante de capacidad). `vertices` es el
+    polígono libre en coordenadas UTM (None = patio sin posición → auto-colocado).
+    `id` da identidad estable para que el frontend siga cada patio entre recálculos.
+    """
+    area_m2: float
+    id: str = ""
+    vertices: Optional[list] = None
+    bloqueado: bool = False   # patio congelado: prioridad máxima de colocación (los demás ceden ante él)
 
 
 @dataclass
@@ -86,6 +100,9 @@ class Parametros:
     diseno: ParametrosDiseno = field(default_factory=ParametrosDiseno)
     urbanismo: ParametrosUrbanisticos = field(default_factory=ParametrosUrbanisticos)
     programa: ParametrosPrograma = field(default_factory=ParametrosPrograma)
+    # Patios reales del edificio (patinejos verticales). Una entrada por patio.
+    # El mismo conjunto se coloca en todas las plantas regulares.
+    patios: list[PatioPlacement] = field(default_factory=list)
     seed: Optional[int] = None
 
 

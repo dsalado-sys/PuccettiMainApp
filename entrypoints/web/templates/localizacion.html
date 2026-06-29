@@ -12,11 +12,14 @@
 
   <aside class="loc-sidebar">
     <div class="loc-tabs" role="tablist">
-      <button type="button" class="loc-tab" data-tab="rc" role="tab">RC</button>
-      <button type="button" class="loc-tab" data-tab="direccion" role="tab">Dirección</button>
+      <button type="button" class="loc-tab" data-tab="rc" role="tab"
+        id="tab-rc" aria-selected="false" aria-controls="form-rc">RC</button>
+      <button type="button" class="loc-tab" data-tab="direccion" role="tab"
+        id="tab-direccion" aria-selected="false" aria-controls="form-direccion">Dirección</button>
     </div>
 
-    <form class="loc-panel oculto" data-panel="rc" id="form-rc" autocomplete="off">
+    <form class="loc-panel oculto" data-panel="rc" id="form-rc" autocomplete="off"
+      role="tabpanel" aria-labelledby="tab-rc">
       <label>
         Referencia catastral
         <input type="text" name="rc" maxlength="20" placeholder="0000000XX0000X0000XX" required />
@@ -24,7 +27,8 @@
       <button type="submit" class="boton-primario">Buscar</button>
     </form>
 
-    <form class="loc-panel oculto" data-panel="direccion" id="form-direccion" autocomplete="off">
+    <form class="loc-panel oculto" data-panel="direccion" id="form-direccion" autocomplete="off"
+      role="tabpanel" aria-labelledby="tab-direccion">
       <label>
         Provincia
         <div class="cb" data-cb="provincia">
@@ -61,7 +65,7 @@
       <h2 id="loc-ficha-titulo"></h2>
 
       <div id="loc-catastro" class="loc-agregados oculto">
-        <h3>Datos catastrales</h3>
+        <h3 class="eyebrow">Datos catastrales</h3>
         <dl>
           <dt>RC</dt>
           <dd id="loc-ficha-rc"></dd>
@@ -89,7 +93,7 @@
       </div>
 
       <div id="loc-agregados" class="loc-agregados oculto">
-        <h3>Agregados de la parcela</h3>
+        <h3 class="eyebrow">Agregados de la parcela</h3>
         <dl>
           <dt title="Total de inmuebles con RC propia: viviendas + locales + garajes + trasteros">Inmuebles totales</dt>
           <dd id="loc-agg-n"></dd>
@@ -111,14 +115,14 @@
           <input type="range" id="slider-simpl" min="0" max="10" step="0.1" value="0" />
         </div>
 
-        <h3>Lados del polígono</h3>
+        <h3 class="eyebrow">Lados del polígono</h3>
         <table class="loc-tabla-lados">
           <thead>
             <tr>
-              <th>#</th>
-              <th>Long.</th>
-              <th>Orientación</th>
-              <th>Tipo</th>
+              <th class="eyebrow">#</th>
+              <th class="eyebrow">Long.</th>
+              <th class="eyebrow">Orientación</th>
+              <th class="eyebrow">Tipo</th>
             </tr>
           </thead>
           <tbody id="loc-lados-tbody"></tbody>
@@ -168,7 +172,7 @@
   {% endif %}
 
   <div id="loc-subref" class="loc-subref oculto">
-    <h3 class="loc-subref-titulo">Inmuebles en la parcela</h3>
+    <h3 class="loc-subref-titulo eyebrow">Inmuebles en la parcela</h3>
     <div id="loc-cards" class="loc-cards"></div>
   </div>
 

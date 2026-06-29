@@ -9,37 +9,44 @@ Está integrado en `app/` (main app) siguiendo arquitectura hexagonal +
 screaming. La lógica de geometría/cálculo vive en `geometria/` aislada
 de FastAPI y SQLAlchemy.
 
+> **Alcance de este README**: documenta la cadena de **cálculo numérico**
+> (envolvente → capacidad → reparto de m² → tablas), que está completa. El
+> **dibujo geométrico de las unidades en planta** (distribuir unidades,
+> repartir m² de estancias como polígonos) **aún no existe**: el campo
+> `edificio` de `/calcular` se devuelve hoy `null`. Ese trabajo y su contrato
+> están en **`RENDER_GEOMETRICO.md`** (al lado). El `rc_canvas.js` ya tiene el
+> código para pintar unidades/núcleo/pasillos; solo falta producir el dato.
+
 ---
 
 ## 1. Estructura
 
 ```
 app/contextos/render_calculos/
-├── dominio.py                 # Enums (UsoEdificio, CategoriaVivienda, …)
-├── parametros.py              # ParametrosRender (urbanísticos + diseño + programa)
-├── casos_uso.py               # Calcular, Previsualizar, Validar cumplimiento
+├── dominio.py                 # Enums (UsoEdificio, CategoriaVivienda, …), NivelAlerta, Alerta
+├── parametros.py              # ParametrosRender (urbanísticos + diseño + programa, por planta)
+├── puertos.py                 # 4 puertos Protocol (normativa + 3 catálogos Anexo I)
+├── casos_uso.py               # Calcular, Previsualizar, Validar, Tipologías, Estancias, Guardar
 ├── geometria/
 │   ├── config.py              # Mirror de parámetros para el motor
 │   ├── parcelas.py            # LadoParcela, orientación cardinal, normal exterior
-│   ├── envolvente.py          # Retranqueos, ocupación, detección de patios, ático/sótano
-│   ├── capacidad.py           # Bucle por planta → capacidad numérica
+│   ├── envolvente.py          # Retranqueos, ocupación, colocación + adaptación de patios, ático/sótano
+│   ├── capacidad.py           # Bucle por planta → capacidad numérica (fuente de verdad)
+│   ├── combinador_tipologias.py     # §2.5 ComboDormitorios + enumeración + codec de slug
+│   ├── accesibilidad.py             # Unidades adaptadas DB-SUA por tramos (solo usos turísticos)
 │   ├── programa.py            # Anexo I.5 vivienda VPO + política escalado
 │   ├── programa_apartamentos.py     # Anexo I.3 (edificios) + I.4 (conjuntos) Decreto 194/2010
-│   ├── programa_hotel_apartamento.py # Anexo I.2 hoteles-apartamento (estrellas)
 │   ├── programa_hotelero.py         # Anexo I.1 hotel/hostal/pensión/albergue (habitación)
 │   ├── programa_uso.py        # `ProgramaUso` + `TipologiaUnidadDescriptor` + reparto genérico
-│   ├── macro_layout.py        # Generación geométrica de unidades dentro de la planta
-│   ├── interiores.py          # Layout interior (paredes, bandas) por vivienda
-│   ├── adyacencias.py         # Grafo de adyacencias entre estancias
-│   └── serializacion.py       # Output JSON (tablas por planta, por unidad, modal)
-└── README.md                  # Este documento
+│   └── serializacion.py       # Output JSON (ring, lados, tablas por planta/unidad)
+├── README.md                  # Este documento (cadena de cálculo numérico)
+└── RENDER_GEOMETRICO.md       # Trabajo de dibujo de planos: contrato `edificio` + roadmap
 ```
 
 Persistencia (en `app/plataforma/persistencia/`):
 - `catalogo_superficies_sqlalchemy.py` — Anexo I.5 vivienda + parámetros motor.
 - `anexo_i_apartamentos_sqlalchemy.py` — Anexo I.3 apartamentos turísticos (edificios).
 - `anexo_i_apartamentos_conjuntos_sqlalchemy.py` — Anexo I.4 apartamentos (conjuntos).
-- `anexo_i_hotel_apartamento_sqlalchemy.py` — Anexo I.2 hoteles-apartamento.
 - `anexo_i_hotelero_sqlalchemy.py` — Anexo I.1 hotel/hostal/pensión/albergue.
 - `normativa_municipal_sqlalchemy.py` — datos urbanísticos por municipio.
 - `carpetas_normativa_sqlalchemy.py` — normativas archivadas (carpetas).
@@ -62,11 +69,11 @@ parcela (poligono UTM30N)
 construir_envolvente(parcela, params)       envolvente.py
    ├── aplicar_retranqueos                 (fachada vs lindero, direccional)
    ├── aplicar ocupación máxima            (recorte por área)
-   ├── detectar_patio                      (si supera area_patio_min)
+   ├── colocar_patios + conformar_patio    (N patios editables, base ideal → efectiva adaptada al borde)
    └── _huella_atico (opcional)
         │
         ▼
-EdificioPlurifamiliar
+Envolvente
    ├── plantas: list[Planta]               (PB, P1, P2, Ático, Sótano)
    └── parcela, lados, edificabilidad_*
         │
@@ -125,14 +132,23 @@ para todo el edificio y el sótano forzaba circulación 0).
 replica PB en todas las plantas → resultado idéntico al histórico hasta que el
 usuario edita una planta tipo/ático/sótano.
 
+**Ocupación máxima por planta** (`urbanisticos.ocupacion_maxima_pct` y
+`…_pct_tipo`): la huella se calcula por categoría en
+[`construir_envolvente`](geometria/envolvente.py). PB y sótano usan la ocupación
+de planta baja; las plantas regulares por encima de PB (y el ático, retranqueado
+sobre la planta inferior) usan la de plantas tipo. Si la clave `…_pct_tipo` no
+viene en el JSON, **hereda** la de PB → todas las plantas comparten huella
+(comportamiento previo). El recorte por ocupación es una erosión uniforme de la
+misma huella tras retranqueos, independiente para cada límite.
+
 ---
 
 ## 4. Reparto multi-tipología (use-agnóstico)
 
 Cuando el usuario elige tipologías extra (selector dinámico `+` / `−`),
 `calcular_capacidad` reparte la planta entre varias tipologías. El
-reparto NO sabe si la unidad es vivienda, apartamento, habitación de
-hotel o hotel-apartamento: opera sobre `TipologiaUnidadDescriptor`.
+reparto NO sabe si la unidad es vivienda, apartamento o habitación de
+hotel: opera sobre `TipologiaUnidadDescriptor`.
 
 ```python
 # programa_uso.py
@@ -190,9 +206,8 @@ el preview rápido.
 
 | Uso | Anexo | Driver de tipología | Construcción `ProgramaUso` |
 |-----|-------|---------------------|---------------------------|
-| Vivienda | I.5 — VPO Junta Andalucía | nº de dormitorios (0..4) | `programa.programa_uso_vivienda(n_dorms, salon_open)` |
+| Vivienda | I.5 — VPO Junta Andalucía | nº de dormitorios (0..4) | rama directa con `programa_uso=None` (estancias vía `programa.programa_vivienda`) |
 | Apartamentos turísticos | I.3 (edificios) / I.4 (conjuntos) — Decreto 194/2010 | categoría 1L–4L × tipología estudio/1d/2d/3d | `programa_apartamentos.programa_uso_apartamento(cat, tip)` |
-| Hotel-Apartamento | I.2 — categorías por estrellas 1E–5E | estudio / individual / doble / triple / cuádruple | `programa_hotel_apartamento.programa_uso_hap(cat, tip)` |
 | Hotelero | I.1 — Hotel 1–5★, Hostal 1–2★, Pensión, Albergue | individual / doble / triple / cuádruple / múltiple (sólo albergue) | `programa_hotelero.programa_uso_hotelero(cat, tip)` |
 
 Para los usos NO-vivienda, cada uso descuenta del techo de planta las
@@ -248,8 +263,8 @@ TOTAL = 25 m² (util_maximo VPO)
 `util_minimo_vivienda(0)` = `max(25, sum_min × 1.15)` — garantiza ≥ 25
 en cualquier caso.
 
-> Los programas de los otros 3 usos (apartamentos, hotel-apartamento,
-> hotelero) producen estancias derivadas de sus mínimos legales + áreas
+> Los programas de los otros 2 usos (apartamentos, hotelero) producen
+> estancias derivadas de sus mínimos legales + áreas
 > comunes — no aplican la política de escalado por % de circulación
 > interior (las habitaciones de hotel no tienen pasillos internos
 > propios).
@@ -286,19 +301,19 @@ son tablas planas con mínimos por (categoría, tipología, estancia).
 - `anexo_i_apartamentos` (PK: `categoria, tipologia, estancia`) — Anexo I.3.
 - `anexo_i_apartamentos_conjuntos` (PK: `categoria, tipologia, estancia`)
   — Anexo I.4; solo categorías 1L y 2L.
-- `anexo_i_hotel_apartamento` (PK: `estrellas, tipologia, estancia`)
-  — Anexo I.2.
 - `anexo_i_hotelero` (PK: `categoria, tipologia, estancia`)
   — Anexo I.1; modelo "habitación" (sin cocina por unidad).
 
-### Carga en arranque
+### Lectura por cálculo (§3.8)
 
-[`aplicacion.py`](../../entrypoints/web/aplicacion.py) llama a
-`programa.cargar_desde_repo(catalogo)` (y a las funciones análogas de
-los otros programas) después de `init_db()`. Cada catálogo expone un
-método tipo `consolidadas_*()` que devuelve un dict con todos los
-valores; las funciones rellenan las constantes module-level del
-programa correspondiente.
+No hay volcado a constantes de módulo al arrancar. En cada cálculo,
+`CalcularLayout._sincronizar_minimos` construye un `Programa*Config`
+inmutable con `programa*.config_desde_repo(catalogo, …)` para el uso
+activo y lo pasa como argumento por toda la cadena de cálculo. Cada
+catálogo expone un método `consolidadas_*()` que devuelve un dict con
+los mínimos editados; las constantes de módulo son solo DEFAULTS
+inmutables (`CONFIG_DEFAULT`). Así no hay estado global compartido:
+los cálculos concurrentes y los tests quedan aislados.
 
 ### Migración SQLite
 
@@ -377,9 +392,10 @@ sobre `NormativaMunicipal` archivada en BBDD.
   orientación cardinal (normal exterior, no azimut del segmento).
 - **Pestañas de planta**: PB / P1 / P2 / Ático / S1. PB es independiente: en
   ella se edita todo (urbanismo, opciones de sótano/ático, uso, % local PB,
-  tipología y ambas secciones de Diseño). En las plantas tipo solo se edita el
-  **tipo de unidad** y **Diseño · muros** + **Diseño · circulación y
-  accesibilidad**; ático y sótano solo su **% muros** y **% circulación**. La
+  tipología y ambas secciones de Diseño). En las plantas tipo se edita el
+  **tipo de unidad**, la **ocupación máxima de plantas tipo** (recorta su
+  huella) y **Diseño · muros** + **Diseño · circulación y accesibilidad**;
+  ático y sótano solo su **% muros** y **% circulación**. La
   visibilidad combina `data-cuando-uso` × `data-visible-en-planta`
   (`pb|tipo|atico|sotano`) en `aplicarVisibilidad`; cada campo editable por
   planta se enruta con `data-bloque` (`diseno`/`diseno_tipo`/`diseno_atico`/
@@ -407,12 +423,11 @@ el usuario contra el reseed automático. La columna `area_target_m2` y
 la tabla `parametros_motor_vivienda` están preparadas para futuras
 pantallas de edición (panel de administración del Anexo I).
 
-Las tablas `anexo_i_apartamentos*`, `anexo_i_hotel_apartamento` y
-`anexo_i_hotelero` siguen el mismo patrón (flag `editable_por_usuario`)
+Las tablas `anexo_i_apartamentos*` y `anexo_i_hotelero` siguen el mismo
+patrón (flag `editable_por_usuario`)
 y el módulo de Normativa Municipal ya tiene CRUD para los parámetros
 urbanísticos. Falta exponer las tablas de superficies mínimas en una
 pantalla específica.
 
-`cargar_desde_repo()` se invoca al arrancar; si más adelante se
-necesita recargar en caliente tras edición, basta llamarla de nuevo
-con la sesión vigente.
+Las ediciones surten efecto en caliente sin recargar nada: el siguiente
+cálculo lee los mínimos vivos de BBDD vía `config_desde_repo` (§3.8).

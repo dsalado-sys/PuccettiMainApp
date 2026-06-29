@@ -1,10 +1,9 @@
 """Etiquetas y orden de estancias para los editores de mínimos del Anexo I.
 
-Compartido por los adapters de apartamentos turísticos (I.3/I.4),
-hoteles-apartamento (I.2) y hotelero (I.1). Análogo a los helpers privados de
-`catalogo_superficies_sqlalchemy.py` (vivienda), pero reutilizable entre los
-tres usos turístico/hoteleros, que comparten la PK `(categoria, tipologia,
-estancia)`.
+Compartido por los adapters de apartamentos turísticos (I.3/I.4) y hotelero
+(I.1). Análogo a los helpers privados de `catalogo_superficies_sqlalchemy.py`
+(vivienda), pero reutilizable entre los usos turístico/hoteleros, que comparten
+la PK `(categoria, tipologia, estancia)`.
 """
 from __future__ import annotations
 
@@ -38,6 +37,9 @@ _ORDEN_TIPOLOGIA: dict[str, int] = {
     "3d": 3, "triple": 3,
     "4d": 4, "cuadruple": 4,
     "multiple": 5,
+    # Salón-comedor común de la unidad: tras las ocupaciones y antes de las áreas
+    # comunes del establecimiento.
+    "salon_comedor": 6,
 }
 
 
@@ -54,7 +56,7 @@ def etiqueta_estancia(nombre: str) -> str:
 
 def _orden_estancia(nombre: str) -> tuple[int, int]:
     fijo = {"salon_comedor": 0, "salon": 0, "salon_cocina": 1, "espacio_principal": 2,
-            "habitacion": 0, "cocina": 3, "aseo": 4}
+            "habitacion": 0, "dormitorio": 0, "estudio": 0, "cocina": 3, "aseo": 4}
     if nombre in fijo:
         return (fijo[nombre], 0)
     if nombre.startswith("dormitorio_"):

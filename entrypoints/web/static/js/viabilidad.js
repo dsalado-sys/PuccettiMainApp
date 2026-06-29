@@ -68,11 +68,11 @@
     set("fuente_superficie", FUENTE_LABEL[estudio.fuente_superficie] || estudio.fuente_superficie);
 
     // KPI margen en rojo si es negativo
-    const kpiMargen = form.querySelector('[data-kpi="margen_eur"]')?.closest(".vb-kpi");
-    const kpiPct = form.querySelector('[data-kpi="margen_pct"]')?.closest(".vb-kpi");
+    const kpiMargen = form.querySelector('[data-kpi="margen_eur"]')?.closest(".kpi");
+    const kpiPct = form.querySelector('[data-kpi="margen_pct"]')?.closest(".kpi");
     [kpiMargen, kpiPct].forEach((el) => {
       if (!el) return;
-      el.classList.toggle("vb-negativo", estudio.margen_eur < 0);
+      el.classList.toggle("kpi--negativo", estudio.margen_eur < 0);
     });
 
     // Avisos
@@ -127,7 +127,10 @@
     const payload = payloadDesdeForm();
     const cuerpo = JSON.stringify(payload);
     if (cuerpo === ultimoPayload) return;
-    ultimoPayload = cuerpo;
+    // `ultimoPayload` se fija SOLO tras un cálculo con éxito (más abajo). Si se
+    // marcara aquí, un fallo transitorio (red caída, 500/422) con el mismo payload
+    // ya no se reintentaría: la guarda de arriba lo bloquearía y el preview quedaría
+    // pegado hasta editar un campo o pulsar Calcular.
 
     if (abortController) abortController.abort();
     abortController = new AbortController();
@@ -145,10 +148,12 @@
         return;
       }
       const estudio = await resp.json();
+      ultimoPayload = cuerpo;   // memoiza solo el último cálculo correcto
       repintar(estudio);
     } catch (err) {
       if (err.name === "AbortError") return;
       mostrarToast("Error de red al calcular", true);
+      // ultimoPayload sin actualizar → el próximo intento con el mismo payload reintenta
     }
   }
 
@@ -188,9 +193,9 @@
   function mostrarToast(msg, esError = false) {
     if (!toast) return;
     toast.textContent = msg;
-    toast.classList.toggle("vb-toast-error", esError);
-    toast.classList.add("vb-toast-on");
-    setTimeout(() => toast.classList.remove("vb-toast-on"), 2200);
+    toast.classList.toggle("toast--error", esError);
+    toast.classList.add("toast--on");
+    setTimeout(() => toast.classList.remove("toast--on"), 2200);
   }
 
   // ── Bindings ───────────────────────────────────────────────────────

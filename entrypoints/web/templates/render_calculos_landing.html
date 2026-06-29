@@ -1,43 +1,13 @@
 {% extends "base.html" %}
 {% block titulo %}Puccetti · {{ tarjeta.titulo }}{% endblock %}
 
-{% block contenido %}
+{% block head %}
 <link rel="stylesheet" href="/static/css/render_calculos.css?v={{ estaticos_version }}" />
-<style>
-  /* Pantalla de selección de modo de Render y cálculos. Reusa la paleta corporativa
-     (variables :root de puccetti.css) y el CSS del módulo (render_calculos.css, que
-     estiliza el modal de normativa). Aquí solo viven los estilos propios .rcl-*. */
-  .rcl-preview {
-    background: var(--blanco);
-    border: 1px solid #E4DFCC;
-    border-left: 4px solid var(--dorado);
-    border-radius: var(--radio);
-    padding: 16px 18px;
-    margin: 20px 0 28px;
-  }
-  .rcl-preview h2 { margin: 0 0 3px; font-size: 17px; }
-  .rcl-preview .rcl-sub { margin: 0 0 14px; color: var(--dorado); font-size: 14px; }
-  .rcl-datos {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px 22px;
-  }
-  .rcl-dato { display: flex; flex-direction: column; gap: 2px; }
-  .rcl-dato .rcl-k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #555; }
-  .rcl-dato .rcl-v { font-size: 15px; color: var(--negro); }
-  .rcl-dato.rcl-destacado .rcl-v { color: var(--dorado); font-weight: 600; font-size: 18px; }
-  .rcl-pregunta { margin: 0 0 14px; font-size: 17px; }
-  .rcl-modos .tarjeta { cursor: pointer; }
-  .rcl-modos .tarjeta header h2 { display: flex; align-items: center; gap: 8px; }
-  .rcl-badge {
-    font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
-    padding: 2px 8px; border-radius: 999px; background: var(--dorado); color: var(--negro);
-  }
-</style>
+{% endblock %}
 
+{% block contenido %}
 <section class="hero">
   <h1>{{ tarjeta.titulo }}</h1>
-  <p>Elige el tipo de intervención para empezar a calcular sobre la parcela del proyecto.</p>
 </section>
 
 {% if estado == "sin_proyecto" %}

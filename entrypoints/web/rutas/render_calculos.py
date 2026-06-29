@@ -14,7 +14,12 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from typing import Annotated, Any
+
+# Tope de tamaño del "resumen" persistido en el aggregate: evita que un POST
+# guarde un blob arbitrariamente grande en el JSON del proyecto.
+_RESUMEN_MAX_BYTES = 100_000
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -34,7 +39,8 @@ from app.contextos.render_calculos.casos_uso import (
     parametros_desde_proyecto,
 )
 from app.contextos.render_calculos.dominio import UsoEdificio
-from app.contextos.render_calculos.geometria import programa
+from app.contextos.render_calculos.geometria.envolvente import fusionar_anillos
+from app.contextos.render_calculos.geometria.serializacion import ring
 from app.contextos.render_calculos.parametros import (
     ParametrosUrbanisticos,
     parametros_a_dict,
@@ -51,7 +57,6 @@ from ..catalogo_modulos import CATALOGO, TarjetaModulo
 from ..render_modos import MODO_POR_DEFECTO, MODOS, modo_o_none
 from ..dependencias import (
     catalogo_apartamentos_adapter,
-    catalogo_hotel_apartamento_adapter,
     catalogo_hotelero_adapter,
     catalogo_superficies_adapter,
     proyecto_activo,
@@ -105,6 +110,49 @@ def _normativa_de_referencia(
     if parcela.municipio and parcela.provincia:
         return repo_norm.obtener(parcela.municipio, parcela.provincia)
     return None
+
+
+# Campos urbanísticos que controla cada sección del panel. Cuando un modo OCULTA una
+# sección (`render_modos.secciones_ocultas`), esos campos no se renderizan y por tanto
+# no viajan en el payload; `parametros_desde_dict` los dejaría en el default del motor.
+# Para esos campos ocultos la fuente de verdad es la NORMATIVA, no el default.
+_URB_POR_SECCION: dict[str, tuple[str, ...]] = {
+    "edificabilidad": ("usar_coeficiente_edificabilidad", "coeficiente_edificabilidad"),
+    "ocupacion": ("ocupacion_maxima_pct",),
+    "retranqueos": ("retranqueo_fachada_m", "retranqueo_linderos_m"),
+}
+
+
+def _aplicar_normativa_secciones_ocultas(
+    params,
+    payload: dict[str, Any],
+    normativa,
+) -> None:
+    """Rellena desde la NORMATIVA los parámetros urbanísticos que el modo oculta.
+
+    Rehabilitación oculta del panel la edificabilidad, la ocupación y los retranqueos
+    (`render_modos`: los fija el PGOU y no se editan en este modo). Al no aparecer en el
+    panel no llegan en el payload, así que `parametros_desde_dict` caería a los defaults
+    del motor (p. ej. coeficiente 2.5), ignorando el planeamiento del municipio. Aquí se
+    sustituyen por los de la normativa de referencia (PGOU del municipio o la aplicada al
+    proyecto). Los campos VISIBLES en el modo (nº de plantas, ático/sótano, patios) se
+    siguen tomando del panel / edificio existente. Sin normativa se respeta lo de partida.
+    """
+    modo_cfg = modo_o_none(payload.get("modo"))
+    if modo_cfg is None or normativa is None:
+        return
+    for seccion in modo_cfg.secciones_ocultas:
+        for attr in _URB_POR_SECCION.get(seccion, ()):
+            if hasattr(normativa, attr):
+                setattr(params.urbanisticos, attr, getattr(normativa, attr))
+
+    # La normativa archivada solo guarda UNA ocupación (no distingue PB de plantas tipo).
+    # Si el modo oculta la sección "ocupacion", el panel no envía ninguno de los dos
+    # campos; tras tomar la de PB de la normativa, espejamos ese valor en plantas tipo
+    # para conservar la OCUPACIÓN ÚNICA (misma huella en todas las plantas), como en el
+    # histórico de un solo campo. Sin esto, plantas tipo se quedarían al 100%.
+    if "ocupacion" in modo_cfg.secciones_ocultas:
+        params.urbanisticos.ocupacion_maxima_pct_tipo = params.urbanisticos.ocupacion_maxima_pct
 
 
 def _estado_pantalla(proyecto: Proyecto | None) -> str:
@@ -286,7 +334,6 @@ def pantalla(
     usos_catalogo = [
         {"value": "vivienda", "label": "Vivienda", "habilitado": True},
         {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": True},
-        {"value": "hotel_apartamento", "label": "Hotel-apartamento", "habilitado": True},
         {"value": "hotelero", "label": "Hotelero", "habilitado": True},
     ]
     # Hook de configuración por modo: si el modo restringe usos, se filtran.
@@ -331,12 +378,13 @@ def preview(
         raise HTTPException(409, "No hay proyecto activo.")
     parcela = construir_parcela_metrica(proyecto)
     if parcela is None:
-        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en §2.1.")
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
 
     params = parametros_desde_dict(payload)
+    normativa = _normativa_de_referencia(payload, parcela, repo_norm)
+    _aplicar_normativa_secciones_ocultas(params, payload, normativa)
     resultado = CalcularEnvolvente().ejecutar(parcela, params)
 
-    normativa = _normativa_de_referencia(payload, parcela, repo_norm)
     alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
     resultado["alertas"] = list(resultado.get("alertas", [])) + [
         {"nivel": a.nivel, "regla": a.regla, "mensaje": a.mensaje, "elemento": a.elemento}
@@ -354,7 +402,6 @@ def calcular(
     repo_norm: NormativaMunicipalRepositorio = Depends(_normativa_repo),
     catalogo_viv=Depends(catalogo_superficies_adapter),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
@@ -362,9 +409,11 @@ def calcular(
         raise HTTPException(409, "No hay proyecto activo.")
     parcela = construir_parcela_metrica(proyecto)
     if parcela is None:
-        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en §2.1.")
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
 
     params = parametros_desde_dict(payload)
+    normativa = _normativa_de_referencia(payload, parcela, repo_norm)
+    _aplicar_normativa_secciones_ocultas(params, payload, normativa)
     # §2.5 — selección temporal de combinación de dormitorios (apartamentos). El
     # slug no se persiste: solo recalcula esta respuesta con esa combinación.
     combo_override = payload.get("combo_dormitorios") or None
@@ -373,18 +422,52 @@ def calcular(
     caso_uso = CalcularLayout(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
-        catalogo_hotel_apartamento=catalogo_hap,
         catalogo_hotelero=catalogo_hot,
     )
     resultado = caso_uso.ejecutar(parcela, params, combo_override=combo_override)
 
-    normativa = _normativa_de_referencia(payload, parcela, repo_norm)
     alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
     resultado["alertas"] = list(resultado.get("alertas", [])) + [
         {"nivel": a.nivel, "regla": a.regla, "mensaje": a.mensaje, "elemento": a.elemento}
         for a in alertas_extra
     ]
     return JSONResponse(resultado)
+
+
+def _anillo_valido(raw: Any) -> list[list[float]] | None:
+    """Valida un anillo `[[x, y], ...]` del payload: ≥3 pares numéricos. None si no vale."""
+    if not isinstance(raw, (list, tuple)):
+        return None
+    pts: list[list[float]] = []
+    for v in raw:
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            try:
+                pts.append([float(v[0]), float(v[1])])
+            except (TypeError, ValueError):
+                return None
+        else:
+            return None
+    return pts if len(pts) >= 3 else None
+
+
+# ─── Fusión de dos patios próximos en una sola figura (cuello fino) ──────────
+@router.post("/fusionar-patios")
+def fusionar_patios(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+):
+    """Une dos anillos de patio (UTM) en un único polígono que conserva ambas formas,
+    conectadas por un cuello finísimo. Devuelve `{"poligono": [[x,y],...]}`. Geometría
+    pura (sin BBDD): el área la fija el frontend como la suma de las dos asignadas."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    a = _anillo_valido(payload.get("a"))
+    b = _anillo_valido(payload.get("b"))
+    if a is None or b is None:
+        raise HTTPException(400, "Cada patio necesita un polígono de al menos 3 vértices.")
+    fusion = fusionar_anillos(a, b)
+    if fusion.is_empty:
+        raise HTTPException(400, "No se pudo fusionar: los patios no forman una figura válida.")
+    return JSONResponse({"poligono": ring(fusion)})
 
 
 # ─── Estancias de un inmueble concreto (modo «inmueble») ────────────────────
@@ -395,7 +478,6 @@ def estancias_inmueble(
     proyecto: Proyecto | None = Depends(proyecto_activo),
     catalogo_viv=Depends(catalogo_superficies_adapter),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     """Distribuye las estancias de un inmueble concreto a partir de su construida.
@@ -408,7 +490,7 @@ def estancias_inmueble(
         raise HTTPException(409, "No hay proyecto activo.")
     construida = _construida_inmueble_m2(proyecto)
     if construida <= 0:
-        raise HTTPException(409, "El inmueble no tiene superficie construida. Elígelo en §2.1.")
+        raise HTTPException(409, "El inmueble no tiene superficie construida. Elígelo en «Buscar parcela».")
 
     params = parametros_desde_dict(payload)
     n_dorms_raw = payload.get("n_dormitorios")
@@ -420,7 +502,6 @@ def estancias_inmueble(
     resultado = CalcularEstanciasInmueble(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
-        catalogo_hotel_apartamento=catalogo_hap,
         catalogo_hotelero=catalogo_hot,
     ).ejecutar(params, construida, n_dormitorios=n_dorms)
     return JSONResponse(resultado)
@@ -434,7 +515,6 @@ def tipologias_dormitorios(
     proyecto: Proyecto | None = Depends(proyecto_activo),
     catalogo_viv=Depends(catalogo_superficies_adapter),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     """Para un nº de dormitorios, devuelve las combinaciones viables y cuántas
@@ -446,7 +526,7 @@ def tipologias_dormitorios(
         raise HTTPException(409, "No hay proyecto activo.")
     parcela = construir_parcela_metrica(proyecto)
     if parcela is None:
-        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en §2.1.")
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
 
     params = parametros_desde_dict(payload)
     try:
@@ -457,7 +537,6 @@ def tipologias_dormitorios(
     resultado = CalcularTipologiasDormitorios(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
-        catalogo_hotel_apartamento=catalogo_hap,
         catalogo_hotelero=catalogo_hot,
     ).ejecutar(parcela, params, n_dorms)
     return JSONResponse(resultado)
@@ -477,6 +556,11 @@ def guardar(
 
     params_payload = payload.get("parametros") or payload
     resumen = payload.get("resumen") or {}
+    try:
+        if len(json.dumps(resumen).encode("utf-8")) > _RESUMEN_MAX_BYTES:
+            raise HTTPException(413, "El resumen a guardar es demasiado grande.")
+    except (TypeError, ValueError):
+        raise HTTPException(422, "El resumen a guardar no es válido.")
     params = parametros_desde_dict(params_payload)
 
     # Cada modo guarda su propio bloque. Modo inválido → modo por defecto.
@@ -578,11 +662,12 @@ def guardar_superficies_vivienda(
     catalogo_viv=Depends(catalogo_superficies_adapter),
 ):
     """Persiste los mínimos editados. `payload = {"cambios": [{n_dormitorios,
-    estancia, valor}, ...]}`. Tras guardar, recarga las constantes vivas del
-    motor para que el siguiente cálculo use los nuevos mínimos sin reiniciar."""
+    estancia, valor}, ...]}`. §3.8: ya no hay que recargar constantes del motor;
+    cada cálculo lee los mínimos vivos de BBDD vía `_sincronizar_minimos`."""
     _exige_permiso(rol, PermisoModulo.EDITAR)
     cambios = payload.get("cambios") or []
     aplicados = 0
+    rechazados: list[str] = []
     for c in cambios:
         if not isinstance(c, dict):
             continue
@@ -596,11 +681,15 @@ def guardar_superficies_vivienda(
             continue
         if valor < 0:
             continue
-        catalogo_viv.actualizar("vivienda", str(n_dorms), estancia, valor)
+        # El adapter rechaza romper el invariante min ≤ útil máximo: se omite
+        # ese cambio (como los negativos) y se informa, sin abortar el lote.
+        try:
+            catalogo_viv.actualizar("vivienda", str(n_dorms), estancia, valor)
+        except ValueError as exc:
+            rechazados.append(str(exc))
+            continue
         aplicados += 1
-    if aplicados:
-        programa.cargar_desde_repo(catalogo_viv)
-    return JSONResponse({"ok": True, "aplicados": aplicados})
+    return JSONResponse({"ok": True, "aplicados": aplicados, "rechazados": rechazados})
 
 
 @router.post("/superficies-vivienda/reset")
@@ -611,24 +700,21 @@ def reset_superficies_vivienda(
     """Restablece los mínimos a los valores sembrados (defaults del motor)."""
     _exige_permiso(rol, PermisoModulo.EDITAR)
     catalogo_viv.reset()
-    programa.cargar_desde_repo(catalogo_viv)
     return JSONResponse({"ok": True})
 
 
 # ─── Superficies mínimas de los usos turístico/hoteleros (Anexo I.1–I.4) ─────
 # Análogo a vivienda, pero acotado a la categoría seleccionada en el panel
 # (las tablas tienen una entrada por categoría × tipología × estancia). Los
-# adapters de apartamentos/hotel-apt/hotelero se consultan en vivo en cada
-# cálculo, así que no hay constantes que recargar tras editar (a diferencia de
-# vivienda, cuyo motor cachea los mínimos).
-_USOS_MINIMOS = {"apartamentos_turisticos", "hotel_apartamento", "hotelero"}
+# adapters de apartamentos/hotelero se consultan en vivo en cada cálculo, así
+# que no hay constantes que recargar tras editar (a diferencia de vivienda, cuyo
+# motor cachea los mínimos).
+_USOS_MINIMOS = {"apartamentos_turisticos", "hotelero"}
 
 
-def _adapter_minimos(uso: str, apt, hap, hot):
+def _adapter_minimos(uso: str, apt, hot):
     if uso == "apartamentos_turisticos":
         return apt
-    if uso == "hotel_apartamento":
-        return hap
     if uso == "hotelero":
         return hot
     raise HTTPException(404, f"Uso desconocido para el editor de mínimos: {uso!r}.")
@@ -641,12 +727,11 @@ def listar_minimos(
     grupo: Annotated[str, Query()] = "edificios",
     rol: Rol = Depends(rol_activo),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     """Mínimos por estancia y tipología de la categoría seleccionada del uso dado."""
     _exige_permiso(rol, PermisoModulo.VER)
-    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hap, catalogo_hot)
+    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hot)
     if uso == "apartamentos_turisticos":
         filas = adapter.filas_min(categoria, grupo)
     else:
@@ -660,19 +745,19 @@ def guardar_minimos(
     payload: Annotated[dict[str, Any], Body(...)],
     rol: Rol = Depends(rol_activo),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     """Persiste los mínimos editados de la categoría. `payload = {categoria,
     grupo, cambios: [{tipologia, estancia, valor}, ...]}`."""
     _exige_permiso(rol, PermisoModulo.EDITAR)
-    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hap, catalogo_hot)
+    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hot)
     categoria = str(payload.get("categoria") or "").strip()
     grupo = str(payload.get("grupo") or "edificios").strip() or "edificios"
     if not categoria:
         raise HTTPException(422, "Falta la categoría.")
     cambios = payload.get("cambios") or []
     aplicados = 0
+    rechazados: list[str] = []
     for c in cambios:
         if not isinstance(c, dict):
             continue
@@ -686,12 +771,18 @@ def guardar_minimos(
             continue
         if valor < 0:
             continue
-        if uso == "apartamentos_turisticos":
-            adapter.actualizar(categoria, tipologia, estancia, valor, grupo=grupo)
-        else:
-            adapter.actualizar(categoria, tipologia, estancia, valor)
+        # El adapter rechaza romper el invariante min ≤ útil máximo: se omite ese
+        # cambio y se informa, sin abortar el lote.
+        try:
+            if uso == "apartamentos_turisticos":
+                adapter.actualizar(categoria, tipologia, estancia, valor, grupo=grupo)
+            else:
+                adapter.actualizar(categoria, tipologia, estancia, valor)
+        except ValueError as exc:
+            rechazados.append(str(exc))
+            continue
         aplicados += 1
-    return JSONResponse({"ok": True, "aplicados": aplicados})
+    return JSONResponse({"ok": True, "aplicados": aplicados, "rechazados": rechazados})
 
 
 @router.post("/minimos/{uso}/reset")
@@ -699,12 +790,11 @@ def reset_minimos(
     uso: str,
     rol: Rol = Depends(rol_activo),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     """Restablece los mínimos del uso a los valores sembrados (Anexo I)."""
     _exige_permiso(rol, PermisoModulo.EDITAR)
-    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hap, catalogo_hot)
+    adapter = _adapter_minimos(uso, catalogo_apt, catalogo_hot)
     adapter.reset()
     return JSONResponse({"ok": True})
 
@@ -717,7 +807,6 @@ def export_csv(
     proyecto: Proyecto | None = Depends(proyecto_activo),
     catalogo_viv=Depends(catalogo_superficies_adapter),
     catalogo_apt=Depends(catalogo_apartamentos_adapter),
-    catalogo_hap=Depends(catalogo_hotel_apartamento_adapter),
     catalogo_hot=Depends(catalogo_hotelero_adapter),
 ):
     _exige_permiso(rol, PermisoModulo.VER)
@@ -730,31 +819,35 @@ def export_csv(
     caso_uso = CalcularLayout(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
-        catalogo_hotel_apartamento=catalogo_hap,
         catalogo_hotelero=catalogo_hot,
     )
     resultado = caso_uso.ejecutar(parcela, params)
 
+    def _es(v):
+        # Formato es-ES para el CSV (delimitador ';'): coma decimal en los
+        # valores con decimales. Enteros, cadenas y booleanos pasan tal cual.
+        return f"{v:.2f}".replace(".", ",") if isinstance(v, float) else v
+
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
-    writer.writerow(["# Tabla de superficies por planta — Render y cálculos §2.7"])
+    writer.writerow(["# Tabla de superficies por planta — Render y cálculos"])
     writer.writerow(["planta", "tipo", "viviendas", "construida_m2", "util_viviendas_m2",
                      "muros_m2", "muros_interior_m2", "circulacion_m2", "nucleo_m2",
                      "local_m2", "otros_m2", "usos_comunes_m2"])
     for r in resultado.get("tabla_planta", []):
-        writer.writerow([r["planta"], r.get("tipo", "regular"), r["viviendas"], r["construida_m2"],
+        writer.writerow([_es(v) for v in [r["planta"], r.get("tipo", "regular"), r["viviendas"], r["construida_m2"],
                          r["util_viviendas_m2"], r.get("muros_m2", 0.0), r.get("muros_interior_m2", 0.0),
                          r["circulacion_m2"], r.get("nucleo_m2", 0.0),
-                         r.get("local_m2", 0.0), r.get("otros_m2", 0.0), r.get("usos_comunes_m2", 0.0)])
+                         r.get("local_m2", 0.0), r.get("otros_m2", 0.0), r.get("usos_comunes_m2", 0.0)]])
     writer.writerow([])
     writer.writerow(["# Tabla por unidad (iter. 3 — sintética desde cálculo)"])
     writer.writerow(["planta", "vivienda", "dorms", "tipo", "util_m2_objetivo",
                      "util_total_m2", "computable_turismo_m2", "circulacion_acceso_m2", "adaptada"])
     for r in resultado.get("tabla_unidad", []):
-        writer.writerow([r["planta"], r["vivienda"], r["dorms"], r.get("tipo", "vivienda"),
+        writer.writerow([_es(v) for v in [r["planta"], r["vivienda"], r["dorms"], r.get("tipo", "vivienda"),
                          r["util_m2_objetivo"], r.get("util_por_unidad_m2", 0.0),
                          r.get("computable_turismo_por_unidad_m2", 0.0),
-                         r.get("circulacion_interior_por_unidad_m2", 0.0), r["adaptada"]])
+                         r.get("circulacion_interior_por_unidad_m2", 0.0), r["adaptada"]]])
     return Response(
         content=buf.getvalue().encode("utf-8-sig"),
         media_type="text/csv; charset=utf-8",

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+import socket
 import unicodedata
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -52,6 +53,11 @@ URL_INSPIRE_WFS_BU = "https://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx"
 
 UA = "Puccetti/0.1"
 TIMEOUT = 30.0
+# ESCatastroLib usa `requests` internamente y NO expone un parámetro de timeout:
+# acotamos a nivel de socket para que sus llamadas (ParcelaCatastral, listar_calles,
+# nº de plantas, croquis) no cuelguen el worker indefinidamente. requests/urllib3
+# honran el default de socket cuando no se pasa un timeout explícito.
+socket.setdefaulttimeout(TIMEOUT)
 
 
 def _sin_tildes(s: str) -> str:
@@ -110,6 +116,29 @@ def _superficie_construida_de_parcela(p: ParcelaCatastral) -> float | None:
 
 
 # ── Rate limit  ──────────────────────────────
+_MSG_RATE_LIMIT = (
+    "El Catastro ha bloqueado temporalmente las peticiones desde esta IP "
+    "por exceder el límite horario. Inténtalo de nuevo en ~1 hora."
+)
+
+
+def _texto_indica_rate_limit(texto: str) -> bool:
+    """True si el texto (cuerpo de respuesta o mensaje de excepción) delata un
+    bloqueo por límite horario.
+
+    Normaliza tildes y entidades HTML para no fallar ante "Petición denegada"
+    con tilde real o con la entidad ``&#243;`` sin desescapar.
+    """
+    txt = (texto or "")[:400]
+    txt = txt.replace("&#243;", "o").replace("&#xf3;", "o").replace("&#xF3;", "o")
+    txt = _sin_tildes(txt).lower()
+    return (
+        "limite de peticiones" in txt
+        or "peticion denegada" in txt
+        or "limite horario" in txt
+    )
+
+
 def _detectar_rate_limit(respuesta: requests.Response) -> None:
     """Lanza RateLimitCatastro si la respuesta indica bloqueo por límite horario.
 
@@ -118,16 +147,9 @@ def _detectar_rate_limit(respuesta: requests.Response) -> None:
     - XML/JSON con texto "Peticion denegada" y HTTP 200 en endpoints WCF.
     """
     if respuesta.status_code == 403:
-        raise RateLimitCatastro(
-            "El Catastro ha bloqueado temporalmente las peticiones desde esta IP "
-            "por exceder el límite horario. Inténtalo de nuevo en ~1 hora."
-        )
-    txt = (respuesta.text or "")[:400].lower()
-    if "limite de peticiones" in txt or "peticion denegada" in txt or "petici&#243;n denegada" in txt:
-        raise RateLimitCatastro(
-            "El Catastro ha bloqueado temporalmente las peticiones desde esta IP "
-            "por exceder el límite horario. Inténtalo de nuevo en ~1 hora."
-        )
+        raise RateLimitCatastro(_MSG_RATE_LIMIT)
+    if _texto_indica_rate_limit(respuesta.text or ""):
+        raise RateLimitCatastro(_MSG_RATE_LIMIT)
 
 
 # ── Click en mapa: RC desde coordenadas  ─────
@@ -167,6 +189,19 @@ def _rc_desde_coordenadas(lon: float, lat: float, srs: str = "EPSG:4326") -> str
 
 
 # ── Subreferencias  ──────────────────────────
+def _anio_o_none(valor: Any) -> int | None:
+    """Convierte la antigüedad (``ant``) del Catastro a un año entero, o None."""
+    if valor is None:
+        return None
+    s = str(valor).strip()
+    if not s:
+        return None
+    try:
+        return int(float(s.replace(".", "").replace(",", ".")))
+    except (TypeError, ValueError):
+        return None
+
+
 def _extraer_rc20(rc_dict: dict) -> str:
     return "".join(rc_dict.get(k, "") or "" for k in ("pc1", "pc2", "car", "cc1", "cc2"))
 
@@ -186,11 +221,15 @@ def _subref_de_item(item: dict) -> Subreferencia:
     if es: partes.append(f"Es {es}")
     if pt: partes.append(f"Pl {pt}")
     if pu: partes.append(f"Pt {pu}")
+    # El listado agregado (Consulta_DNPRC por RC14) ya trae la antigüedad (`ant`)
+    # por inmueble cuando el Catastro la informa: la aprovechamos para que el
+    # listado quede completo con UNA sola llamada y no haya que consultar cada RC20.
     return Subreferencia(
         rc=rc20,
         localizacion=" · ".join(partes),
         uso=(debi.get("luso") or "").strip(),
         superficie_construida_m2=_superficie_catastro(debi.get("sfc")),
+        anio_construccion=_anio_o_none(debi.get("ant")),
     )
 
 
@@ -668,8 +707,26 @@ class CatastroMEH(CatastroPort):
             return DetalleSubreferencia(None, None)
         try:
             p = ParcelaCatastral(rc=rc_limpio)
-        except (ValueError, ErrorServidorCatastro):
-            return DetalleSubreferencia(None, None)
+        except RateLimitCatastro:
+            raise
+        except (ValueError, ErrorServidorCatastro) as exc:
+            # El rate limit por esta vía no llega como 403 sino como mensaje de
+            # error de ESCatastroLib: hay que detectarlo en el texto, si no el
+            # bloqueo horario quedaría invisible y se persistirían datos vacíos.
+            if _texto_indica_rate_limit(str(exc)):
+                raise RateLimitCatastro(_MSG_RATE_LIMIT) from exc
+            raise ParcelaNoEncontrada(
+                f"No se pudo obtener el detalle de la subreferencia {rc_limpio}."
+            ) from exc
+        except requests.RequestException as exc:
+            raise ParcelaNoEncontrada(
+                "No se pudo conectar con el Catastro al pedir el detalle de "
+                f"{rc_limpio}. Inténtalo de nuevo en unos minutos."
+            ) from exc
+        except Exception as exc:  # parseo XML/atributos inesperados de ESCatastroLib
+            raise ParcelaNoEncontrada(
+                f"El Catastro devolvió una respuesta inesperada para {rc_limpio}."
+            ) from exc
         anio = getattr(p, "antiguedad", None)
         try:
             anio = int(anio) if anio else None

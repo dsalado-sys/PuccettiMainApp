@@ -1,9 +1,9 @@
 """Generalización del motor: descriptor del programa por unidad (§2.5).
 
-Hasta la iteración 1 el motor (`macro_layout.py`, `capacidad.py`) estaba atado
-a `programa.programa_vivienda` y a la noción de `n_dormitorios`. La iteración 2
-introduce apartamentos turísticos cuyo dimensionamiento depende de
-(categoría, tipología), no del nº de dormitorios.
+Hasta la iteración 1 el motor de cálculo estaba atado a la noción de
+`n_dormitorios` (solo vivienda). La iteración 2 introduce apartamentos
+turísticos cuyo dimensionamiento depende de (categoría, tipología), no del
+nº de dormitorios.
 
 `ProgramaUso` encapsula los **cuatro datos** que el motor necesita para trocear
 una planta sin saber si es vivienda o apartamento:
@@ -15,8 +15,9 @@ una planta sin saber si es vivienda o apartamento:
     tipo_unidad              → "vivienda" | "apartamento" (etiqueta en la dataclass `Unidad`)
     area_servicios_obligatorios_m2 → restado del techo en apartamentos (Decreto 194/2010)
 
-Los constructores `programa_uso_vivienda()` y `programa_uso_apartamento()` viven
-en sus respectivos módulos de programa para evitar imports circulares.
+Los constructores de apartamento/hotelero (`programa_uso_apartamento()`,
+`programa_uso_hotelero()`) viven en sus módulos de programa para evitar imports
+circulares; la vivienda no usa constructor (su rama opera con `programa_uso=None`).
 """
 from __future__ import annotations
 

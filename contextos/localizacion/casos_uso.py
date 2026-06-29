@@ -11,7 +11,6 @@ from .dominio import (
     ORIENTACIONES,
     Parcela,
     ParcelaNoEncontrada,
-    RateLimitCatastro,
     Subreferencia,
     TipoLado,
 )
@@ -260,41 +259,12 @@ class SeleccionarInmueble:
         return parcela
 
 
-@dataclass
-class CargarTodosLosDetalles:
-    """Recorre todas las subreferencias y rellena coef. participación + año.
-
-    Una llamada al Catastro por subreferencia. Si alguna falla por rate limit,
-    propaga el error; los demás fallos (ParcelaNoEncontrada, etc.) se ignoran
-    y se sigue con la siguiente — la parcela queda con `detalle_cargado=True`
-    en las que sí pudieron resolverse.
-    """
-    catastro: CatastroPort
-    repo: ParcelaTemporalRepositorio
-
-    def ejecutar(self, parcela_id: str) -> Parcela:
-        parcela = self.repo.obtener(parcela_id)
-        if parcela is None:
-            raise ParcelaNoEncontrada(f"No hay parcela con id {parcela_id} en memoria.")
-        for s in parcela.subreferencias:
-            if s.detalle_cargado:
-                continue
-            try:
-                detalle = self.catastro.obtener_detalle_subreferencia(s.rc)
-            except RateLimitCatastro:
-                # Rate limit afecta a toda la app: aborta el bulk y propaga
-                # para que el handler avise al usuario.
-                self.repo.guardar(parcela)
-                raise
-            except Exception:
-                continue
-            s.coeficiente_participacion = detalle.coeficiente_participacion
-            s.anio_construccion = detalle.anio_construccion
-            s.detalle_cargado = True
-        self.repo.guardar(parcela)
-        return parcela
-
-
+# NOTA: el antiguo `CargarTodosLosDetalles` (carga masiva subref a subref) se
+# eliminó: un edificio con N inmuebles disparaba ~3·N peticiones seriadas al
+# Catastro y agotaba la cuota horaria de toda la IP del estudio. El listado por
+# inmueble (uso, superficie, año) ya llega en UNA sola Consulta_DNPRC al localizar
+# la metaparcela; el coeficiente de participación se enriquece bajo demanda, fila
+# a fila, con `CargarDetalleSubreferencia`.
 @dataclass
 class CargarDetalleSubreferencia:
     """Llamada lazy: el técnico pide enriquecer una fila concreta de la tabla."""

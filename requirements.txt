@@ -1,11 +1,14 @@
-fastapi>=0.110
-uvicorn[standard]>=0.29
-jinja2>=3.1
-python-multipart>=0.0.9
-itsdangerous>=2.0
-sqlalchemy>=2.0
-shapely>=2.0
-pyproj>=3.6
-requests>=2.31
-ESCatastroLib>=0.5
-geopandas>=0.14
+# Dependencias de la main app Puccetti. Versiones fijadas (reproducibilidad).
+# Para actualizar: ajustar aquí y reinstalar con `pip install -r requirements.txt`.
+fastapi==0.136.1
+uvicorn[standard]==0.47.0
+jinja2==3.1.6
+python-multipart==0.0.29
+itsdangerous==2.2.0
+sqlalchemy==2.0.50
+alembic==1.18.4
+shapely==2.1.2
+pyproj==3.7.2
+requests==2.34.2
+ESCatastroLib==1.0.0
+geopandas==1.1.3

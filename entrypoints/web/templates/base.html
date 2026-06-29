@@ -1,25 +1,125 @@
-<!DOCTYPE html>
+{% set shell = contexto_shell(request) %}
+{% set es_hub = request.url.path == '/' %}<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  {# Anti-flash: fija el tema guardado ANTES del primer paint (SKILL.md §1.5). #}
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("puccetti-tema");
+        if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { /* almacenamiento bloqueado */ }
+    })();
+  </script>
   <title>{% block titulo %}Puccetti{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/puccetti.css?v={{ estaticos_version }}" />
+  <script defer src="/static/js/tema.js?v={{ estaticos_version }}"></script>
+  {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{{ 'vista-hub' if es_hub else 'vista-modulo' }}">
+  {# Sprite de iconos SVG inline (§6: sin librerías externas; trazo coherente).
+     Vive en base.html para que rail, cabecera y menú compartan los mismos IDs
+     (coinciden con TarjetaModulo.icono del catálogo de módulos). #}
+  <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+    <defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <symbol id="icono-mapa" viewBox="0 0 24 24">
+          <path d="M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V5l-6 2.5z"/>
+          <path d="M9 4v13.5M15 6.5V20"/>
+        </symbol>
+        <symbol id="icono-balanza" viewBox="0 0 24 24">
+          <path d="M12 4v16M7 20h10M5 7h14M12 5 5 7m7-2 7 2"/>
+          <path d="M5 7 2.5 13a3 3 0 0 0 5 0zM19 7l-2.5 6a3 3 0 0 0 5 0z"/>
+        </symbol>
+        <symbol id="icono-volumen" viewBox="0 0 24 24">
+          <path d="M12 2 3 7v10l9 5 9-5V7z"/>
+          <path d="M3 7l9 5 9-5M12 12v10"/>
+        </symbol>
+        <symbol id="icono-documento" viewBox="0 0 24 24">
+          <path d="M6 2h8l4 4v16H6z"/>
+          <path d="M14 2v4h4M9 12h6M9 16h6"/>
+        </symbol>
+        <symbol id="icono-carpeta" viewBox="0 0 24 24">
+          <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        </symbol>
+        <symbol id="icono-plano" viewBox="0 0 24 24">
+          <path d="M3 4h18v16H3z"/>
+          <path d="M3 9h7v11M14 4v7h7"/>
+        </symbol>
+        <symbol id="icono-luna" viewBox="0 0 24 24">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+        </symbol>
+        <symbol id="icono-sol" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/>
+        </symbol>
+        <symbol id="icono-salir" viewBox="0 0 24 24">
+          <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/>
+          <path d="M10 17l5-5-5-5M15 12H3"/>
+        </symbol>
+      </g>
+    </defs>
+  </svg>
+
+  {% if es_hub %}
+  {# Nexo principal: solo cabecera superior (las tarjetas del hub son la navegación). #}
   <header class="cabecera">
     <a class="marca" href="/">
       <span class="marca-nombre">PUCCETTI</span>
       <span class="marca-claim">Prefactibilidad inmobiliaria</span>
     </a>
-
     <div class="sesion-usuario">
+      <button type="button" class="tema-toggle" data-tema-toggle
+              aria-pressed="false" aria-label="Cambiar a tema oscuro (Ctrl+O)" title="Cambiar a tema oscuro (Ctrl+O)">
+        <svg class="tema-icono tema-icono--luna" aria-hidden="true"><use href="#icono-luna"></use></svg>
+        <svg class="tema-icono tema-icono--sol" aria-hidden="true"><use href="#icono-sol"></use></svg>
+      </button>
       <span class="sesion-nombre" title="Usuario conectado">{{ request.session.get('usuario') }}</span>
       <form method="post" action="/logout" class="sesion-logout">
         <button type="submit" class="boton-secundario">Cerrar sesión</button>
       </form>
     </div>
   </header>
+  {% else %}
+  {# Dentro de un módulo: solo el rail vertical (sin cabecera). Colapsado muestra
+     iconos; se ensancha al pasar el ratón / al recibir foco para ver los nombres. #}
+  <aside class="rail" aria-label="Navegación principal">
+    <a class="rail-marca" href="/" title="Inicio" aria-label="Puccetti — inicio">
+      <span class="rail-monograma" aria-hidden="true">P</span>
+      <span class="rail-marca-texto">PUCCETTI</span>
+    </a>
+    <nav class="rail-nav">
+      {% for item in shell.nav_items %}
+        {% if item.acceso.puede_ver %}
+          <a class="rail-item {% if item.activo %}rail-item--activo{% endif %}"
+             href="{{ item.modulo.ruta }}"
+             title="{{ item.modulo.titulo }}"
+             {% if item.activo %}aria-current="page"{% endif %}>
+            <svg class="rail-icono" aria-hidden="true"><use href="#{{ item.modulo.icono }}"></use></svg>
+            <span class="rail-label">{{ item.modulo.titulo }}</span>
+          </a>
+        {% endif %}
+      {% endfor %}
+    </nav>
+    <div class="rail-pie">
+      <span class="rail-usuario" title="Usuario conectado">{{ request.session.get('usuario') }}</span>
+      <button type="button" class="rail-accion" data-tema-toggle
+              aria-pressed="false" aria-label="Cambiar a tema oscuro (Ctrl+O)" title="Cambiar a tema oscuro (Ctrl+O)">
+        <svg class="tema-icono tema-icono--luna" aria-hidden="true"><use href="#icono-luna"></use></svg>
+        <svg class="tema-icono tema-icono--sol" aria-hidden="true"><use href="#icono-sol"></use></svg>
+        <span class="rail-label">Cambiar tema</span>
+      </button>
+      <form method="post" action="/logout" class="sesion-logout">
+        <button type="submit" class="rail-accion" title="Cerrar sesión" aria-label="Cerrar sesión">
+          <svg class="rail-icono" aria-hidden="true"><use href="#icono-salir"></use></svg>
+          <span class="rail-label">Cerrar sesión</span>
+        </button>
+      </form>
+    </div>
+  </aside>
+  {% endif %}
 
   <main class="contenido">
     {% block contenido %}{% endblock %}

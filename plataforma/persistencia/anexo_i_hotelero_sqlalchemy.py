@@ -68,7 +68,7 @@ class CatalogoHoteleroSQLAlchemy:
     def consolidadas_hotelero(self) -> dict:
         """Mínimos editables de BBDD en la forma de las constantes del motor (A1.1).
 
-        `programa_hotelero.cargar_desde_repo` lo vuelca a sus constantes. Mapeo
+        `programa_hotelero.config_desde_repo` lo empaqueta en su config. Mapeo
         (excluye `comunes_*`): `habitacion` → `MIN_HABITACION[(cat, tip)]`;
         `bano` → `MIN_BANO_HOTELERO[cat]`.
         """
@@ -134,13 +134,25 @@ class CatalogoHoteleroSQLAlchemy:
             )
             self._session.add(orm)
         else:
+            # Invariante de fila: el mínimo no puede superar el útil máximo.
+            if valor > orm.max_m2_util:
+                raise ValueError(
+                    f"El mínimo ({valor:g} m²) no puede superar el útil máximo "
+                    f"({orm.max_m2_util:g} m²) de {categoria}/{tipologia}/{estancia}."
+                )
             orm.min_m2 = valor
             orm.editable_por_usuario = 1
             orm.actualizado_en = datetime.now(timezone.utc)
         self._session.commit()
 
     def reset(self) -> None:
+        """Reseed atómico: borrado + siembra en una transacción (rollback si el
+        seed falla; nunca deja la tabla vacía)."""
         from .seed_normativa import sembrar_anexo_i_hotelero
-        self._session.query(AnexoIHoteleroORM).delete()
-        self._session.commit()
-        sembrar_anexo_i_hotelero(self._session, forzar=True)
+        try:
+            self._session.query(AnexoIHoteleroORM).delete()
+            sembrar_anexo_i_hotelero(self._session, forzar=True, commit=False)
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
