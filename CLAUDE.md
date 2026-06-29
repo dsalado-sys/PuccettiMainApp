@@ -32,7 +32,7 @@ app/
 │   ├── dependencias.py       # DI: sesión, repos, casos de uso, usuario/rol/proyecto activos
 │   ├── catalogo_modulos.py   # única fuente de verdad del menú (CATALOGO)
 │   ├── render_modos.py       # 3 modos del módulo Render (obra-nueva/rehabilitacion/inmueble)
-│   ├── plantillas.py         # Jinja2Templates + ESTATICOS_VERSION (cache-busting)
+│   ├── plantillas.py         # Jinja2Templates + estaticos_version (cache-busting automático por mtime)
 │   ├── rutas/                # 8 routers (ver §Rutas HTTP)
 │   ├── templates/  static/css/  static/js/
 ├── tests/                    # pytest (contextos/ + plataforma/) — ver §Tests
@@ -176,8 +176,10 @@ subreferencia; usa ESCatastroLib + REST.
   **Claves de sesión**: `usuario_id, usuario, rol`. Form de login: campo `contraseña`
   (con ñ), no `password`. Throttling 5 intentos/15 min por IP+usuario; `session.clear()`
   anti-fijación.
-- **Cache-busting**: `plantillas.py::ESTATICOS_VERSION` es el `?v=` que `base.html` añade
-  a CSS/JS. **Subirlo a mano al tocar estáticos.**
+- **Cache-busting**: el `?v=` que las plantillas añaden a CSS/JS es **automático**:
+  `plantillas.py` expone `estaticos_version` como un wrapper que se reevalúa en cada
+  render y deriva del mtime más reciente de `static/`. **No hay que tocar nada al editar
+  estáticos** (en dev el cambio se refleja sin reiniciar).
 - `templates/`: base, login, menu, modulo_pendiente, localizacion, proyectos,
   normativa_municipal, viabilidad, render_calculos(+_landing) y parciales `_rc_*`.
   `static/css/` y `static/js/` (incl. `rc_canvas.js`, `rc_brujula.js`).
@@ -241,7 +243,7 @@ python -m app.run        # → http://127.0.0.1:8080 (reload). También: `py run
 3. **Menú**: añadir `TarjetaModulo` a `CATALOGO` (`catalogo_modulos.py`).
 4. **Contexto**: `app/contextos/<modulo>/` con `dominio.py`/`puertos.py`/`casos_uso.py` (importar por submódulo salvo que añadas `__all__`).
 5. **Adapter(s)**: implementar el/los puerto(s) en `plataforma/...`; si hay ORM nuevo, registrarlo en `_registrar_modelos()` y añadir seed idempotente si procede.
-6. **Web**: router en `entrypoints/web/rutas/<modulo>.py` con su prefix, incluirlo en `aplicacion.py`, plantilla(s) + estáticos; **subir `ESTATICOS_VERSION`** al tocar CSS/JS.
+6. **Web**: router en `entrypoints/web/rutas/<modulo>.py` con su prefix, incluirlo en `aplicacion.py`, plantilla(s) + estáticos (el cache-busting `?v=` es automático, no hay que tocarlo).
 7. Persistir resultados en el aggregate vía `proyecto.fijar_datos(ModuloPuccetti.X, dict)` salvo que justifique repositorio propio.
 
 ## Mantenimiento de este archivo

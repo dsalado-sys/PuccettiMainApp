@@ -43,6 +43,8 @@ from .geometria.serializacion import (
 from .parametros import (
     ParametrosRender,
     ParametrosUrbanisticos,
+    PatioDef,
+    area_de_patio,
     parametros_a_dict,
     parametros_desde_dict,
 )
@@ -328,8 +330,11 @@ def _plantas_envolvente_a_dict(envolvente) -> list[dict[str, Any]]:
             "computa_edif": getattr(pl, "computa_edif", True),
             "footprint": ring(pl.footprint),
             "patios": [
-                {"poligono": ring(p.geometry), "area_m2": round(p.area_m2, 2),
-                 "luz_recta_m": round(p.luz_recta_m, 2)}
+                {"id": getattr(p, "id", ""), "poligono": ring(p.geometry),
+                 "base": ring(getattr(p, "base", None) or p.geometry),
+                 "area_m2": round(p.area_m2, 2), "luz_recta_m": round(p.luz_recta_m, 2),
+                 "area_efectiva_m2": round(getattr(p, "area_efectiva_m2", 0.0) or p.area_m2, 2),
+                 "cabe": bool(getattr(p, "cabe", True))}
                 for p in pl.patios
             ],
             "construida_m2": round(pl.area_construida_m2, 2),
@@ -1350,7 +1355,7 @@ def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proy
             if isinstance(a, (int, float)) and float(a) > 0
         ]
         if areas:
-            params.urbanisticos.patios = areas
+            params.urbanisticos.patios = [PatioDef(area_m2=a) for a in areas]
     elif loc.get("n_patios") == 0:
         params.urbanisticos.patios = []
 
@@ -1513,8 +1518,8 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
     area_patio_min = float(params.urbanisticos.area_patio_min_m2 or 0.0)
     if area_patio_min > 0:
         pequenos = [
-            float(a) for a in params.urbanisticos.patios
-            if 0 < float(a) < area_patio_min - 1e-6
+            area_de_patio(pd) for pd in params.urbanisticos.patios
+            if 0 < area_de_patio(pd) < area_patio_min - 1e-6
         ]
         if pequenos:
             listado = ", ".join(f"{a:.2f}" for a in pequenos)

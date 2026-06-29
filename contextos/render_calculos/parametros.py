@@ -14,6 +14,7 @@ Iteración 4 (2026-06-04):
 """
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,10 +32,72 @@ from .geometria.config import (
     ParametrosDiseno as DisenoMotor,
     ParametrosPrograma as ProgramaMotor,
     ParametrosUrbanisticos as UrbMotor,
+    PatioPlacement as PatioPlacementMotor,
 )
 
 
 USOS_PGOU_VALIDOS: tuple[str, ...] = ("residencial", "hotelero", "terciario", "mixto")
+
+
+@dataclass
+class PatioDef:
+    """Definición de un patio del edificio (entrada del usuario / frontend).
+
+    `area_m2` es el invariante sagrado: se preserva siempre (capacidad deduce su
+    suma; la geometría se construye para tenerlo). `vertices` es el polígono libre
+    en coordenadas UTM tal como lo editó el usuario en el lienzo (None = patio sin
+    posición → el motor lo auto-coloca, comportamiento histórico). `id` da identidad
+    estable para que el frontend siga cada patio entre recálculos y ediciones.
+    """
+    area_m2: float
+    id: str = ""
+    vertices: list | None = None
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            self.id = uuid.uuid4().hex[:8]
+
+
+def area_de_patio(pd: Any) -> float:
+    """Área asignada de un patio, tolerante a `PatioDef` o a un `float` legado."""
+    if isinstance(pd, PatioDef):
+        return max(0.0, float(pd.area_m2))
+    try:
+        return max(0.0, float(pd))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _parse_patio(item: Any) -> PatioDef | None:
+    """Parsea una entrada de `patios` del JSON: número suelto (solo área) u objeto
+    `{area_m2|area, id?, vertices?}`. Devuelve None si el área no es positiva."""
+    if isinstance(item, bool):
+        return None
+    if isinstance(item, (int, float)):
+        a = float(item)
+        return PatioDef(area_m2=a) if a > 0 else None
+    if isinstance(item, dict):
+        try:
+            a = float(item.get("area_m2", item.get("area", 0.0)))
+        except (TypeError, ValueError):
+            return None
+        if a <= 0:
+            return None
+        verts: list | None = None
+        raw = item.get("vertices")
+        if isinstance(raw, (list, tuple)):
+            pts: list[list[float]] = []
+            for v in raw:
+                if isinstance(v, (list, tuple)) and len(v) >= 2:
+                    try:
+                        pts.append([float(v[0]), float(v[1])])
+                    except (TypeError, ValueError):
+                        pts = []
+                        break
+            if len(pts) >= 3:
+                verts = pts
+        return PatioDef(area_m2=a, id=str(item.get("id") or ""), vertices=verts)
+    return None
 
 
 @dataclass
@@ -63,12 +126,12 @@ class ParametrosUrbanisticos:
     retranqueo_atico_m: float = 3.0         # INFERIOR (mínimo normativo)
     luz_recta_patio_min_m: float = 3.0      # INFERIOR (nombre legacy)
     area_patio_min_m2: float = 12.0                 # INFERIOR
-    # Patios reales del edificio: una superficie (m²) por patio. Atraviesan todas
-    # las plantas (patinejos de luz); el cálculo descuenta su SUMA en cada planta.
-    # `area_patio_min_m2`/`luz_recta_patio_min_m` quedan solo como referencia
-    # normativa (validación de cumplimiento). Default = un patio de 12 m² (= el
-    # comportamiento histórico de patio único).
-    patios: list[float] = field(default_factory=lambda: [12.0])
+    # Patios reales del edificio: un `PatioDef` por patio (área asignada + polígono
+    # libre opcional). Atraviesan todas las plantas (patinejos de luz); el cálculo
+    # descuenta su SUMA de áreas en cada planta. `area_patio_min_m2`/`luz_recta_patio_min_m`
+    # quedan solo como referencia normativa (validación de cumplimiento). Default = un
+    # patio de 12 m² sin posición (auto-colocado = comportamiento histórico).
+    patios: list[PatioDef] = field(default_factory=lambda: [PatioDef(area_m2=12.0)])
     ancho_min_fachada_m: float = 5.0                # INFERIOR (sobre la parcela)
     espesor_tabique_min_m: float = 0.10             # INFERIOR
     ancho_min_pasillo_comun_m: float = 1.20         # INFERIOR
@@ -224,7 +287,7 @@ class ParametrosRender:
                 # El motor descuenta la SUMA de los patios definidos por planta;
                 # el mínimo normativo (`area_patio_min_m2`) queda solo como
                 # referencia para la validación de cumplimiento.
-                area_patio_min=sum(max(0.0, float(a)) for a in self.urbanisticos.patios),
+                area_patio_min=sum(area_de_patio(pd) for pd in self.urbanisticos.patios),
                 pct_muros=pct_muros,
                 pct_muros_interior=pct_muros_interior,
                 pct_circulacion_pb=pct_circulacion_pb,
@@ -257,11 +320,34 @@ class ParametrosRender:
                 pct_otros_pb=max(0.0, min(100.0, float(programa.pct_otros_pb))),
                 pct_usos_comunes_pb=max(0.0, min(100.0, float(programa.pct_usos_comunes_pb))),
             ),
+            # Colocación individual de cada patio (polígono libre opcional). El motor
+            # los dibuja uno a uno y los resta del interior; capacidad sigue usando solo
+            # la SUMA de áreas (`area_patio_min`), así los números no se mueven.
+            patios=[
+                PatioPlacementMotor(
+                    area_m2=area_de_patio(pd),
+                    id=(pd.id if isinstance(pd, PatioDef) else ""),
+                    vertices=(pd.vertices if isinstance(pd, PatioDef) else None),
+                )
+                for pd in self.urbanisticos.patios
+                if area_de_patio(pd) > 0
+            ],
             seed=self.seed,
         )
 
 
 # ─── Serialización JSON ─────────────────────────────────────────────────────
+def _patio_def_a_dict(pd: Any) -> dict[str, Any]:
+    """Serializa un patio para el frontend / persistencia. Emite siempre `id` +
+    `area_m2`, y `vertices` (polígono libre UTM) cuando los hay. Tolera floats legados."""
+    if isinstance(pd, PatioDef):
+        out: dict[str, Any] = {"id": pd.id or "", "area_m2": float(pd.area_m2)}
+        if pd.vertices:
+            out["vertices"] = [[float(x), float(y)] for x, y in pd.vertices]
+        return out
+    return {"id": "", "area_m2": float(pd)}
+
+
 def _diseno_a_dict(d: ParametrosDiseno) -> dict[str, Any]:
     return {
         "espesor_muro_fachada_m": d.espesor_muro_fachada_m,
@@ -311,7 +397,7 @@ def parametros_a_dict(p: ParametrosRender) -> dict[str, Any]:
             "usos_permitidos": list(p.urbanisticos.usos_permitidos),
             "luz_recta_patio_min_m": p.urbanisticos.luz_recta_patio_min_m,
             "area_patio_min_m2": p.urbanisticos.area_patio_min_m2,
-            "patios": [float(a) for a in p.urbanisticos.patios],
+            "patios": [_patio_def_a_dict(pd) for pd in p.urbanisticos.patios],
             "diametro_max_vestibulo_m": p.urbanisticos.diametro_max_vestibulo_m,
             "espesor_muro_medianero_max_m": p.urbanisticos.espesor_muro_medianero_max_m,
             "espesor_separacion_unidades_max_m": p.urbanisticos.espesor_separacion_unidades_max_m,
@@ -483,22 +569,20 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
     if not usos_validos:
         usos_validos = list(base.urbanisticos.usos_permitidos)
 
-    # Patios reales del edificio (lista de áreas en m²). Si la clave está presente
-    # se respeta tal cual (lista vacía = sin patios, intencional). JSON legado sin
-    # la clave → un patio del área mínima normativa, preservando el patio único
-    # histórico.
+    # Patios reales del edificio. Cada entrada admite un número suelto (= solo área,
+    # auto-colocado, formato histórico) o un objeto `{area_m2|area, id?, vertices?}`
+    # (polígono libre editado en el lienzo). Si la clave está presente se respeta tal
+    # cual (lista vacía = sin patios, intencional). JSON legado sin la clave → un patio
+    # del área mínima normativa, preservando el patio único histórico.
     area_patio_min = _f(urb_in, "area_patio_min_m2", base.urbanisticos.area_patio_min_m2)
     if "patios" in urb_in:
-        patios: list[float] = []
-        for a in (urb_in.get("patios") or []):
-            try:
-                v = float(a)
-            except (TypeError, ValueError):
-                continue
-            if v > 0:
-                patios.append(v)
+        patios: list[PatioDef] = []
+        for item in (urb_in.get("patios") or []):
+            pd = _parse_patio(item)
+            if pd is not None:
+                patios.append(pd)
     else:
-        patios = [area_patio_min] if area_patio_min > 0 else []
+        patios = [PatioDef(area_m2=area_patio_min)] if area_patio_min > 0 else []
 
     urb = ParametrosUrbanisticos(
         coeficiente_edificabilidad=coef,

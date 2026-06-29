@@ -9,26 +9,38 @@ Está integrado en `app/` (main app) siguiendo arquitectura hexagonal +
 screaming. La lógica de geometría/cálculo vive en `geometria/` aislada
 de FastAPI y SQLAlchemy.
 
+> **Alcance de este README**: documenta la cadena de **cálculo numérico**
+> (envolvente → capacidad → reparto de m² → tablas), que está completa. El
+> **dibujo geométrico de las unidades en planta** (distribuir unidades,
+> repartir m² de estancias como polígonos) **aún no existe**: el campo
+> `edificio` de `/calcular` se devuelve hoy `null`. Ese trabajo y su contrato
+> están en **`RENDER_GEOMETRICO.md`** (al lado). El `rc_canvas.js` ya tiene el
+> código para pintar unidades/núcleo/pasillos; solo falta producir el dato.
+
 ---
 
 ## 1. Estructura
 
 ```
 app/contextos/render_calculos/
-├── dominio.py                 # Enums (UsoEdificio, CategoriaVivienda, …)
-├── parametros.py              # ParametrosRender (urbanísticos + diseño + programa)
-├── casos_uso.py               # Calcular, Previsualizar, Validar cumplimiento
+├── dominio.py                 # Enums (UsoEdificio, CategoriaVivienda, …), NivelAlerta, Alerta
+├── parametros.py              # ParametrosRender (urbanísticos + diseño + programa, por planta)
+├── puertos.py                 # 4 puertos Protocol (normativa + 3 catálogos Anexo I)
+├── casos_uso.py               # Calcular, Previsualizar, Validar, Tipologías, Estancias, Guardar
 ├── geometria/
 │   ├── config.py              # Mirror de parámetros para el motor
 │   ├── parcelas.py            # LadoParcela, orientación cardinal, normal exterior
-│   ├── envolvente.py          # Retranqueos, ocupación, detección de patios, ático/sótano
-│   ├── capacidad.py           # Bucle por planta → capacidad numérica
+│   ├── envolvente.py          # Retranqueos, ocupación, colocación + adaptación de patios, ático/sótano
+│   ├── capacidad.py           # Bucle por planta → capacidad numérica (fuente de verdad)
+│   ├── combinador_tipologias.py     # §2.5 ComboDormitorios + enumeración + codec de slug
+│   ├── accesibilidad.py             # Unidades adaptadas DB-SUA por tramos (solo usos turísticos)
 │   ├── programa.py            # Anexo I.5 vivienda VPO + política escalado
 │   ├── programa_apartamentos.py     # Anexo I.3 (edificios) + I.4 (conjuntos) Decreto 194/2010
 │   ├── programa_hotelero.py         # Anexo I.1 hotel/hostal/pensión/albergue (habitación)
 │   ├── programa_uso.py        # `ProgramaUso` + `TipologiaUnidadDescriptor` + reparto genérico
-│   └── serializacion.py       # Output JSON (tablas por planta, por unidad, modal)
-└── README.md                  # Este documento
+│   └── serializacion.py       # Output JSON (ring, lados, tablas por planta/unidad)
+├── README.md                  # Este documento (cadena de cálculo numérico)
+└── RENDER_GEOMETRICO.md       # Trabajo de dibujo de planos: contrato `edificio` + roadmap
 ```
 
 Persistencia (en `app/plataforma/persistencia/`):
@@ -57,7 +69,7 @@ parcela (poligono UTM30N)
 construir_envolvente(parcela, params)       envolvente.py
    ├── aplicar_retranqueos                 (fachada vs lindero, direccional)
    ├── aplicar ocupación máxima            (recorte por área)
-   ├── detectar_patio                      (si supera area_patio_min)
+   ├── colocar_patios + conformar_patio    (N patios editables, base ideal → efectiva adaptada al borde)
    └── _huella_atico (opcional)
         │
         ▼

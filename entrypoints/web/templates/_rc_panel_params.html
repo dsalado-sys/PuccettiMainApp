@@ -138,18 +138,22 @@
         </label>
       </div>
 
-      {# Patios reales del edificio: una superficie por patio. El cálculo descuenta
-         su suma en cada planta; «Luz/Área mín.» de arriba son solo referencia
-         normativa. Inputs con name="patios" → el JS los recoge como array. #}
+      {# Patios reales del edificio: cada patio es una sección individual editable
+         en el lienzo (mover/estirar/girar/reformar) que conserva sus m². La fila
+         lleva data-patio-id (identidad estable) y data-vertices (polígono UTM, si
+         ya tiene posición). Inputs con name="patios" → el JS los recoge como objetos. #}
       <fieldset class="rc-patios" data-visible-en-planta="pb">
         <legend>Patios del edificio</legend>
+        <p class="rc-patios-ayuda">Arrástralos en el plano para mover, estirar, girar o reformar.</p>
         <div class="rc-patios-lista" id="rc-patios-lista">
-          {% for area in urb.patios %}
-          <div class="rc-patio-fila">
+          {% for patio in urb.patios %}
+          <div class="rc-patio-fila" data-patio-id="{{ patio.id }}"
+               {% if patio.vertices %}data-vertices='{{ patio.vertices | tojson }}'{% endif %}>
             <input type="number" name="patios" min="0" step="0.5"
-                   value="{{ area }}" data-bloque="urbanisticos"
+                   value="{{ patio.area_m2 }}" data-bloque="urbanisticos"
                    aria-label="Área del patio (m²)">
             <button type="button" class="rc-patio-quitar" aria-label="Quitar patio">×</button>
+            <span class="rc-patio-aviso" hidden></span>
           </div>
           {% endfor %}
         </div>

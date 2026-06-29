@@ -81,11 +81,27 @@ class ParametrosPrograma:
 
 
 @dataclass
+class PatioPlacement:
+    """Colocación de un patio para el motor de geometría (neutral, sin dependencias del contexto).
+
+    `area_m2` es el área ASIGNADA (invariante de capacidad). `vertices` es el
+    polígono libre en coordenadas UTM (None = patio sin posición → auto-colocado).
+    `id` da identidad estable para que el frontend siga cada patio entre recálculos.
+    """
+    area_m2: float
+    id: str = ""
+    vertices: Optional[list] = None
+
+
+@dataclass
 class Parametros:
     """Bundle global pasado al motor de geometría."""
     diseno: ParametrosDiseno = field(default_factory=ParametrosDiseno)
     urbanismo: ParametrosUrbanisticos = field(default_factory=ParametrosUrbanisticos)
     programa: ParametrosPrograma = field(default_factory=ParametrosPrograma)
+    # Patios reales del edificio (patinejos verticales). Una entrada por patio.
+    # El mismo conjunto se coloca en todas las plantas regulares.
+    patios: list[PatioPlacement] = field(default_factory=list)
     seed: Optional[int] = None
 
 

@@ -187,8 +187,8 @@
         <span class="rc-kpi-valor" data-kpi="construida_total_m2">—</span>
       </article>
       <article class="rc-kpi">
-        <span class="rc-kpi-label">Superficie del solar</span>
-        <span class="rc-kpi-valor" data-kpi="superficie_parcela_m2">—</span>
+        <span class="rc-kpi-label">Superficie del polígono</span>
+        <span class="rc-kpi-valor" data-kpi="superficie_poligono_m2">—</span>
       </article>
       <article class="rc-kpi rc-kpi-destacada">
         <span class="rc-kpi-label">Unidades calculadas</span>
@@ -258,5 +258,6 @@
 <script>window.__RC_NORMATIVA_APLICADA__ = {{ normativa_aplicada | tojson if normativa_aplicada else 'null' }};</script>
 <script src="/static/js/rc_brujula.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_canvas.js?v={{ estaticos_version }}" defer></script>
+<script src="/static/js/rc_patios.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/render_calculos.js?v={{ estaticos_version }}" defer></script>
 {% endblock %}

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+from shapely.affinity import scale
 from shapely.geometry import LineString, Polygon, box, Point
 from shapely.ops import unary_union
 
@@ -43,11 +44,41 @@ def _normalizar(g) -> Polygon:
     return g
 
 
+def _pieza_anclada(g, ancla: Polygon) -> Polygon:
+    """Como `_normalizar` pero, ante un MultiPolygon, conserva la pieza que MÁS se solapa
+    con `ancla` (el recorte original donde el usuario soltó el patio), no la de mayor área.
+
+    Así, al rellenar un patio dentro de su hueco, el resultado no «salta» a un blob
+    desconectado al otro lado de un cuello: se queda anclado donde se soltó. Si ninguna
+    pieza solapa el ancla (no debería pasar: el buffer siempre contiene a `poly`), cae a
+    la de mayor área (mismo criterio que `_normalizar`).
+    """
+    if g is None or g.is_empty:
+        return Polygon()
+    if not g.is_valid:
+        g = g.buffer(0)
+        if g.is_empty:
+            return Polygon()
+    if hasattr(g, "geoms"):
+        polys = [p for p in g.geoms if p.geom_type == "Polygon" and not p.is_empty]
+        if not polys:
+            return Polygon()
+        solapados = [p for p in polys if p.intersection(ancla).area > 1e-9]
+        g = max(solapados or polys, key=lambda p: p.intersection(ancla).area if solapados else p.area)
+    if g.geom_type != "Polygon":
+        return Polygon()
+    return g
+
+
 @dataclass
 class Patio:
-    geometry: Polygon
-    area_m2: float
+    geometry: Polygon       # forma EFECTIVA dibujada (base adaptada al borde): puede llevar vértices temporales
+    area_m2: float          # área ASIGNADA (invariante de capacidad), no geometry.area
     luz_recta_m: float
+    id: str = ""            # identidad estable (eco del PatioPlacement); "" = auto/legacy
+    base: Optional[Polygon] = None   # forma IDEAL del usuario (área asignada, sin vértices temporales)
+    area_efectiva_m2: float = 0.0    # área que realmente entra tras adaptarse (== area_m2 si cabe)
+    cabe: bool = True                # False si, ya adaptado, no alcanza el área asignada
 
 
 @dataclass
@@ -204,6 +235,205 @@ def detectar_patio(interior_planta: Polygon, params: Parametros) -> Optional[Pat
     return Patio(geometry=rect, area_m2=rect.area, luz_recta_m=lr)
 
 
+def _ajustar_area(geom: Polygon, area: float) -> Polygon:
+    """Reescala `geom` respecto a su centroide hasta tener exactamente `area` m².
+
+    Es la regla «área fija»: el polígono que envía el usuario puede tener cualquier
+    forma, pero su superficie se normaliza al área asignada (factor √(area/actual),
+    isótropo → conserva la forma y el centroide). Así, editar los m² de un patio
+    reescala su forma sin moverlo, y un reformado de vértices recupera los m².
+    """
+    a = geom.area
+    if a <= 1e-9 or area <= 0:
+        return geom
+    if abs(a - area) <= 1e-6 * max(area, 1.0):
+        return geom
+    f = (area / a) ** 0.5
+    c = geom.centroid
+    return _normalizar(scale(geom, xfact=f, yfact=f, origin=(c.x, c.y)))
+
+
+def _rect_area(zona: Polygon, lr: float, area: float) -> Optional[Polygon]:
+    """Rectángulo de área EXACTA `area` centrado en el polo de inaccesibilidad de `zona`.
+
+    Forma por defecto del auto-colocado: lado `lr` (luz recta) × `area/lr` cuando el
+    área lo permite (mantiene el ancho mínimo); si no, un cuadrado de lado √area. En
+    ambos casos el área dibujada == área asignada.
+    """
+    if zona is None or zona.is_empty or area <= 0:
+        return None
+    try:
+        from shapely.ops import polylabel
+        c = polylabel(zona, tolerance=0.5)
+    except Exception:
+        c = zona.representative_point()
+    if lr > 0 and area >= lr * lr:
+        w, h = lr, area / lr
+    else:
+        w = h = area ** 0.5
+    return box(c.x - w / 2, c.y - h / 2, c.x + w / 2, c.y + h / 2)
+
+
+def _inflar_a_area(poly: Polygon, region, objetivo: float, hi_max: float | None = None) -> Polygon:
+    """Crece `poly` DENTRO de `region` hasta alcanzar `objetivo` m², en una sola pieza.
+
+    Bisección de la distancia de buffer: `poly.buffer(d) ∩ region`, quedándose con la pieza
+    ANCLADA a `poly` (la que más lo solapa, no la de mayor área), hasta que el área llega al
+    objetivo o no puede crecer más (la zona no da para más). Si `poly` ya tiene el área, lo
+    devuelve tal cual (sin inflar).
+
+    `hi_max` acota la distancia de buffer (relleno LOCAL): con `None` se usa el histórico
+    `region.area**0.5` (crecimiento prácticamente ilimitado); el llamante de patios pasa un
+    tope ligado al tamaño del patio para que el relleno no escape del hueco hacia el espacio
+    libre lejano.
+    """
+    poly = _normalizar(poly)
+    if poly.is_empty or objetivo <= 0:
+        return poly
+    if poly.area >= objetivo - 1e-9:
+        return poly
+    lo, hi = 0.0, hi_max if hi_max is not None else max(region.area ** 0.5, 1.0)
+    mejor_ok: Optional[Polygon] = None     # menor candidato que YA llega al objetivo
+    mejor_bajo = poly                      # mayor candidato que aún no llega (por si nunca llega)
+    for _ in range(24):
+        d = (lo + hi) / 2.0
+        cand = _pieza_anclada(poly.buffer(d, join_style=2).intersection(region), poly)
+        if cand.is_empty:
+            hi = d
+            continue
+        if cand.area >= objetivo:
+            mejor_ok = cand
+            hi = d
+        else:
+            if cand.area > mejor_bajo.area:
+                mejor_bajo = cand
+            lo = d
+        if hi - lo < 1e-3:
+            break
+    return mejor_ok if mejor_ok is not None else mejor_bajo
+
+
+def conformar_patio(base: Polygon, region, area_objetivo: float, lr: float, footprint=None):
+    """Adapta `base` al HUECO LOCAL disponible en `region`, anclada donde el usuario la soltó.
+
+    Devuelve `(efectiva, area_efectiva, cabe)`:
+    - Si `base` ya está entera dentro → `efectiva == base` (sin vértices temporales).
+    - Si asoma fuera / pisa a un vecino → recorta (`∩ region`) y rellena el hueco local
+      (`_inflar_a_area` acotado a ~2 lados del patio: ni teletransporta ni se infla fuera).
+    - Si el hueco local no alcanza el área → `efectiva` es lo máximo que entra ahí y `cabe=False`
+      (salta el aviso). NUNCA se reubica a otra zona para forzar el área.
+    - Si la base cae ENTERA fuera de `region` (sobre un vecino): se queda donde se soltó,
+      recortada solo a la huella (`footprint`), marcada `cabe=False`. `lr` se conserva por
+      compatibilidad de firma aunque ya no se use.
+    """
+    base = _normalizar(base)
+    if region is None or region.is_empty or base.is_empty:
+        return base, base.area, False
+    if region.contains(base):
+        return base, area_objetivo, True
+    recorte = _normalizar(base.intersection(region))
+    if recorte.is_empty:
+        # La base cae entera sobre un vecino / fuera de la región: aquí no hay sitio. NO se
+        # siembra en otra zona (eso teletransportaba el patio): se deja donde el usuario lo
+        # soltó, recortado solo a la HUELLA (puede pisar al vecino), avisando que no cabe.
+        zona = footprint if (footprint is not None and not footprint.is_empty) else region
+        visible = _normalizar(base.intersection(zona))
+        if visible.is_empty:
+            return base, base.area, False
+        return visible, visible.area, False
+    hi_max = max(2.0 * area_objetivo ** 0.5, 1.0)
+    efectiva = _inflar_a_area(recorte, region, area_objetivo, hi_max=hi_max)
+    area_ef = efectiva.area
+    cabe = area_ef >= area_objetivo - 1e-6 * max(area_objetivo, 1.0)
+    return efectiva, area_ef, cabe
+
+
+def colocar_patios(interior_planta: Polygon, params: Parametros, footprint: Optional[Polygon] = None) -> list[Patio]:
+    """Coloca TODOS los patios definidos en `params.patios` como secciones individuales.
+
+    - Patio con `vertices` → polígono libre tal cual lo posicionó el usuario (la
+      restricción de encaje la impone el frontend; aquí no se recorta para no falsear
+      la forma). Su `area_m2` es el área ASIGNADA (invariante de capacidad).
+    - Patio sin `vertices` → auto-colocado: rectángulo del área asignada en el polo de
+      inaccesibilidad del residual (restando los ya colocados para no solaparse).
+
+    El mismo conjunto de definiciones se coloca en cada planta regular (patinejos
+    verticales). Si no hay lista de patios, cae a la heurística histórica de patio único.
+
+    Dos fases:
+      A) Construye la forma BASE de cada patio (ideal del usuario, área asignada).
+      B) Adapta cada base al borde con `conformar_patio` (recorte + relleno hacia dentro).
+         Prioridad por orden de lista: cada patio cede solo ante los ANTERIORES (mayor
+         prioridad); el anterior conserva su base, el posterior se adapta. Así, cuando el
+         usuario arrastra un patio encima de otro, solo se reacomoda el movido (que el
+         frontend coloca el último) y los demás quedan intactos. Las efectivas siguen sin
+         pisarse (cada posterior evita a los anteriores) y la capacidad no cambia
+         (deduce Σ area_m2, orden-independiente). `Patio.geometry` = efectiva; `Patio.base` = ideal.
+    """
+    defs = list(getattr(params, "patios", None) or [])
+    if not defs:
+        patio = detectar_patio(interior_planta, params)
+        return [patio] if patio is not None else []
+
+    lr = params.diseno.luz_recta_patio_min
+    # ── Fase A: bases (forma ideal, área asignada) ──────────────────────────────
+    bases: list[Optional[tuple[Polygon, float, str]]] = [None] * len(defs)  # (base, area, id)
+    residual = interior_planta
+    # A1: patios con polígono explícito (respetan la posición del usuario).
+    for idx, d in enumerate(defs):
+        area = max(0.0, float(getattr(d, "area_m2", 0.0)))
+        if area <= 0:
+            continue
+        verts = getattr(d, "vertices", None)
+        if verts and len(verts) >= 3:
+            try:
+                geom = _normalizar(Polygon([(float(x), float(y)) for x, y in verts]))
+            except Exception:
+                geom = Polygon()
+            if geom.is_empty:
+                continue
+            geom = _ajustar_area(geom, area)   # área fija: normaliza al área asignada
+            bases[idx] = (geom, area, str(getattr(d, "id", "") or ""))
+            residual = _normalizar(residual.difference(geom))
+    # A2: patios sin posición → auto-colocado en el residual restante.
+    for idx, d in enumerate(defs):
+        if bases[idx] is not None:
+            continue
+        area = max(0.0, float(getattr(d, "area_m2", 0.0)))
+        if area <= 0:
+            continue
+        geom = _rect_area(residual, lr, area)
+        if geom is None or geom.is_empty:
+            continue
+        geom = _normalizar(geom)
+        bases[idx] = (geom, area, str(getattr(d, "id", "") or ""))
+        residual = _normalizar(residual.difference(geom))
+
+    # ── Fase B: adaptar cada base al borde, cediendo solo ante los ANTERIORES ────
+    # Prioridad por orden de lista (no exclusión mutua): el patio `idx` evita las bases
+    # `0..idx-1` (mayor prioridad) pero NO las posteriores. Así el de mayor prioridad
+    # conserva su forma ideal y solo el posterior se adapta — el frontend coloca el patio
+    # recién movido el último para que sea el único que ceda.
+    zona = footprint if (footprint is not None and not footprint.is_empty) else interior_planta
+    resultado: list[Patio] = []
+    for idx, b in enumerate(bases):
+        if b is None:
+            continue
+        base_geom, area, pid = b
+        anteriores = [bb[0] for j, bb in enumerate(bases) if bb is not None and j < idx]
+        region = zona
+        if anteriores:
+            region = zona.difference(unary_union(anteriores))
+            if not region.is_valid:
+                region = region.buffer(0)
+        efectiva, area_ef, cabe = conformar_patio(base_geom, region, area, lr, footprint=zona)
+        resultado.append(Patio(
+            geometry=efectiva, area_m2=area, luz_recta_m=lr, id=pid,
+            base=base_geom, area_efectiva_m2=area_ef, cabe=cabe,
+        ))
+    return resultado
+
+
 def _huella_atico(huella: Polygon, retranqueo_atico: float) -> Polygon:
     """Huella reducida del ático tras aplicar el retranqueo perimetral."""
     if retranqueo_atico <= 0:
@@ -302,11 +532,9 @@ def construir_envolvente(
         f = huella_pb if n == 0 else huella_tipo
         i = interior_pb if n == 0 else interior_tipo
         huella_ultima_regular = f
-        patios: list[Patio] = []
-        patio = detectar_patio(i, params)
-        if patio is not None:
-            i = i.difference(patio.geometry)
-            patios.append(patio)
+        patios = colocar_patios(i, params, footprint=f)
+        for pt in patios:
+            i = _normalizar(i.difference(pt.geometry))
         # El patio interior (vacío a cielo abierto) no computa ni como construido ni
         # como edificabilidad: la construida de la planta —y el techo que consume— es
         # la huella menos el área de patio.
