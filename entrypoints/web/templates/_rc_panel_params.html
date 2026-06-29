@@ -147,12 +147,19 @@
         <p class="rc-patios-ayuda">Arrástralos en el plano para mover, estirar, girar o reformar.</p>
         <div class="rc-patios-lista" id="rc-patios-lista">
           {% for patio in urb.patios %}
-          <div class="rc-patio-fila" data-patio-id="{{ patio.id }}"
+          <div class="rc-patio-fila{% if patio.bloqueado %} rc-patio-fila-bloqueada{% endif %}"
+               data-patio-id="{{ patio.id }}"
+               {% if patio.bloqueado %}data-bloqueado="true"{% endif %}
                {% if patio.vertices %}data-vertices='{{ patio.vertices | tojson }}'{% endif %}>
             <input type="number" name="patios" min="0" step="0.5"
                    value="{{ patio.area_m2 }}" data-bloque="urbanisticos"
-                   aria-label="Área del patio (m²)">
-            <button type="button" class="rc-patio-quitar" aria-label="Quitar patio">×</button>
+                   aria-label="Área del patio (m²)"{% if patio.bloqueado %} readonly{% endif %}>
+            <button type="button" class="rc-patio-bloquear"
+                    aria-pressed="{{ 'true' if patio.bloqueado else 'false' }}"
+                    aria-label="{{ 'Desbloquear patio' if patio.bloqueado else 'Bloquear patio' }}"
+                    title="{{ 'Desbloquear patio' if patio.bloqueado else 'Bloquear patio (no se podrá editar)' }}">{{ '🔒' if patio.bloqueado else '🔓' }}</button>
+            <button type="button" class="rc-patio-quitar" aria-label="Quitar patio"
+                    {% if patio.bloqueado %}disabled{% endif %}>×</button>
             <span class="rc-patio-aviso" hidden></span>
           </div>
           {% endfor %}

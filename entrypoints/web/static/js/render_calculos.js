@@ -62,6 +62,7 @@
     onCommit: (id, vertices) => commitPatioGeom(id, vertices),
     onFijarGeom: (id, vertices) => fijarPatioGeom(id, vertices),
     onSelect: (id) => resaltarFilaPatio(id),
+    onMerge: (idA, idB) => fusionarPatios(idA, idB),
   }) : null;
   if (renderer && patioEditor) renderer.setOverlay(() => patioEditor.dibujarOverlay());
 
@@ -150,6 +151,7 @@
               if (Array.isArray(vs) && vs.length >= 3) obj.vertices = vs;
             } catch (e) { /* geometría corrupta → se auto-coloca */ }
           }
+          if (fila && fila.dataset.bloqueado === "true") obj.bloqueado = true;
           bloques[bloque].patios.push(obj);
         }
       } else {
@@ -1653,6 +1655,77 @@
     if (fila) fila.classList.add("rc-patio-fila-activa");
   }
 
+  // ─── Fusión de patios próximos (≤ 0,1 m) ──────────────────────────────
+  // Anillo efectivo de un patio (por id) del último payload pintado; cae a data-vertices.
+  function ringPatioPorId(id) {
+    if (renderer && renderer._lastPayload) {
+      const pls = (renderer._lastPayload.envolvente && renderer._lastPayload.envolvente.plantas)
+        || (renderer._lastPayload.edificio && renderer._lastPayload.edificio.plantas) || [];
+      for (const planta of pls) {
+        for (const p of (planta.patios || [])) {
+          if (p.id === id && (p.poligono || p.base)) return p.poligono || p.base;
+        }
+      }
+    }
+    const fila = filaPorPatioId(id);
+    if (fila && fila.dataset.vertices) {
+      try { const v = JSON.parse(fila.dataset.vertices); if (Array.isArray(v) && v.length >= 3) return v; }
+      catch (e) { /* corrupto */ }
+    }
+    return null;
+  }
+
+  // Fusiona dos patios en uno conservando AMBAS formas exactas: el backend une los dos
+  // anillos con un cuello finísimo (sin envolvente convexa ni relleno). Superficie = SUMA
+  // de las dos áreas. El patio A se reutiliza como fusionado (al final de la lista, para
+  // que sea él quien se adapte); el B se elimina.
+  async function fusionarPatios(idA, idB) {
+    const filaA = filaPorPatioId(idA), filaB = filaPorPatioId(idB);
+    if (!filaA || !filaB) return;
+    // Un patio bloqueado no participa en la fusión.
+    if (filaA.dataset.bloqueado === "true" || filaB.dataset.bloqueado === "true") return;
+    const inA = filaA.querySelector('input[name="patios"]');
+    const inB = filaB.querySelector('input[name="patios"]');
+    const areaA = inA ? Number(inA.value) || 0 : 0;
+    const areaB = inB ? Number(inB.value) || 0 : 0;
+    const suma = areaA + areaB;
+    if (suma <= 0) return;
+    const ringA = ringPatioPorId(idA), ringB = ringPatioPorId(idB);
+    if (!ringA || !ringB) return;
+    // El backend (shapely) calcula la unión con cuello fino: conserva las dos formas.
+    let fused = null;
+    try {
+      const resp = await fetch("/modulos/render-calculos/fusionar-patios", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ a: ringA, b: ringB }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        mostrarToast(err.detail || "No se pudieron fusionar los patios", true);
+        return;
+      }
+      fused = (await resp.json()).poligono;
+    } catch (e) {
+      mostrarToast("No se pudieron fusionar los patios", true);
+      return;
+    }
+    if (!Array.isArray(fused) || fused.length < 3) return;
+    // El patio A se queda como el fusionado (anillo unido + área = suma).
+    filaA.dataset.vertices = JSON.stringify(fused);
+    if (inA) inA.value = String(Math.round(suma * 100) / 100);
+    // Limpia el aviso «no cabe» heredado y baja la prioridad (al final de la lista).
+    filaA.classList.remove("rc-patio-fila-nocabe");
+    const avisoA = filaA.querySelector(".rc-patio-aviso");
+    if (avisoA) { avisoA.hidden = true; avisoA.textContent = ""; }
+    const lista = document.getElementById("rc-patios-lista");
+    if (lista && filaA.parentElement === lista) lista.appendChild(filaA);
+    // Elimina el patio B.
+    filaB.remove();
+    if (patioEditor) patioEditor.olvidar(idB);
+    pedirCalculo();
+  }
+
   // Margen de seguridad (m²) que «Adaptar» resta al área efectiva: el polígono que
   // serializa el backend es aproximado (ring() simplifica + redondea a cm y descarta
   // agujeros), así que pedir el área efectiva EXACTA puede quedar un pelo por encima de
@@ -1673,6 +1746,8 @@
       if (!p.id) return;
       const fila = filaPorPatioId(p.id);
       if (!fila) return;
+      // Refleja el estado de bloqueo que confirma el backend (persiste entre recálculos).
+      aplicarEstadoBloqueo(fila, !!p.bloqueado);
       const forma = p.poligono || p.base;
       if (forma) fila.dataset.vertices = JSON.stringify(forma);
       const cabe = p.cabe !== false;
@@ -1783,6 +1858,8 @@
       fila.innerHTML =
         '<input type="number" name="patios" min="0" step="0.5" placeholder="m²"' +
         ' data-bloque="urbanisticos" aria-label="Área del patio (m²)">' +
+        '<button type="button" class="rc-patio-bloquear" aria-pressed="false"' +
+        ' aria-label="Bloquear patio" title="Bloquear patio (no se podrá editar)">🔓</button>' +
         '<button type="button" class="rc-patio-quitar" aria-label="Quitar patio">×</button>';
       listaPatios.appendChild(fila);
       fila.querySelector("input").focus();
@@ -1794,10 +1871,66 @@
     const btn = ev.target.closest(".rc-patio-quitar");
     if (!btn) return;
     const fila = btn.closest(".rc-patio-fila");
+    // Un patio bloqueado no se puede borrar: hay que desbloquearlo primero.
+    if (fila && fila.dataset.bloqueado === "true") return;
     const id = fila && fila.dataset.patioId;
     if (fila) fila.remove();
     if (patioEditor && id) patioEditor.olvidar(id);
     calcularConDebounce();
+  });
+
+  // ─── Bloqueo de patios ────────────────────────────────────────────────
+  // Fija el estado bloqueado/desbloqueado de una fila (clase, dataset, input
+  // readonly, × deshabilitado, candado) y lo refleja en el objeto del payload
+  // (para que el editor del lienzo lo respete en vivo, sin esperar al recálculo).
+  function aplicarEstadoBloqueo(fila, bloqueado) {
+    if (!fila) return;
+    bloqueado = !!bloqueado;
+    fila.dataset.bloqueado = bloqueado ? "true" : "";
+    if (!bloqueado) delete fila.dataset.bloqueado;
+    fila.classList.toggle("rc-patio-fila-bloqueada", bloqueado);
+    const input = fila.querySelector('input[name="patios"]');
+    if (input) input.readOnly = bloqueado;
+    const quitar = fila.querySelector(".rc-patio-quitar");
+    if (quitar) quitar.disabled = bloqueado;
+    const candado = fila.querySelector(".rc-patio-bloquear");
+    if (candado) {
+      candado.setAttribute("aria-pressed", bloqueado ? "true" : "false");
+      candado.setAttribute("aria-label", bloqueado ? "Desbloquear patio" : "Bloquear patio");
+      candado.title = bloqueado ? "Desbloquear patio" : "Bloquear patio (no se podrá editar)";
+      candado.textContent = bloqueado ? "🔒" : "🔓";
+    }
+    // Refleja el estado en el patio del payload activo (el editor lo lee en vivo).
+    marcarPatioPayloadBloqueado(fila.dataset.patioId, bloqueado);
+  }
+
+  // Marca `bloqueado` en el objeto de patio del último payload pintado (por id), en
+  // todas las plantas, para que el editor del lienzo lo respete inmediatamente.
+  function marcarPatioPayloadBloqueado(id, bloqueado) {
+    if (!id || !renderer || !renderer._lastPayload) return;
+    const pl = (renderer._lastPayload.envolvente && renderer._lastPayload.envolvente.plantas)
+      || (renderer._lastPayload.edificio && renderer._lastPayload.edificio.plantas) || [];
+    for (const planta of pl) {
+      for (const p of (planta.patios || [])) {
+        if (p.id === id) p.bloqueado = !!bloqueado;
+      }
+    }
+  }
+
+  // Delegación global: click en 🔒/🔓 alterna el bloqueo del patio.
+  form.addEventListener("click", ev => {
+    const btn = ev.target.closest(".rc-patio-bloquear");
+    if (!btn) return;
+    const fila = btn.closest(".rc-patio-fila");
+    if (!fila) return;
+    const bloqueado = fila.dataset.bloqueado !== "true";
+    aplicarEstadoBloqueo(fila, bloqueado);
+    // Al bloquear, suelta la selección del lienzo y repinta para quitar tiradores.
+    if (bloqueado && patioEditor) patioEditor.olvidar(fila.dataset.patioId);
+    if (renderer) renderer.repintar();
+    // Recalcula: el backend re-prioriza (un bloqueado congela su zona y los vecinos
+    // se adaptan alrededor) y persiste el estado en los parámetros del proyecto.
+    pedirCalculo();
   });
 
   // Delegación global: «Adaptar» fija el patio a la forma/área que CABEN en su hueco.

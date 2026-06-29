@@ -334,7 +334,8 @@ def _plantas_envolvente_a_dict(envolvente) -> list[dict[str, Any]]:
                  "base": ring(getattr(p, "base", None) or p.geometry),
                  "area_m2": round(p.area_m2, 2), "luz_recta_m": round(p.luz_recta_m, 2),
                  "area_efectiva_m2": round(getattr(p, "area_efectiva_m2", 0.0) or p.area_m2, 2),
-                 "cabe": bool(getattr(p, "cabe", True))}
+                 "cabe": bool(getattr(p, "cabe", True)),
+                 "bloqueado": bool(getattr(p, "bloqueado", False))}
                 for p in pl.patios
             ],
             "construida_m2": round(pl.area_construida_m2, 2),

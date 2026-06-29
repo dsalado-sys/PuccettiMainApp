@@ -329,6 +329,33 @@ Notas del consumo en el canvas (verificadas en `rc_canvas.js`):
   con área falseada → «no cabe» falso y botón «Adaptar» vacío. Nuevo helper `autoCruza(v)` (par de aristas no
   adyacentes que se cruzan); `_move` rechaza el candidato autointersectante y mantiene `_ultimoValido` (sembrado
   en `_down`). Nunca se commitea un patio bowtie. 176 tests verdes.
+- **2026-06-29** — **Patios: bloqueo (congelado) + fusión por proximidad.** Nuevo campo `bloqueado`
+  propagado por todo el pipeline (`PatioDef`→`PatioPlacement`→`Patio`→dict de salida; parse/serialize en
+  `parametros.py`, emitido solo si `True`). **Bloqueo**: botón candado 🔒/🔓 a la izquierda del `×` en cada
+  `.rc-patio-fila`; un patio bloqueado NO admite interacción (lienzo, área `readonly`, `×` `disabled`) y en
+  `colocar_patios` tiene **prioridad máxima** (`orden = bloqueados primero, luego lista` → los vecinos se
+  adaptan alrededor; el bloqueado conserva su base). Persistente (round-trip por params). El editor
+  (`rc_patios.js`) gatea los bloqueados leyendo `patio.bloqueado` del payload (`_bloqueado`): saltados en
+  `_hit`/`_down`/`_candidatosHandle`/`_dblclick`/`_contextmenu`. **Fusión**: cuando dos patios NO bloqueados
+  quedan a ≤ 0,1 m (`distanciaPoligonos`), `dibujarOverlay` pinta una **ventanita azul** (`COLOR.azul`
+  `#2D6CDF`, excepción a la paleta pedida por el arquitecto) con un botón `+`; al pulsarlo, `fusionarPatios`
+  (render_calculos.js) los une en uno: forma = **envolvente convexa** (`convexHull`, cadena monótona) de
+  ambos, superficie = **suma** de áreas (el backend la normaliza vía `_ajustar_area`); se elimina el patio B
+  y el A baja a última prioridad. 180 tests (+4: round-trip `bloqueado`, propagación motor/Patio, prioridad
+  congelada, contrato del dict de salida).
+- **2026-06-29** — **Fusión: cuello fino (sustituye la envolvente convexa) + fila del panel en una línea.**
+  El hull deformaba («rellenaba alrededor»); ahora la fusión **conserva ambas formas/vértices exactos** y las
+  une por un **cuello finísimo** en una sola figura (superficie = suma). La unión robusta se hace con **shapely
+  en el backend**: `fusionar_poligonos(a, b, ancho=ANCHO_PUENTE=0.06)` (`envolvente.py`) = `unary_union([a, b,
+  puente])` donde `puente` = buffer fino del segmento entre `nearest_points(a, b)` (o disco mínimo si ya se
+  tocan); `_normalizar` garantiza un único Polygon válido. Endpoint **`POST /modulos/render-calculos/fusionar-patios`**
+  (permiso editar): recibe `{a, b}` (anillos UTM), devuelve `{poligono: ring(fused)}` vía `fusionar_anillos`
+  (wrapper coords→Polygon). `fusionarPatios` (render_calculos.js) ahora es **async**: pide la unión al backend,
+  la fija como `vertices` del patio A (área = suma) y borra el B; `convexHull` eliminado. El anillo fusionado
+  viaja luego como un patio normal (el pipeline lo preserva: `_ajustar_area`≈identidad, `conformar_patio`
+  idéntico si cabe). **CSS**: `.rc-patio-fila input { flex:1 1 60px; min-width:0 }` → candado + `×` en la misma
+  línea (el aviso «no cabe» sigue cayendo solo por `flex-basis:100%`). 182 tests (+2: fusión conserva ambas
+  formas / un solo Polygon; fusión tocándose).
 - **2026-06-29** — **Doble-clic en patios: edición de vértices EN SITIO (vivo) + «volver a cuadrado» AÑADIDO Y
   RETIRADO el mismo día.** **Vivo:** doble-clic SOBRE una arista inserta un vértice (`mejorD <= tolPx`) y clic
   derecho sobre un vértice lo borra (≥3); ambas conservan el área (`escalarAArea`), así que se fijan **EN SITIO**:

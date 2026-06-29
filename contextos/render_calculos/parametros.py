@@ -52,6 +52,7 @@ class PatioDef:
     area_m2: float
     id: str = ""
     vertices: list | None = None
+    bloqueado: bool = False   # patio congelado: el usuario no puede editarlo y el motor lo prioriza
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -96,7 +97,12 @@ def _parse_patio(item: Any) -> PatioDef | None:
                         break
             if len(pts) >= 3:
                 verts = pts
-        return PatioDef(area_m2=a, id=str(item.get("id") or ""), vertices=verts)
+        return PatioDef(
+            area_m2=a,
+            id=str(item.get("id") or ""),
+            vertices=verts,
+            bloqueado=bool(item.get("bloqueado", False)),
+        )
     return None
 
 
@@ -328,6 +334,7 @@ class ParametrosRender:
                     area_m2=area_de_patio(pd),
                     id=(pd.id if isinstance(pd, PatioDef) else ""),
                     vertices=(pd.vertices if isinstance(pd, PatioDef) else None),
+                    bloqueado=(pd.bloqueado if isinstance(pd, PatioDef) else False),
                 )
                 for pd in self.urbanisticos.patios
                 if area_de_patio(pd) > 0
@@ -344,6 +351,8 @@ def _patio_def_a_dict(pd: Any) -> dict[str, Any]:
         out: dict[str, Any] = {"id": pd.id or "", "area_m2": float(pd.area_m2)}
         if pd.vertices:
             out["vertices"] = [[float(x), float(y)] for x, y in pd.vertices]
+        if pd.bloqueado:
+            out["bloqueado"] = True
         return out
     return {"id": "", "area_m2": float(pd)}
 

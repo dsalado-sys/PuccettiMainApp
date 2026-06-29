@@ -39,6 +39,8 @@ from app.contextos.render_calculos.casos_uso import (
     parametros_desde_proyecto,
 )
 from app.contextos.render_calculos.dominio import UsoEdificio
+from app.contextos.render_calculos.geometria.envolvente import fusionar_anillos
+from app.contextos.render_calculos.geometria.serializacion import ring
 from app.contextos.render_calculos.parametros import (
     ParametrosUrbanisticos,
     parametros_a_dict,
@@ -430,6 +432,42 @@ def calcular(
         for a in alertas_extra
     ]
     return JSONResponse(resultado)
+
+
+def _anillo_valido(raw: Any) -> list[list[float]] | None:
+    """Valida un anillo `[[x, y], ...]` del payload: ≥3 pares numéricos. None si no vale."""
+    if not isinstance(raw, (list, tuple)):
+        return None
+    pts: list[list[float]] = []
+    for v in raw:
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            try:
+                pts.append([float(v[0]), float(v[1])])
+            except (TypeError, ValueError):
+                return None
+        else:
+            return None
+    return pts if len(pts) >= 3 else None
+
+
+# ─── Fusión de dos patios próximos en una sola figura (cuello fino) ──────────
+@router.post("/fusionar-patios")
+def fusionar_patios(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+):
+    """Une dos anillos de patio (UTM) en un único polígono que conserva ambas formas,
+    conectadas por un cuello finísimo. Devuelve `{"poligono": [[x,y],...]}`. Geometría
+    pura (sin BBDD): el área la fija el frontend como la suma de las dos asignadas."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    a = _anillo_valido(payload.get("a"))
+    b = _anillo_valido(payload.get("b"))
+    if a is None or b is None:
+        raise HTTPException(400, "Cada patio necesita un polígono de al menos 3 vértices.")
+    fusion = fusionar_anillos(a, b)
+    if fusion.is_empty:
+        raise HTTPException(400, "No se pudo fusionar: los patios no forman una figura válida.")
+    return JSONResponse({"poligono": ring(fusion)})
 
 
 # ─── Estancias de un inmueble concreto (modo «inmueble») ────────────────────

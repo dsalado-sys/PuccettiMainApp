@@ -91,6 +91,7 @@ class PatioPlacement:
     area_m2: float
     id: str = ""
     vertices: Optional[list] = None
+    bloqueado: bool = False   # patio congelado: prioridad máxima de colocación (los demás ceden ante él)
 
 
 @dataclass

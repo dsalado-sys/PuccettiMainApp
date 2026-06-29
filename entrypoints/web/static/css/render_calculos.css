@@ -125,7 +125,9 @@
 .rc-patios-ayuda { font-size: var(--text-eyebrow); color: var(--on-surface-muted); margin: 0 0 var(--space-sm); }
 .rc-patios-lista { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--space-sm); }
 .rc-patio-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: var(--space-xs); border-left: 3px solid transparent; border-radius: var(--radio-chip); }
-.rc-patio-fila input { flex: 1; }
+/* El input encoge (min-width:0) para que candado + × quepan en la misma línea;
+   el aviso «no cabe» sigue cayendo a su propia línea (flex-basis:100%). */
+.rc-patio-fila input { flex: 1 1 60px; min-width: 0; }
 /* Patio seleccionado en el lienzo: resalta su fila en el panel. */
 .rc-patio-fila-activa { border-left-color: var(--dorado); background: var(--tint-primary-6); }
 /* Patio que, tras adaptarse al borde, no alcanza sus m²: aviso en rojo. */
@@ -148,6 +150,23 @@
   font-size: var(--text-lg); line-height: 1; padding: 0;
 }
 .rc-patio-quitar:hover { background: var(--tint-error-8); }
+.rc-patio-quitar:disabled { opacity: 0.4; cursor: not-allowed; }
+.rc-patio-quitar:disabled:hover { background: var(--surface); }
+/* Botón-icono de bloquear/desbloquear patio (candado), a la izquierda del de quitar. */
+.rc-patio-bloquear {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface); border: 1px solid var(--outline); color: var(--on-surface-secondary);
+  border-radius: var(--radio-chip); min-width: 32px; min-height: 32px; cursor: pointer;
+  font-size: var(--text-sm); line-height: 1; padding: 0;
+}
+.rc-patio-bloquear:hover { background: var(--tint-primary-8); }
+.rc-patio-bloquear[aria-pressed="true"] { border-color: var(--dorado); background: var(--tint-primary-6); }
+/* Patio bloqueado (congelado): no editable. Fila atenuada, borde dorado, input readonly inerte. */
+.rc-patio-fila-bloqueada { border-left-color: var(--dorado); opacity: 0.82; }
+.rc-patio-fila-bloqueada input[readonly] {
+  background: var(--surface-variant, var(--surface)); color: var(--on-surface-muted);
+  cursor: not-allowed; opacity: 0.75;
+}
 .rc-patio-add {
   background: var(--surface); border: 1px solid var(--dorado); color: var(--on-surface-secondary);
   border-radius: var(--radio-chip); font-size: var(--text-sm); padding: var(--space-xs) 10px; cursor: pointer;

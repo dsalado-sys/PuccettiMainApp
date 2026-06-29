@@ -15,6 +15,7 @@ from app.contextos.render_calculos.geometria.envolvente import (
     colocar_patios,
     conformar_patio,
     construir_envolvente,
+    fusionar_poligonos,
 )
 from app.contextos.render_calculos.geometria.config import PatioPlacement
 from app.contextos.render_calculos.geometria.serializacion import ring
@@ -313,3 +314,99 @@ def test_adaptar_reencaja_con_area_efectiva_menos_margen():
     ]), footprint=FOOT)
     assert b2.cabe is True
     assert b2.area_efectiva_m2 == pytest.approx(objetivo, rel=0.02)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Patio bloqueado (congelado): persiste y tiene prioridad máxima de colocación.
+# ════════════════════════════════════════════════════════════════════════════
+
+# ─── 17. Round-trip de `bloqueado` (se emite solo cuando es True; ausente → False) ─
+def test_round_trip_bloqueado():
+    verts = [[18.0, 18.0], [22.0, 18.0], [22.0, 22.0], [18.0, 22.0]]
+    p = ParametrosRender()
+    p.urbanisticos.patios = [
+        PatioDef(area_m2=16.0, id="locked", vertices=verts, bloqueado=True),
+        PatioDef(area_m2=10.0, id="free"),
+    ]
+    d = parametros_a_dict(p)
+    patios_d = d["urbanisticos"]["patios"]
+    assert patios_d[0].get("bloqueado") is True      # emitido solo cuando es True
+    assert "bloqueado" not in patios_d[1]            # patio libre: clave omitida
+    p2 = parametros_desde_dict(d)
+    assert p2.urbanisticos.patios[0].bloqueado is True
+    assert p2.urbanisticos.patios[1].bloqueado is False   # default al ausentarse
+
+
+# ─── 18. `bloqueado` propaga al motor (PatioPlacement) y al Patio dibujado ────
+def test_bloqueado_propaga_a_motor_y_a_patio():
+    verts = [[18.0, 18.0], [22.0, 18.0], [22.0, 22.0], [18.0, 22.0]]
+    p = _render([PatioDef(area_m2=16.0, vertices=verts, bloqueado=True)])
+    motor = p.a_parametros_motor()
+    assert motor.patios[0].bloqueado is True
+    pt = _regulares(_envolvente(p))[0].patios[0]
+    assert pt.bloqueado is True
+    assert pt.area_m2 == 16.0                          # área (capacidad) intacta
+
+
+# ─── 19. Congelado = prioridad máxima: cede el NO bloqueado, aunque sea anterior ─
+def test_bloqueado_tiene_prioridad_aunque_sea_posterior():
+    # El patio bloqueado va DESPUÉS en la lista pero, al estar congelado, conserva su
+    # base; es el NO bloqueado (anterior) quien se adapta. Sin bloqueo cedería el posterior.
+    libre = [[16.0, 16.0], [24.0, 16.0], [24.0, 24.0], [16.0, 24.0]]      # 64→30 centrado (20,20)
+    congelado = [[20.0, 20.0], [28.0, 20.0], [28.0, 28.0], [20.0, 28.0]]  # 64→30 (24,24), solapa libre
+    a, b = colocar_patios(FOOT, _motor([
+        PatioDef(area_m2=30.0, vertices=libre),                       # anterior, NO bloqueado
+        PatioDef(area_m2=30.0, vertices=congelado, bloqueado=True),   # posterior, BLOQUEADO
+    ]), footprint=FOOT)
+    assert b.bloqueado is True
+    assert b.geometry.equals(b.base)                       # el bloqueado queda intacto
+    assert a.geometry.intersection(b.base).area < 0.5      # el libre esquiva al bloqueado
+    assert a.geometry.intersection(b.geometry).area < 0.5  # las efectivas no se pisan
+    assert a.area_efectiva_m2 == pytest.approx(30.0, rel=0.05)   # capacidad intacta
+    assert a.cabe is True
+
+
+# ─── 20. La salida para el canvas expone `bloqueado` (contrato del frontend) ──
+def test_salida_dict_incluye_bloqueado():
+    from app.contextos.render_calculos.casos_uso import _plantas_envolvente_a_dict
+    verts = [[18.0, 18.0], [22.0, 18.0], [22.0, 22.0], [18.0, 22.0]]
+    env = _envolvente(_render([PatioDef(area_m2=16.0, vertices=verts, bloqueado=True)]))
+    regs = [pl for pl in _plantas_envolvente_a_dict(env) if pl["tipo"] == "regular"]
+    assert regs[0]["patios"][0]["bloqueado"] is True
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Fusión de dos patios con cuello fino: una sola figura que CONSERVA ambas formas.
+# ════════════════════════════════════════════════════════════════════════════
+
+# ─── 21. Fusión: un único Polygon, área ≈ suma, contiene ambas formas ─────────
+def test_fusionar_poligonos_conserva_ambas_formas():
+    from app.contextos.render_calculos.geometria.serializacion import ring
+    a = box(10.0, 10.0, 16.0, 16.0)   # 6×6 = 36 m², centro (13,13)
+    b = box(16.05, 10.0, 22.05, 16.0)  # 6×6 = 36 m², a 0,05 m a la derecha de A
+    fused = fusionar_poligonos(a, b)
+    # Una sola figura válida (NO MultiPolygon).
+    assert fused.geom_type == "Polygon"
+    assert fused.is_valid and not fused.is_empty
+    # Superficie ≈ suma (el cuello fino añade un área ínfima).
+    assert fused.area == pytest.approx(72.0, rel=0.02)
+    # Conserva AMBAS formas: contiene puntos interiores de A y de B.
+    assert fused.contains(a.representative_point())
+    assert fused.contains(b.representative_point())
+    # NO es una envolvente convexa: el hueco entre A y B (arriba/abajo del cuello)
+    # NO se rellena → un punto fuera de ambos patios y fuera del cuello queda fuera.
+    from shapely.geometry import Point
+    assert not fused.contains(Point(16.025, 14.0))   # encima del cuello, entre A y B
+    # Serializa sin romper (ring() solo admite Polygon simple).
+    assert len(ring(fused)) >= 4
+
+
+# ─── 22. Fusión cuando ya se tocan/solapan → sigue siendo un Polygon válido ──
+def test_fusionar_poligonos_tocandose():
+    a = box(0.0, 0.0, 5.0, 5.0)        # 25 m²
+    b = box(5.0, 0.0, 10.0, 5.0)       # 25 m², comparte la arista x=5
+    fused = fusionar_poligonos(a, b)
+    assert fused.geom_type == "Polygon"
+    assert fused.area == pytest.approx(50.0, rel=0.02)
+    assert fused.contains(a.representative_point())
+    assert fused.contains(b.representative_point())

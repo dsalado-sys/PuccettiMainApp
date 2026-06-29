@@ -13,7 +13,7 @@ from typing import Optional
 
 from shapely.affinity import scale
 from shapely.geometry import LineString, Polygon, box, Point
-from shapely.ops import unary_union
+from shapely.ops import unary_union, nearest_points
 
 from .config import Parametros
 
@@ -42,6 +42,51 @@ def _normalizar(g) -> Polygon:
     if g.geom_type != "Polygon":
         return Polygon()
     return g
+
+
+# Ancho del «cuello» que une dos patios al fusionarlos. 6 cm: lo bastante ancho para
+# sobrevivir a `ring()` (que simplifica con tol 0,03 m y redondea a cm), casi invisible,
+# y de área despreciable (~ancho × hueco ≤ 0,006 m²).
+ANCHO_PUENTE = 0.06
+
+
+def fusionar_poligonos(a: Polygon, b: Polygon, ancho: float = ANCHO_PUENTE) -> Polygon:
+    """Une dos patios en UNA sola figura conservando ambas formas EXACTAS.
+
+    En vez de una envolvente convexa (que deforma y «rellena alrededor»), conecta los dos
+    polígonos por sus puntos más cercanos con un cuello finísimo y los une (`unary_union`).
+    El resultado es un único Polygon válido cuyo contorno son las dos formas originales más
+    el cuello; su superficie ≈ suma de las dos (el cuello añade un área ínfima). Si ya se
+    tocan/solapan, el cuello es inocuo. Devuelve un Polygon vacío si las entradas no valen.
+    """
+    a, b = _normalizar(a), _normalizar(b)
+    if a.is_empty:
+        return b
+    if b.is_empty:
+        return a
+    try:
+        p1, p2 = nearest_points(a, b)
+        if p1.distance(p2) <= 1e-9:
+            puente = p1.buffer(ancho)               # ya se tocan: un disco mínimo asegura conexión
+        else:
+            puente = LineString([p1, p2]).buffer(ancho / 2.0, cap_style=2)  # rectángulo fino plano
+    except Exception:
+        puente = Polygon()
+    return _normalizar(unary_union([a, b, puente]))
+
+
+def fusionar_anillos(a: list, b: list, ancho: float = ANCHO_PUENTE) -> Polygon:
+    """Versión orientada a coordenadas de `fusionar_poligonos` (para la capa web).
+
+    Recibe dos anillos `[[x, y], ...]` (UTM) y devuelve el Polygon fusionado, o un
+    Polygon vacío si alguna entrada no es un polígono válido de ≥3 vértices.
+    """
+    try:
+        pa = _normalizar(Polygon([(float(x), float(y)) for x, y in a]))
+        pb = _normalizar(Polygon([(float(x), float(y)) for x, y in b]))
+    except Exception:
+        return Polygon()
+    return fusionar_poligonos(pa, pb, ancho)
 
 
 def _pieza_anclada(g, ancla: Polygon) -> Polygon:
@@ -79,6 +124,7 @@ class Patio:
     base: Optional[Polygon] = None   # forma IDEAL del usuario (área asignada, sin vértices temporales)
     area_efectiva_m2: float = 0.0    # área que realmente entra tras adaptarse (== area_m2 si cabe)
     cabe: bool = True                # False si, ya adaptado, no alcanza el área asignada
+    bloqueado: bool = False          # patio congelado: el usuario no lo edita y el motor le da prioridad máxima
 
 
 @dataclass
@@ -363,12 +409,13 @@ def colocar_patios(interior_planta: Polygon, params: Parametros, footprint: Opti
     Dos fases:
       A) Construye la forma BASE de cada patio (ideal del usuario, área asignada).
       B) Adapta cada base al borde con `conformar_patio` (recorte + relleno hacia dentro).
-         Prioridad por orden de lista: cada patio cede solo ante los ANTERIORES (mayor
-         prioridad); el anterior conserva su base, el posterior se adapta. Así, cuando el
-         usuario arrastra un patio encima de otro, solo se reacomoda el movido (que el
-         frontend coloca el último) y los demás quedan intactos. Las efectivas siguen sin
-         pisarse (cada posterior evita a los anteriores) y la capacidad no cambia
-         (deduce Σ area_m2, orden-independiente). `Patio.geometry` = efectiva; `Patio.base` = ideal.
+         Prioridad de colocación: primero los BLOQUEADOS (congelados; los demás se adaptan
+         alrededor de ellos), luego por orden de lista (el patio recién movido va el último →
+         es el único que cede). Cada patio cede solo ante los de MAYOR prioridad; el de mayor
+         prioridad conserva su base. Así, al arrastrar un patio encima de otro, solo se
+         reacomoda el movido y los demás quedan intactos. Las efectivas no se pisan y la
+         capacidad no cambia (deduce Σ area_m2, orden-independiente). `Patio.geometry` =
+         efectiva; `Patio.base` = ideal.
     """
     defs = list(getattr(params, "patios", None) or [])
     if not defs:
@@ -377,7 +424,7 @@ def colocar_patios(interior_planta: Polygon, params: Parametros, footprint: Opti
 
     lr = params.diseno.luz_recta_patio_min
     # ── Fase A: bases (forma ideal, área asignada) ──────────────────────────────
-    bases: list[Optional[tuple[Polygon, float, str]]] = [None] * len(defs)  # (base, area, id)
+    bases: list[Optional[tuple[Polygon, float, str, bool]]] = [None] * len(defs)  # (base, area, id, bloqueado)
     residual = interior_planta
     # A1: patios con polígono explícito (respetan la posición del usuario).
     for idx, d in enumerate(defs):
@@ -393,7 +440,7 @@ def colocar_patios(interior_planta: Polygon, params: Parametros, footprint: Opti
             if geom.is_empty:
                 continue
             geom = _ajustar_area(geom, area)   # área fija: normaliza al área asignada
-            bases[idx] = (geom, area, str(getattr(d, "id", "") or ""))
+            bases[idx] = (geom, area, str(getattr(d, "id", "") or ""), bool(getattr(d, "bloqueado", False)))
             residual = _normalizar(residual.difference(geom))
     # A2: patios sin posición → auto-colocado en el residual restante.
     for idx, d in enumerate(defs):
@@ -406,21 +453,30 @@ def colocar_patios(interior_planta: Polygon, params: Parametros, footprint: Opti
         if geom is None or geom.is_empty:
             continue
         geom = _normalizar(geom)
-        bases[idx] = (geom, area, str(getattr(d, "id", "") or ""))
+        bases[idx] = (geom, area, str(getattr(d, "id", "") or ""), bool(getattr(d, "bloqueado", False)))
         residual = _normalizar(residual.difference(geom))
 
-    # ── Fase B: adaptar cada base al borde, cediendo solo ante los ANTERIORES ────
-    # Prioridad por orden de lista (no exclusión mutua): el patio `idx` evita las bases
-    # `0..idx-1` (mayor prioridad) pero NO las posteriores. Así el de mayor prioridad
-    # conserva su forma ideal y solo el posterior se adapta — el frontend coloca el patio
-    # recién movido el último para que sea el único que ceda.
+    # ── Fase B: adaptar cada base al borde según prioridad de colocación ─────────
+    # Prioridad: primero los BLOQUEADOS (congelados; los demás se adaptan alrededor de
+    # ellos), luego por orden de lista (el patio recién movido va el último → es el único
+    # que cede). Cada patio evita las bases de MAYOR prioridad (no las de menor): el de
+    # mayor prioridad conserva su forma ideal. La capacidad no cambia (deduce Σ area_m2,
+    # orden-independiente). La salida conserva el ORDEN ORIGINAL (ids estables p/ el frontend).
+    orden = sorted(
+        (idx for idx, b in enumerate(bases) if b is not None),
+        key=lambda i: (0 if bases[i][3] else 1, i),   # bloqueado primero, luego orden de lista
+    )
+    rank = {idx: pos for pos, idx in enumerate(orden)}   # menor rank = mayor prioridad
     zona = footprint if (footprint is not None and not footprint.is_empty) else interior_planta
     resultado: list[Patio] = []
     for idx, b in enumerate(bases):
         if b is None:
             continue
-        base_geom, area, pid = b
-        anteriores = [bb[0] for j, bb in enumerate(bases) if bb is not None and j < idx]
+        base_geom, area, pid, bloqueado = b
+        anteriores = [
+            bb[0] for j, bb in enumerate(bases)
+            if bb is not None and j != idx and rank[j] < rank[idx]
+        ]
         region = zona
         if anteriores:
             region = zona.difference(unary_union(anteriores))
@@ -429,7 +485,7 @@ def colocar_patios(interior_planta: Polygon, params: Parametros, footprint: Opti
         efectiva, area_ef, cabe = conformar_patio(base_geom, region, area, lr, footprint=zona)
         resultado.append(Patio(
             geometry=efectiva, area_m2=area, luz_recta_m=lr, id=pid,
-            base=base_geom, area_efectiva_m2=area_ef, cabe=cabe,
+            base=base_geom, area_efectiva_m2=area_ef, cabe=cabe, bloqueado=bloqueado,
         ))
     return resultado
 

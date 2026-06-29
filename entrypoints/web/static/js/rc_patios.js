@@ -15,6 +15,7 @@
   const COLOR = {
     negro: "#0A0A0A", dorado: "#B8960C", doradoClaro: "#C9A84C",
     blanco: "#FFFFFF", error: "#8C2A1F",
+    azul: "#2D6CDF",         // azul de la ventanita de fusión (excepción deliberada a la paleta, pedido del usuario)
   };
   const HIT_PX = 9;          // radio de acierto de un tirador (px de pantalla)
   const DRAG_PX = 4;         // umbral de PREVIEW: por debajo es un clic (jitter), no se arrastra en vivo
@@ -22,6 +23,9 @@
                              // doble-clic (4-8px) hace preview pero nunca reordena/recalcula.
   const ROT_OFFSET_PX = 26;  // distancia del tirador de giro sobre el patio
   const K_MIN = 0.25, K_MAX = 4;   // tope del factor de estirado (el área se conserva igual)
+  const UMBRAL_FUSION_M = 0.1;     // gap ≤ 0,1 m entre dos patios → fusionables (ventanita azul)
+  const FUSION_BTN_R = 11;         // radio del botón de fusión (px de pantalla)
+  const FUSION_BTN_DY_PX = 13;     // separación del botón sobre el borde superior de la ventanita
 
   // ── Helpers geométricos (mundo UTM) ─────────────────────────────────────
   function bbox(v) {
@@ -130,6 +134,34 @@
     }
     return v;
   }
+  // Distancia punto→segmento y segmento→segmento (mundo UTM), para medir el hueco entre patios.
+  function distPuntoSeg(p, a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const L2 = dx * dx + dy * dy || 1e-12;
+    let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+  }
+  function distSegSeg(a, b, c, d) {
+    if (segCruza(a, b, c, d)) return 0;
+    return Math.min(distPuntoSeg(a, c, d), distPuntoSeg(b, c, d), distPuntoSeg(c, a, b), distPuntoSeg(d, a, b));
+  }
+  // Distancia mínima entre dos polígonos (anillos ABIERTOS): 0 si solapan, si no el
+  // mínimo sobre todos los pares de aristas. Sirve para detectar patios a ≤ 0,1 m.
+  function distanciaPoligonos(ra, rb) {
+    if (!ra || !rb || ra.length < 2 || rb.length < 2) return Infinity;
+    if (solapan(ra, rb)) return 0;
+    let m = Infinity;
+    for (let i = 0; i < ra.length; i++) {
+      const a1 = ra[i], a2 = ra[(i + 1) % ra.length];
+      for (let j = 0; j < rb.length; j++) {
+        const d = distSegSeg(a1, a2, rb[j], rb[(j + 1) % rb.length]);
+        if (d < m) m = d;
+        if (m === 0) return 0;
+      }
+    }
+    return m;
+  }
 
   // ── Editor ───────────────────────────────────────────────────────────────
   class PatioEditor {
@@ -189,6 +221,8 @@
     // tiradores operan sobre lo que se dibuja, no sobre la ideal que pueda asomar fuera. Sin
     // adaptación `poligono == base`, así que coincide con la forma del usuario.
     _editable(patio) { return abrirAnillo(patio.poligono || patio.base); }
+    // Un patio bloqueado (congelado) no admite ninguna interacción de edición.
+    _bloqueado(patio) { return !!(patio && patio.bloqueado); }
 
     // ── Coordenadas ──
     _pos(ev) {
@@ -212,7 +246,7 @@
     // (rotar → estirar → vértice). Si hay varios, se ciclará entre ellos al pulsar.
     _candidatosHandle(px, py) {
       const sel = this.seleccionId ? this._patioPorId(this.seleccionId) : null;
-      if (!sel) return [];
+      if (!sel || this._bloqueado(sel)) return [];
       const v = this._editable(sel);   // tiradores sobre la forma EFECTIVA (visible)
       const cerca = (mundo) => {
         const s = this.r._mundoAPantalla(mundo[0], mundo[1]);
@@ -248,6 +282,7 @@
       const w = this.r._pantallaAMundo(px, py);
       const patios = this._patios();
       for (let i = patios.length - 1; i >= 0; i--) {
+        if (this._bloqueado(patios[i])) continue;   // patio congelado: no seleccionable
         if (puntoEnPoligono(w, patios[i].poligono)) return { modo: "mover", idx: -1, patio: patios[i] };
       }
       return null;
@@ -279,6 +314,7 @@
     _hover(ev) {
       if (this.modo || !this.activo) return;
       const [px, py] = this._pos(ev);
+      if (this._botonFusionEn(px, py)) { this.r.cv.style.cursor = "pointer"; return; }
       const h = this._hit(px, py);
       let c = "default";
       if (h) c = h.modo === "rotar" ? "grab" : (h.modo === "mover" ? "move" : "pointer");
@@ -288,6 +324,9 @@
     _down(ev) {
       if (!this.activo) return;
       const [px, py] = this._pos(ev);
+      // El botón de la ventanita azul (fusión) tiene prioridad sobre cualquier tirador/patio.
+      const bf = this._botonFusionEn(px, py);
+      if (bf) { ev.preventDefault(); this.opts.onMerge && this.opts.onMerge(bf.idA, bf.idB); return; }
       // Agarra SIN avanzar: el arrastre afectará al tirador resaltado. El ciclado al
       // siguiente ocurre solo en un clic suelto (sin arrastre), en `_up`.
       let h = null;
@@ -311,6 +350,7 @@
         const w = this.r._pantallaAMundo(px, py);
         const patios = this._patios();
         for (let i = patios.length - 1; i >= 0; i--) {
+          if (this._bloqueado(patios[i])) continue;   // patio congelado: no seleccionable
           if (puntoEnPoligono(w, patios[i].poligono)) { h = { modo: "mover", idx: -1, patio: patios[i] }; break; }
         }
       }
@@ -445,7 +485,7 @@
     _dblclick(ev) {   // doble-clic SOBRE una arista → inserta un vértice (EN SITIO, sin recálculo)
       if (!this.activo || !this.seleccionId) return;
       const sel = this._patioPorId(this.seleccionId);
-      if (!sel) return;
+      if (!sel || this._bloqueado(sel)) return;
       const w = this.r._pantallaAMundo(...this._pos(ev));
       const v = this._editable(sel), tolPx = HIT_PX + 2;   // arista de la forma efectiva
       let mejor = -1, mejorD = Infinity;
@@ -468,7 +508,7 @@
     _contextmenu(ev) {   // clic derecho sobre un vértice → lo elimina (si quedan ≥3)
       if (!this.activo || !this.seleccionId) return;
       const sel = this._patioPorId(this.seleccionId);
-      if (!sel) return;
+      if (!sel || this._bloqueado(sel)) return;
       const v = this._editable(sel);   // vértices de la forma efectiva
       if (v.length <= 3) return;   // un triángulo es el mínimo
       const [px, py] = this._pos(ev);
@@ -496,11 +536,80 @@
       return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
     }
 
+    // ── Fusión de patios próximos (≤ 0,1 m): ventanita azul + botón ──────────
+    // Pares de patios NO bloqueados con hueco ≤ UMBRAL_FUSION_M (anillos efectivos abiertos).
+    _paresFusionables() {
+      if (!this.activo) return [];
+      const patios = this._patios();
+      const pares = [];
+      for (let i = 0; i < patios.length; i++) {
+        if (this._bloqueado(patios[i]) || !patios[i].id) continue;
+        const ri = abrirAnillo(patios[i].poligono || patios[i].base);
+        if (!ri || ri.length < 3) continue;
+        for (let j = i + 1; j < patios.length; j++) {
+          if (this._bloqueado(patios[j]) || !patios[j].id) continue;
+          const rj = abrirAnillo(patios[j].poligono || patios[j].base);
+          if (!rj || rj.length < 3) continue;
+          if (distanciaPoligonos(ri, rj) <= UMBRAL_FUSION_M) {
+            pares.push({ idA: patios[i].id, idB: patios[j].id, ra: ri, rb: rj });
+          }
+        }
+      }
+      return pares;
+    }
+    // Para cada par: caja (bbox unión, mundo) + ancla del botón (mundo, sobre el borde superior).
+    _botonesFusion() {
+      const sc = this.r.scale || 1;
+      return this._paresFusionables().map(par => {
+        const b = bbox(par.ra.concat(par.rb));
+        return { idA: par.idA, idB: par.idB, box: b,
+                 ax: (b.mnx + b.mxx) / 2, ay: b.mxy + FUSION_BTN_DY_PX / sc };
+      });
+    }
+    // ¿El punto de pantalla (px,py) cae sobre algún botón de fusión? Devuelve el par o null.
+    _botonFusionEn(px, py) {
+      if (!this.activo) return null;
+      for (const bf of this._botonesFusion()) {
+        const s = this.r._mundoAPantalla(bf.ax, bf.ay);
+        if (Math.hypot(s[0] - px, s[1] - py) <= FUSION_BTN_R) return bf;
+      }
+      return null;
+    }
+    _dibujarFusiones() {
+      const r = this.r, ctx = r.ctx, sc = r.scale || 1, mrg = 6 / sc;
+      for (const bf of this._botonesFusion()) {
+        const b = bf.box;
+        ctx.save();
+        // Ventanita azul (rectángulo discontinuo) alrededor del par fusionable.
+        ctx.beginPath();
+        ctx.moveTo(r._x(b.mnx - mrg), r._y(b.mny - mrg));
+        ctx.lineTo(r._x(b.mxx + mrg), r._y(b.mny - mrg));
+        ctx.lineTo(r._x(b.mxx + mrg), r._y(b.mxy + mrg));
+        ctx.lineTo(r._x(b.mnx - mrg), r._y(b.mxy + mrg));
+        ctx.closePath();
+        ctx.setLineDash([5, 3]); ctx.strokeStyle = COLOR.azul; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.setLineDash([]);
+        // Botón de fusión: disco azul con "+" blanco.
+        const hx = r._x(bf.ax), hy = r._y(bf.ay);
+        ctx.beginPath(); ctx.arc(hx, hy, FUSION_BTN_R, 0, Math.PI * 2);
+        ctx.fillStyle = COLOR.azul; ctx.fill();
+        ctx.strokeStyle = COLOR.blanco; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(hx - 5, hy); ctx.lineTo(hx + 5, hy);
+        ctx.moveTo(hx, hy - 5); ctx.lineTo(hx, hy + 5);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     // ── Overlay (se dibuja en el contexto YA rotado por la brújula) ──
     dibujarOverlay() {
-      if (!this.activo || !this.seleccionId) return;
+      if (!this.activo) return;
+      this._dibujarFusiones();                 // ventanitas azules (no requieren selección)
+      if (!this.seleccionId) return;
       const sel = this._patioPorId(this.seleccionId);
-      if (!sel) return;
+      if (!sel || this._bloqueado(sel)) return;
       // Tiradores y contorno sobre la forma EFECTIVA (la adaptada y visible): el contorno
       // discontinuo coincide con el relleno dibujado, así se edita lo que se ve (no una
       // forma ideal que asome fuera de la parcela).
