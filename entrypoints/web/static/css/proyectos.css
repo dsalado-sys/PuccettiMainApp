@@ -65,7 +65,7 @@
 .pr-bloque h3 { margin: 0 0 10px; }
 .pr-bloque-peligro { border-color: var(--tint-error-35); }
 .pr-activo-aviso { margin: 0 0 10px; font-size: var(--text-base); color: var(--on-surface-body); }
-.pr-activo-aviso strong { color: var(--negro); }
+.pr-activo-aviso strong { color: var(--on-surface); }
 .pr-activo-aviso.pr-es-activo { color: var(--dorado); }
 .pr-detalle-acciones { display: flex; gap: var(--space-sm); flex-wrap: wrap; }
 
@@ -78,7 +78,7 @@
 }
 .pr-datos-lista > div:last-child { border-bottom: none; padding-bottom: 0; }
 .pr-datos-lista dt { font-size: var(--text-eyebrow); color: var(--on-surface-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.pr-datos-lista dd { margin: 0; font-size: var(--text-base); color: var(--negro); text-align: right; }
+.pr-datos-lista dd { margin: 0; font-size: var(--text-base); color: var(--on-surface); text-align: right; }
 
 .pr-campo { display: flex; flex-direction: column; gap: var(--space-xs); }
 .pr-campo-label { font-size: var(--text-eyebrow); color: var(--on-surface-secondary); }

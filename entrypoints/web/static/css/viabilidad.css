@@ -56,11 +56,11 @@
 .vb-radio span {
   font-weight: 700;
   font-size: var(--text-md);
-  color: var(--negro);
+  color: var(--on-surface);
 }
 .vb-radio small { color: var(--on-surface-muted); font-size: var(--text-sm); }
 .vb-radio:has(input:checked) {
-  background: var(--blanco);
+  background: var(--surface);
   border-color: var(--dorado);
   box-shadow: inset 0 0 0 1px var(--dorado);
 }
@@ -83,7 +83,7 @@
   padding: 10px 12px;
   border: 1px solid var(--outline-input);
   border-radius: var(--radio);
-  background: var(--blanco);
+  background: var(--surface);
   color: var(--on-surface);
   min-height: 36px;
 }

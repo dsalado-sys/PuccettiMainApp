@@ -5,9 +5,47 @@ from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
 
+from app.nucleo.modelo import Rol
+from app.nucleo.modelo.rol import acceso
+
+from .catalogo_modulos import CATALOGO
+
 RAIZ_WEB = Path(__file__).parent
 DIR_ESTATICOS = RAIZ_WEB / "static"
 plantillas = Jinja2Templates(directory=str(RAIZ_WEB / "templates"))
+
+
+def _contexto_shell(request) -> dict:
+    """Datos del shell común (rail + cabecera) para CADA página que extiende
+    base.html, sin tocar BBDD: el rol vive en la sesión y la navegación se deriva
+    del catálogo de módulos filtrado por permisos.
+
+    Se expone como global de Jinja (en lugar de context_processor) para no
+    depender de la versión de Starlette y porque `request` siempre está en el
+    contexto de plantilla. Devuelve `nav_items` (catálogo + acceso por rol + flag
+    `activo` según la ruta actual).
+    """
+    try:
+        slug_rol = request.session.get("rol")
+    except (AssertionError, AttributeError):
+        slug_rol = None
+    try:
+        rol = Rol(slug_rol) if slug_rol else Rol.INVERSOR
+    except ValueError:
+        rol = Rol.INVERSOR
+
+    ruta = request.url.path
+    items = []
+    for tarjeta in CATALOGO:
+        items.append({
+            "modulo": tarjeta,
+            "acceso": acceso(rol, tarjeta.id),
+            "activo": ruta == tarjeta.ruta or ruta.startswith(tarjeta.ruta + "/"),
+        })
+    return {"nav_items": items}
+
+
+plantillas.env.globals["contexto_shell"] = _contexto_shell
 
 
 def _calcular_version_estaticos() -> str:

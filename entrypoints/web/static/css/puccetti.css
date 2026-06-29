@@ -34,6 +34,9 @@
   --surface: #FFFFFF;             /* tarjetas / paneles */
   --surface-muted: #F4F2EC;       /* superficie hundida / deshabilitada */
   --surface-inverse: #0A0A0A;     /* bloques negros: cabecera, pie, KPI destacada */
+  --lienzo-papel: #F4F2EC;        /* "papel" de dibujo (canvas render / overlays mapa):
+                                     claro en TODO tema — el JS pinta con colores fijos
+                                     que asumen fondo claro; NO se reasigna en oscuro. */
 
   /* ── Texto sobre superficie (escala de 4 pasos + el gris más claro) ───── */
   --on-surface: #0A0A0A;          /* títulos, cifras, énfasis */
@@ -135,11 +138,25 @@
   /* ── Geometría del shell (para vistas a pantalla completa, p. ej. mapa) ── */
   --altura-cabecera: 66px;
   --altura-pie: 45px;
+  --rail-ancho: 72px;            /* rail vertical colapsado (solo iconos) */
+  --rail-ancho-exp: 248px;       /* rail expandido al pasar el ratón (iconos + nombres) */
+
+  color-scheme: light;          /* controles nativos (scroll, inputs) en claro */
 }
 
-/* ── Tema oscuro (dormido: ningún toggle lo activa todavía). Demuestra que
-   el sistema es dark-ready: basta reasignar el :root, sin tocar los módulos. */
+/* ════════════════════════ Tema oscuro ════════════════════════
+   Se activa con data-theme="dark" en <html> (lo fija el script pre-paint de
+   base.html desde localStorage; lo conmuta tema.js con el botón o Ctrl+O). Los
+   tokens cambian solos: los módulos no conocen el tema (SKILL.md §1, §11).
+   ALCANCE: chrome + páginas estándar. Las vistas de lienzo (localización,
+   render) se fijan a claro porque su canvas usa colores fijos (excepción §13);
+   ver `pagina_lienzo` en plantillas.py.
+   Marca fija (--negro/--dorado/--blanco/--error) NO se reasigna: el rail, la
+   cabecera y el pie son negro+oro en ambos temas, como la identidad del estudio. */
 :root[data-theme="dark"] {
+  color-scheme: dark;           /* inputs/selects/scroll nativos en oscuro */
+
+  /* Atmósfera y superficies */
   --background: #0A0A0A;
   --surface: #16140F;
   --surface-muted: #1C1A14;
@@ -151,6 +168,38 @@
   --outline: #2B2B2B;
   --outline-subtle: #242424;
   --outline-input: #3A3A3A;
+
+  /* Aliases neutros (usados como superficie/texto en algunos módulos) */
+  --gris-suave: #2A2520;
+  --gris-medio: #6B6860;
+
+  /* Velos / scrim: el de carga era blanco (lavaría la pantalla en oscuro) */
+  --veil: rgba(var(--negro-rgb), 0.62);
+  --veil-strong: rgba(var(--negro-rgb), 0.82);
+
+  /* Filetes y tintes neutros: eran negros → imperceptibles sobre fondo oscuro */
+  --hairline-soft: rgba(var(--blanco-rgb), 0.08);
+  --hairline: rgba(var(--blanco-rgb), 0.12);
+  --hairline-strong: rgba(var(--blanco-rgb), 0.20);
+  --tint-neutral-4: rgba(var(--blanco-rgb), 0.05);
+  --tint-neutral-7: rgba(var(--blanco-rgb), 0.10);
+  --tint-neutral-20: rgba(var(--blanco-rgb), 0.25);
+
+  /* Avisos ámbar/naranja: el fondo claro + texto oscuro se invierte para leerse
+     en oscuro (se mantiene el ámbar como advertencia convencional, §13). */
+  --state-warning-bg: #3A2E05;
+  --state-warning-border: #E0A800;
+  --state-warning-text: #FFE082;
+  --state-warning-strong-bg: #3A2205;
+  --state-warning-strong-border: #FF9800;
+  --state-warning-strong-text: #FFCC80;
+
+  /* Rojo de error: el de marca (#8C2A1F) es demasiado oscuro para leerse como
+     texto sobre fondo oscuro. Se aclara a un coral legible; los tintes
+     (--tint-error-*) derivan de --error-rgb, así que también se reasigna para
+     que los fondos de fila/aviso de error se perciban en oscuro. */
+  --error: #F1705C;
+  --error-rgb: 241, 112, 92;
 }
 
 /* ════════════════════════ Base ════════════════════════ */
@@ -197,6 +246,33 @@ summary:focus-visible,
   * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
+/* Cambio de tema progresivo: tema.js añade `.tema-transicion` a <html> solo
+   durante el conmutado (claro↔oscuro) y la retira al acabar. Así el fundido de
+   color ocurre únicamente al cambiar de tema — la carga inicial y los hovers
+   siguen siendo instantáneos. Se omite si el usuario pide menos movimiento. */
+@media (prefers-reduced-motion: no-preference) {
+  .tema-transicion,
+  .tema-transicion *,
+  .tema-transicion *::before,
+  .tema-transicion *::after {
+    transition: background-color 500ms ease, color 500ms ease,
+                border-color 500ms ease, fill 500ms ease,
+                stroke 500ms ease, box-shadow 500ms ease !important;
+  }
+}
+
+/* Iconos SVG vía <use>: las propiedades de trazo deben ir en el <svg> consumidor,
+   NO en el <g> del sprite — un <use> no hereda presentación de ancestros en
+   <defs> (su shadow tree hereda del punto de uso). Sin esto los símbolos caen a
+   fill:black / stroke:none y se ven como manchas oscuras (invisibles en el rail). */
+.rail-icono, .tarjeta-icono, .tema-icono {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* ════════════════════════ Cabecera (glass sticky) ════════════════════════ */
 .cabecera {
   position: sticky;
@@ -205,6 +281,9 @@ summary:focus-visible,
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  column-gap: var(--space-lg);
+  row-gap: var(--space-sm);
   padding: 14px 32px;
   background: rgba(var(--negro-rgb), 0.85);
   backdrop-filter: blur(12px) saturate(1.1);
@@ -220,6 +299,101 @@ summary:focus-visible,
 .sesion-usuario { display: flex; gap: 14px; align-items: center; }
 .sesion-nombre { color: var(--on-inverse-accent); font-weight: 600; font-size: var(--text-md); letter-spacing: 0.02em; }
 .sesion-logout { margin: 0; }
+
+/* Conmutador de tema (sol/luna) — vive en la cabecera oscura: paleta inversa en
+   ambos temas. El icono se intercambia por CSS según data-theme (sin JS). */
+.tema-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--on-inverse-muted);
+  color: var(--on-inverse);
+  border-radius: var(--radio-inner);
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.tema-toggle:hover { border-color: var(--dorado); color: var(--dorado); background: var(--tint-primary-12); }
+.tema-icono { width: 18px; height: 18px; }
+.tema-icono--sol { display: none; }
+:root[data-theme="dark"] .tema-icono--luna { display: none; }
+:root[data-theme="dark"] .tema-icono--sol { display: inline; }
+
+/* ════════════════════════ Rail vertical (navegación de módulos) ════════════
+   Dentro de un módulo el rail es la ÚNICA navegación (no hay cabecera). Negro+oro
+   en ambos temas (identidad del estudio). position: fixed → no reduce el viewport
+   (el contenido se desplaza con padding-left en body.vista-modulo). Colapsado
+   muestra solo iconos; al pasar el ratón (o al recibir foco) se ensancha y revela
+   los nombres de los módulos, superponiéndose al contenido sin remaquetarlo. */
+.rail {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 999;
+  width: var(--rail-ancho);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: 14px 0;
+  background: rgba(var(--negro-rgb), 0.94);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  border-right: 1px solid var(--dorado);
+  overflow: hidden;             /* recorta las etiquetas mientras está colapsado */
+  transition: width 160ms ease, box-shadow 160ms ease;
+}
+/* Se ensancha al pasar el ratón o con foco de TECLADO (:focus-visible). Se usa
+   :has(:focus-visible) en vez de :focus-within para que un clic de ratón (p. ej.
+   en el conmutador de tema) no deje el rail "pegado" abierto al salir el ratón. */
+.rail:hover, .rail:has(:focus-visible) { width: var(--rail-ancho-exp); box-shadow: var(--shadow-elevated); }
+
+/* Filas del rail (marca · items de nav · acciones del pie): icono fijo a la
+   izquierda (no se desplaza al ensanchar) + etiqueta que aparece al expandir.
+   padding-left 24 + icono 24/2 = 36 = mitad de 72 → icono centrado al colapsar. */
+.rail-marca, .rail-item, .rail-accion {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 44px;
+  padding: 0 24px;
+  width: 100%;
+  white-space: nowrap;
+  color: var(--on-inverse-muted);
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: pointer;
+}
+.rail-marca { height: 48px; margin-bottom: var(--space-sm); color: var(--dorado); }
+.rail-monograma {
+  flex: 0 0 24px; width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--dorado); color: var(--negro);
+  border-radius: var(--radio-inner);
+  font-family: var(--fuente-titulos); font-weight: 700; font-size: var(--text-base);
+}
+.rail-marca-texto { font-family: var(--fuente-titulos); font-weight: 700; letter-spacing: 0.26em; }
+
+.rail-nav { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+.rail-pie { display: flex; flex-direction: column; gap: 4px; padding-top: var(--space-sm); border-top: 1px solid rgba(var(--blanco-rgb), 0.12); }
+
+.rail-icono, .rail-accion .tema-icono { flex: 0 0 24px; width: 24px; height: 24px; }
+.rail-label, .rail-marca-texto, .rail-usuario { opacity: 0; transition: opacity 120ms ease; }
+.rail:hover .rail-label, .rail:has(:focus-visible) .rail-label,
+.rail:hover .rail-marca-texto, .rail:has(:focus-visible) .rail-marca-texto,
+.rail:hover .rail-usuario, .rail:has(:focus-visible) .rail-usuario { opacity: 1; }
+
+.rail-item:hover, .rail-accion:hover { background: var(--tint-primary-12); color: var(--on-inverse); }
+.rail-item--activo { color: var(--dorado); background: var(--tint-primary-16); box-shadow: inset 3px 0 0 var(--dorado); }
+
+.rail-usuario { font-size: var(--text-sm); color: var(--on-inverse-accent); padding: 2px 24px 6px; white-space: nowrap; }
+
+/* El contenido se desplaza a la derecha del rail (fixed) solo dentro de módulos;
+   en el nexo principal (hub) no hay rail y manda la cabecera superior. */
+body.vista-modulo { padding-left: var(--rail-ancho); }
 
 /* ════════════════════════ Contenido ════════════════════════ */
 .contenido {
