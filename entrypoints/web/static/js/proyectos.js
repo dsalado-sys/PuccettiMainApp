@@ -43,9 +43,9 @@
   function mostrarToast(msg, esError = false) {
     if (!toast) return;
     toast.textContent = msg;
-    toast.classList.toggle("pr-toast-error", esError);
-    toast.classList.add("pr-toast-on");
-    setTimeout(() => toast.classList.remove("pr-toast-on"), 2200);
+    toast.classList.toggle("toast--error", esError);
+    toast.classList.add("toast--on");
+    setTimeout(() => toast.classList.remove("toast--on"), 2200);
   }
 
   // fetch que nunca lanza: ante error de red devuelve {ok:false} para que los
@@ -149,20 +149,21 @@
 
   function construirCarpeta(g, proyectos, filtrando) {
     const det = document.createElement("details");
-    det.className = "pr-carpeta" + (g.esSin ? " pr-carpeta-sincarpeta" : "");
+    det.className = "carpeta" + (g.esSin ? " carpeta--clara" : "");
     det.dataset.key = g.key;
     det.open = STATE.abiertas.has(g.key) || filtrando;
 
     const sum = document.createElement("summary");
-    sum.className = "pr-carpeta-summary";
+    sum.className = "carpeta-summary";
     const accionesCarpeta = (!g.esSin && puedeEditar)
-      ? '<span class="pr-carpeta-acciones">' +
-        '<button type="button" class="pr-btn-borrar-carpeta" title="Eliminar carpeta">×</button>' +
+      ? '<span class="carpeta-acciones">' +
+        '<button type="button" class="icon-btn icon-btn--peligro pr-btn-borrar-carpeta" ' +
+        'title="Eliminar carpeta" aria-label="Eliminar carpeta">×</button>' +
         '</span>'
       : '';
     sum.innerHTML =
-      `<span class="pr-carpeta-nombre">${escapeHtml(g.nombre)}</span>` +
-      `<span class="pr-carpeta-cuenta">${proyectosDeCarpeta(g.key).length}</span>` +
+      `<span class="carpeta-nombre">${escapeHtml(g.nombre)}</span>` +
+      `<span class="carpeta-cuenta">${proyectosDeCarpeta(g.key).length}</span>` +
       accionesCarpeta;
     det.appendChild(sum);
 
@@ -197,7 +198,7 @@
     if (STATE.seleccionadoId === p.id) li.classList.add("pr-proyecto-sel");
     li.dataset.id = p.id;
     const esActivo = STATE.activoId === p.id;
-    const badge = esActivo ? '<span class="pr-proy-badge">Activo</span>' : '';
+    const badge = esActivo ? '<span class="badge badge--oro-solido">Activo</span>' : '';
     li.innerHTML =
       `<button type="button" class="pr-proy-cargar">` +
       `<strong>${escapeHtml(p.nombre)}${badge}</strong>` +
@@ -205,6 +206,26 @@
       `</button>`;
     li.querySelector(".pr-proy-cargar").addEventListener("click", () => seleccionar(p.id));
     return li;
+  }
+
+  // Etiqueta humana del estado del proyecto (EstadoProyecto del núcleo) para la
+  // pill. Valor desconocido → se muestra tal cual como fallback.
+  const ESTADO_ETIQUETA = {
+    borrador: "Borrador",
+    en_analisis: "En análisis",
+    entregado: "Entregado",
+    archivado: "Archivado",
+  };
+
+  // Pinta el estado como .status-pill: oro para «entregado», neutro para el resto,
+  // de modo que estado y la insignia «Activo» compartan un mismo lenguaje visual.
+  function pintarEstado(estado) {
+    const e = document.getElementById("pr-d-estado");
+    if (!e) return;
+    const v = estado || "";
+    e.textContent = ESTADO_ETIQUETA[v] || (v || "—");
+    e.classList.toggle("badge--oro", v === "entregado");
+    e.classList.toggle("badge--gris", v !== "entregado");
   }
 
   // ─── Detalle (columna derecha) ───────────────────────────────────────
@@ -235,8 +256,8 @@
     const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
     set("pr-d-rc", p.referencia_catastral || "—");
     set("pr-d-direccion", p.direccion || "—");
-    set("pr-d-estado", p.estado || "—");
     set("pr-d-actualizado", p.actualizado_en || "—");
+    pintarEstado(p.estado);
 
     const esActivo = STATE.activoId === p.id;
     const aviso = document.getElementById("pr-activo-aviso");

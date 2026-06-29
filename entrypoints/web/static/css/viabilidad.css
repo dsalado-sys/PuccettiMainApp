@@ -1,9 +1,10 @@
-/* §2.9 — Estudio de viabilidad. Hereda paleta corporativa de puccetti.css. */
+/* §2.9 — Estudio de viabilidad. Hereda paleta + primitivas de puccetti.css.
+   KPIs/badges/toast usan las primitivas compartidas (.kpi-strip/.badge/.toast). */
 
 .vb-layout {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
-  gap: 24px;
+  grid-template-columns: minmax(360px, 1.1fr) minmax(320px, 0.9fr);
+  gap: var(--space-xl);
   align-items: start;
 }
 
@@ -13,65 +14,25 @@
 
 .vb-col { display: flex; flex-direction: column; gap: 18px; }
 
-/* ── Tarjetas ─────────────────────────────────────────────────── */
-.vb-card {
-  background: var(--blanco);
-  border: 1px solid #E4DFCC;
-  border-radius: var(--radio);
-  padding: 18px 20px;
-}
+/* ── Tarjetas (reusan .card; aquí solo el header propio) ──────── */
 .vb-card-h {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 14px;
-  gap: 12px;
+  gap: var(--space-md);
 }
 .vb-card-h h2 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--negro);
+  font-size: var(--text-base);
 }
 
-.vb-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 600;
-  border: 1px solid transparent;
-}
-.vb-badge-dorado { background: rgba(184, 150, 12, 0.12); border-color: var(--dorado); color: var(--dorado); }
-.vb-badge-gris { background: var(--gris-suave); color: var(--gris-medio); border-color: #DDD8C5; }
-.vb-badge-fuente { background: rgba(184, 150, 12, 0.08); border-color: var(--dorado); color: var(--negro); }
-
-/* ── Datos parcela ────────────────────────────────────────────── */
-.vb-dl {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 18px;
-  margin: 0;
-}
-.vb-dl > div { display: flex; flex-direction: column; }
-.vb-dl dt {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #555;
-  margin-bottom: 3px;
-}
-.vb-dl dd { margin: 0; font-size: 15px; font-weight: 600; color: var(--negro); }
+/* ── Datos parcela (reusa .dl-ficha; aquí variante desglose) ──── */
 .vb-dl-desglose { grid-template-columns: 1fr; gap: 10px; }
-.vb-dl-desglose > div { flex-direction: row; justify-content: space-between; align-items: baseline; padding: 6px 0; border-bottom: 1px dashed #EEE9D5; }
+.vb-dl-desglose > div { flex-direction: row; justify-content: space-between; align-items: baseline; padding: 6px 0; border-bottom: 1px dashed var(--outline-subtle); }
 .vb-dl-desglose > div:last-child { border-bottom: none; }
 .vb-dl-desglose dt { margin: 0; }
-.vb-dl-desglose dd { font-size: 15px; }
+.vb-dl-desglose dd { font-size: var(--text-lg); }
 
 .vb-vacio { color: var(--gris-medio); font-style: italic; margin: 0; }
 .vb-link { color: var(--dorado); font-weight: 600; }
@@ -85,60 +46,59 @@
   flex-direction: column;
   gap: 2px;
   padding: 12px 14px;
-  border: 1px solid #DDD8C5;
+  border: 1px solid var(--outline-input);
   border-radius: var(--radio);
   cursor: pointer;
-  background: var(--gris-suave);
-  transition: border-color 120ms, background 120ms;
+  background: var(--surface-muted);
+  transition: border-color 120ms, background 120ms, box-shadow 120ms;
 }
 .vb-radio input { position: absolute; opacity: 0; pointer-events: none; }
 .vb-radio span {
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--text-md);
   color: var(--negro);
 }
-.vb-radio small { color: #666; font-size: 12px; }
+.vb-radio small { color: var(--on-surface-muted); font-size: var(--text-sm); }
 .vb-radio:has(input:checked) {
   background: var(--blanco);
   border-color: var(--dorado);
   box-shadow: inset 0 0 0 1px var(--dorado);
 }
 .vb-radio:has(input:checked) span { color: var(--dorado); }
+/* Anillo de foco accesible al navegar por teclado. */
+.vb-radio:has(input:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
 
 /* ── Campos ───────────────────────────────────────────────────── */
-.vb-campo { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.vb-campo { display: flex; flex-direction: column; gap: var(--space-xs); margin-bottom: var(--space-md); }
 .vb-campo:last-child { margin-bottom: 0; }
 .vb-campo-label {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #555;
   font-weight: 600;
 }
 .vb-campo input {
   font-family: inherit;
-  font-size: 16px;
+  font-size: var(--text-lg);
   padding: 10px 12px;
-  border: 1px solid #C9C5B5;
+  border: 1px solid var(--outline-input);
   border-radius: var(--radio);
   background: var(--blanco);
+  color: var(--on-surface);
+  min-height: 36px;
 }
-.vb-campo input:focus { outline: 2px solid var(--dorado); outline-offset: 1px; }
-.vb-hint { font-size: 11px; color: #666; line-height: 1.4; }
+.vb-campo input:focus { outline: var(--focus-ring); outline-offset: 1px; }
+.vb-hint { font-size: var(--text-eyebrow); color: var(--on-surface-muted); line-height: 1.4; }
 
 .vb-avanzado {
-  margin-top: 8px;
-  border-top: 1px dashed #DDD8C5;
-  padding-top: 12px;
+  margin-top: var(--space-sm);
+  border-top: 1px dashed var(--outline-input);
+  padding-top: var(--space-md);
 }
 .vb-avanzado summary {
   cursor: pointer;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   color: var(--dorado);
-  font-weight: 700;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-md);
 }
 .vb-avanzado[open] summary { margin-bottom: 14px; }
 
@@ -148,75 +108,27 @@
 /* ── Acciones ─────────────────────────────────────────────────── */
 .vb-acciones {
   display: flex;
-  gap: 12px;
+  gap: var(--space-md);
   align-items: center;
   flex-wrap: wrap;
 }
-.vb-toast {
-  font-size: 12px;
-  color: #444;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--blanco);
-  border: 1px solid #E4DFCC;
-  opacity: 0;
-  transition: opacity 200ms ease;
-}
-.vb-toast.vb-toast-on { opacity: 1; }
-.vb-toast.vb-toast-error { color: var(--error); border-color: var(--error); }
 
-/* ── KPIs ─────────────────────────────────────────────────────── */
-.vb-kpis {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-.vb-kpi {
-  background: var(--blanco);
-  border: 1px solid #E4DFCC;
-  border-radius: var(--radio);
-  padding: 18px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.vb-kpi-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #555;
-  font-weight: 600;
-}
-.vb-kpi-valor {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--negro);
-  letter-spacing: -0.01em;
-}
-.vb-kpi-destacada {
-  background: var(--negro);
-  border-color: var(--dorado);
-}
-.vb-kpi-destacada .vb-kpi-label { color: var(--gris-medio); }
-.vb-kpi-destacada .vb-kpi-valor { color: var(--dorado); }
-.vb-kpi-destacada.vb-negativo .vb-kpi-valor { color: var(--error); }
+/* ── KPIs (reusa .kpi-strip / .kpi / .kpi-valor de puccetti.css) ── */
 
-/* ── Avisos ───────────────────────────────────────────────────── */
+/* ── Avisos (mantiene tono dorado informativo) ───────────────── */
 .vb-avisos {
-  background: rgba(184, 150, 12, 0.08);
+  background: var(--tint-primary-8);
   border: 1px solid var(--dorado);
   border-radius: var(--radio);
   padding: 14px 18px;
 }
 .vb-avisos h2 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  margin: 0 0 var(--space-sm);
+  font-size: var(--text-base);
   color: var(--dorado);
 }
 .vb-avisos ul { margin: 0; padding-left: 18px; }
-.vb-avisos li { font-size: 13px; color: #4a4a4a; margin-bottom: 4px; }
+.vb-avisos li { font-size: var(--text-base); color: var(--on-surface-body); margin-bottom: var(--space-xs); }
 
 /* ── Estado solo lectura (rol inversor) ──────────────────────── */
 .vb-layout[data-puede-editar="false"] input,

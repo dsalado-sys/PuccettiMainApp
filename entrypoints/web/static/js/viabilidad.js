@@ -68,11 +68,11 @@
     set("fuente_superficie", FUENTE_LABEL[estudio.fuente_superficie] || estudio.fuente_superficie);
 
     // KPI margen en rojo si es negativo
-    const kpiMargen = form.querySelector('[data-kpi="margen_eur"]')?.closest(".vb-kpi");
-    const kpiPct = form.querySelector('[data-kpi="margen_pct"]')?.closest(".vb-kpi");
+    const kpiMargen = form.querySelector('[data-kpi="margen_eur"]')?.closest(".kpi");
+    const kpiPct = form.querySelector('[data-kpi="margen_pct"]')?.closest(".kpi");
     [kpiMargen, kpiPct].forEach((el) => {
       if (!el) return;
-      el.classList.toggle("vb-negativo", estudio.margen_eur < 0);
+      el.classList.toggle("kpi--negativo", estudio.margen_eur < 0);
     });
 
     // Avisos
@@ -193,9 +193,9 @@
   function mostrarToast(msg, esError = false) {
     if (!toast) return;
     toast.textContent = msg;
-    toast.classList.toggle("vb-toast-error", esError);
-    toast.classList.add("vb-toast-on");
-    setTimeout(() => toast.classList.remove("vb-toast-on"), 2200);
+    toast.classList.toggle("toast--error", esError);
+    toast.classList.add("toast--on");
+    setTimeout(() => toast.classList.remove("toast--on"), 2200);
   }
 
   // ── Bindings ───────────────────────────────────────────────────────

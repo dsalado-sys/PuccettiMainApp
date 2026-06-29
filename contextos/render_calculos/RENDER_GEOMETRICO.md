@@ -324,54 +324,23 @@ Notas del consumo en el canvas (verificadas en `rc_canvas.js`):
 - **2026-06-29** — **Cache-busting AUTOMÁTICO**: `plantillas.py` deriva `estaticos_version` del mtime
   más reciente de `static/` (reevaluado en cada render). Ya NO hay que subir la versión a mano al
   tocar CSS/JS.
-- **2026-06-29** — **Doble-clic en patio = «volver a cuadrado» EN SITIO (no se mueve).** `rc_patios.js::_dblclick`
-  discrimina por dónde cae el doble-clic: cerca de una **arista** inserta vértice (recalcula, intacto); en el
-  **interior** reconstruye el patio como **cuadrado** (eje UTM, lado √área, centrado en el centroide de la forma
-  EFECTIVA = lo que se VE; misma forma que `_rect_area` del auto-colocado). Se fija **EN SITIO sin round-trip al
-  backend**: cuadrar conserva el `area_m2` y la capacidad solo depende de la SUMA de áreas → **no hace falta
-  recalcular**. Nuevo callback `onFijarGeom` (`rc_patios.js`) → `fijarPatioGeom` (`render_calculos.js`) solo
-  escribe `data-vertices` (**sin reorden a última prioridad, sin `pedirCalculo`**); el lienzo ya se repinta en
-  local desde `_lastPayload`. Además **umbral de arrastre `DRAG_PX=4`** (`_down` guarda `_startPx`; `_move` ignora
-  < 4 px mientras `!_movido`) → un clic con micro-jitter ya no comete un «mover» accidental (que reordenaba +
-  recalculaba el patio antes de cuadrarlo). Resultado: **movimiento CERO** e idempotente; nunca desaparece. El
-  cuadrado viaja al backend en el próximo recálculo real o al guardar; único stale: el aviso «no cabe»/
-  `area_efectiva_m2` de ese patio hasta entonces (se autocorrige). *Intentos superados el mismo día (no repetir):*
-  anclar el cuadrado en el centroide de la **base ideal** lo hacía desaparecer en proyectos guardados cuya base
-  cae fuera de pantalla (p. ej. *CL Levies 6*); usar la efectiva **con recálculo + reorden** lo MOVÍA (reorden a
-  última prioridad + `conformar_patio` re-adaptando un «no cabe»). Sin cambios de backend ni de tests.
 - **2026-06-29** — **Patios: anti-autointersección al reformar (bowtie).** Reformar un vértice podía cruzar
   aristas (figura imposible): el backend no sabe adaptar un anillo inválido y `escalarAArea` (shoelace) lo agranda
   con área falseada → «no cabe» falso y botón «Adaptar» vacío. Nuevo helper `autoCruza(v)` (par de aristas no
   adyacentes que se cruzan); `_move` rechaza el candidato autointersectante y mantiene `_ultimoValido` (sembrado
   en `_down`). Nunca se commitea un patio bowtie. 176 tests verdes.
-- **2026-06-29** — **Patios: el doble-clic «volver a cuadrado» ya NO teletransporta (causa real).** El `DRAG_PX=4`
-  del entry anterior solo tapaba la deriva < 4 px; la banda de jitter real de un doble-clic (≈ 4-8 px) seguía
-  cometiendo un «mover» accidental. Un doble-clic dispara `mousedown→mouseup` **dos veces** antes de `dblclick`: si
-  el puntero deriva ≥ 4 px en un clic, `_up` llamaba a `commitPatioGeom` (reordena a última prioridad + `pedirCalculo`),
-  el backend `conformar_patio` re-adaptaba la forma arrastrada (desplaza el centroide) y la respuesta sobrescribía
-  `_lastPayload`/`data-vertices` → con los DOS mouseup el patio caminaba hasta `cabe=False` y desaparecía. **Fix
-  (solo `rc_patios.js`, `_up(ev)`):** se separa el umbral de **preview** (`DRAG_PX=4`, intacto) del de **confirmación**
-  (`COMMIT_PX=8`). Un `mover` solo confirma (reordena + recalcula) si `dist ≥ COMMIT_PX`; además el 2.º+ clic de un
-  multi-clic (`ev.detail >= 2`) **nunca** confirma (backstop). Si hubo preview pero no se confirma, se revierte el
-  micro-arrastre (`_aplicarLive(_poly0)`). El gate de COMMIT_PX se aplica **solo** a `modo==='mover'` (vértice/estirar/
-  girar siguen confirmando con cualquier `_movido`); el ciclado de tiradores intacto. Latencia CERO en el camino feliz
-  (un arrastre deliberado ≥ 8 px confirma al instante). Sin cambios de backend ni de tests; 176 verdes.
-- **2026-06-29** — **Patios: el doble-clic «volver a cuadrado» — CAUSA REAL (2.ª pasada; el gate de `_up` no bastó).**
-  El teletransporte NO venía solo de `_up`: `_dblclick` tiene **dos ramas** y la rama **ARISTA** (clic a ≤ `tolPx=HIT_PX+2=11`
-  **px de pantalla** de una arista) llamaba a **`onCommit`** → `commitPatioGeom` (**reordena a última prioridad +
-  `pedirCalculo`**) → `conformar_patio` re-adaptaba y desplazaba el patio. En un patio pequeño/mediano **todo el interior
-  cae a ≤ 11 px de alguna arista**, así que un doble-clic «interior» entraba en la rama ARISTA → teletransporte/desaparición.
-  (Verificado exhaustivamente: las ÚNICAS vías de recálculo desde un doble-clic son `_up` —ya gateada— y esta rama; no hay
-  `setInterval`/`MutationObserver`/bucle; `sincronizarPatiosDesdePayload` escribe `dataset`, no `input.value`.) **Fix (solo
-  `rc_patios.js`):** (1) **discriminación sin parámetros**: la rama ARISTA exige además `mejorD < distCentroidePx` (clic más
-  cerca de una arista que del centroide, en px de pantalla) → el CUERPO siempre cuadra, solo el perímetro inserta vértice;
-  escala con el tamaño. (2) **fijar EN SITIO** todas las ediciones de geometría del doble-clic/clic-derecho: nuevo helper
-  `_fijar(id, geom)` (`onFijarGeom || onCommit`) sustituye a `onCommit` en la rama ARISTA, la rama CUADRADO y `_contextmenu`
-  (borrar vértice) — insertar/borrar vértice conserva el área (`escalarAArea`) → sin reorden ni recálculo. La única vía que
-  sigue reordenando+recalculando es el `_up` con arrastre deliberado ≥ 8 px (correcto). Sin cambios de backend; 176 verdes.
-- **2026-06-29** — **Patios: ELIMINADO el doble-clic «volver a cuadrado»/centrado (decisión del arquitecto).** Tras varios
-  intentos de estabilizarlo, el arquitecto pidió quitar la función. Se elimina **solo** la rama CUERPO→cuadrado de
-  `_dblclick` (y su discriminación por centroide, que solo existía para habilitarla). **Se CONSERVA** la inserción de
-  vértice por doble-clic SOBRE una arista (`mejorD <= tolPx`), ahora vía `_fijar` (EN SITIO, sin reorden ni recálculo → sin
-  teletransporte). Un doble-clic en el cuerpo ya no hace nada. Se mantienen el gate de `_up` (COMMIT_PX/`ev.detail`), el
-  helper `_fijar` (lo usan la inserción de vértice y `_contextmenu`) y `_distPuntoSegmentoPx`. Sin cambios de backend; 176 verdes.
+- **2026-06-29** — **Doble-clic en patios: edición de vértices EN SITIO (vivo) + «volver a cuadrado» AÑADIDO Y
+  RETIRADO el mismo día.** **Vivo:** doble-clic SOBRE una arista inserta un vértice (`mejorD <= tolPx`) y clic
+  derecho sobre un vértice lo borra (≥3); ambas conservan el área (`escalarAArea`), así que se fijan **EN SITIO**:
+  callback `onFijarGeom` (`rc_patios.js`, helper `_fijar`) → `fijarPatioGeom` (`render_calculos.js`) solo escribe
+  `data-vertices` (**sin reorden a última prioridad, sin `pedirCalculo`**); el lienzo se repinta en local desde
+  `_lastPayload`. Umbral de arrastre `DRAG_PX=4` (preview) + gate de `_up` `COMMIT_PX=8`/`ev.detail>=2`
+  (confirmación) → un clic con micro-jitter no comete un «mover» accidental. **Retirado (decisión del arquitecto):**
+  el doble-clic en el CUERPO reconstruía el patio como cuadrado centrado; tras dos intentos fallidos de evitar que se
+  teletransportara y desapareciera, se eliminó **solo** esa rama de `_dblclick` (y su discriminación por centroide,
+  que solo existía para ella). Hoy el doble-clic en el cuerpo no hace nada. **Lección durable (motor del
+  teletransporte, aplica a CUALQUIER commit de patio):** `commitPatioGeom` **reordena el patio a última prioridad
+  (`appendChild`) + `pedirCalculo`** → el backend `conformar_patio` re-adapta una forma que protruye o «no cabe» y
+  **desplaza su centroide** → el patio camina hasta desaparecer. Toda edición que conserve el área debe ir por
+  `_fijar`, **nunca** por `onCommit`; el único camino que aún reordena+recalcula es `_up` con arrastre deliberado
+  ≥ COMMIT_PX (correcto). Sin cambios de backend; 176 verdes.

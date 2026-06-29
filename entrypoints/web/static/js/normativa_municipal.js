@@ -31,9 +31,9 @@
   function mostrarToast(msg, esError = false) {
     if (!toast) return;
     toast.textContent = msg;
-    toast.classList.toggle("nm-toast-error", esError);
-    toast.classList.add("nm-toast-on");
-    setTimeout(() => toast.classList.remove("nm-toast-on"), 2200);
+    toast.classList.toggle("toast--error", esError);
+    toast.classList.add("toast--on");
+    setTimeout(() => toast.classList.remove("toast--on"), 2200);
   }
 
   // fetch que nunca lanza: ante un error de red (servidor caído, sin conexión)
@@ -112,14 +112,14 @@
     }
     items.forEach(c => {
       const det = document.createElement("details");
-      det.className = "nm-carpeta";
+      det.className = "carpeta";
       det.dataset.id = c.id;
       const sum = document.createElement("summary");
-      sum.className = "nm-carpeta-summary";
-      sum.innerHTML = `<span class="nm-carpeta-nombre">${escapeHtml(c.nombre)}</span>
-        <span class="nm-carpeta-acciones">
-          ${puedeEditar ? '<button type="button" class="nm-btn-nueva-norma" title="Crear normativa">+</button>' : ''}
-          ${puedeEditar ? '<button type="button" class="nm-btn-borrar-carpeta" title="Eliminar carpeta">×</button>' : ''}
+      sum.className = "carpeta-summary";
+      sum.innerHTML = `<span class="carpeta-nombre">${escapeHtml(c.nombre)}</span>
+        <span class="carpeta-acciones">
+          ${puedeEditar ? '<button type="button" class="icon-btn nm-btn-nueva-norma" title="Crear normativa" aria-label="Crear normativa">+</button>' : ''}
+          ${puedeEditar ? '<button type="button" class="icon-btn icon-btn--peligro nm-btn-borrar-carpeta" title="Eliminar carpeta" aria-label="Eliminar carpeta">×</button>' : ''}
         </span>`;
       det.appendChild(sum);
       const ul = document.createElement("ul");
@@ -127,7 +127,9 @@
       ul.innerHTML = '<li class="nm-vacio">Cargando…</li>';
       det.appendChild(ul);
 
+      sum.setAttribute("aria-expanded", "false");
       det.addEventListener("toggle", () => {
+        sum.setAttribute("aria-expanded", det.open ? "true" : "false");
         if (det.open) cargarNormativasDeCarpeta(c.id, ul);
       });
       const btnAdd = sum.querySelector(".nm-btn-nueva-norma");
@@ -166,7 +168,7 @@
           <strong>${escapeHtml(n.nombre)}</strong>
           <small>${escapeHtml(n.direccion || "—")}</small>
         </button>
-        ${puedeEditar ? '<button type="button" class="nm-norma-borrar" title="Eliminar">×</button>' : ''}`;
+        ${puedeEditar ? '<button type="button" class="nm-norma-borrar" title="Eliminar" aria-label="Eliminar normativa">×</button>' : ''}`;
       li.querySelector(".nm-norma-cargar").addEventListener("click", () => {
         cargarDetalle(n.id, carpetaId);
       });
@@ -290,7 +292,7 @@
       mostrarToast("Cambios guardados");
       // refrescar la lista de la carpeta para reflejar el nombre/dirección
       const li = document.querySelector(`.nm-normativa-item[data-id="${STATE.seleccionada}"]`);
-      const det = li ? li.closest(".nm-carpeta") : null;
+      const det = li ? li.closest(".carpeta") : null;
       if (det) {
         const carpetaId = parseInt(det.dataset.id);
         const ul = det.querySelector(".nm-normativas");
@@ -350,7 +352,7 @@
       const data = await resp.json();
       cerrar("nm-submodal-nueva-norma");
       mostrarToast("Normativa creada");
-      const det = document.querySelector(`.nm-carpeta[data-id="${carpetaIdParaNuevaNorma}"]`);
+      const det = document.querySelector(`.carpeta[data-id="${carpetaIdParaNuevaNorma}"]`);
       if (det) {
         const ul = det.querySelector(".nm-normativas");
         if (ul) await cargarNormativasDeCarpeta(carpetaIdParaNuevaNorma, ul);

@@ -7,12 +7,13 @@
 
 {% block contenido %}
 
-<section class="hero pr-hero">
-  <div class="pr-hero-titulo">
+<section class="hero">
+  <div class="hero-titulo">
+    <span class="eyebrow eyebrow--oro">Espacio de trabajo</span>
     <h1>Proyectos</h1>
   </div>
-  <div class="pr-hero-acciones">
-    <span id="pr-toast" class="pr-toast" role="status" aria-live="polite"></span>
+  <div class="hero-acciones">
+    <span id="pr-toast" class="toast" role="status" aria-live="polite"></span>
   </div>
 </section>
 
@@ -21,12 +22,12 @@
          data-activo-id="{{ proyecto_activo.id if proyecto_activo else '' }}">
 
   <!-- ─── Columna izquierda: carpetas + proyectos ─── -->
-  <aside class="pr-col-carpetas" aria-label="Carpetas de proyectos">
+  <aside class="pr-col-carpetas card" aria-label="Carpetas de proyectos">
     <header class="pr-col-header">
-      <h2>Carpetas</h2>
+      <h2 class="eyebrow">Carpetas</h2>
       <div class="pr-col-acciones">
-        <label class="pr-buscador-lupa" aria-label="Buscar proyecto o carpeta">
-          <span class="pr-icono-lupa" aria-hidden="true">⌕</span>
+        <label class="buscador" aria-label="Buscar proyecto o carpeta">
+          <span class="icono-lupa" aria-hidden="true">⌕</span>
           <input type="text" id="pr-buscar" placeholder="Buscar…" autocomplete="off">
         </label>
         {% if puede_editar %}
@@ -41,14 +42,14 @@
   </aside>
 
   <!-- ─── Columna derecha: detalle del proyecto seleccionado ─── -->
-  <section class="pr-col-datos" aria-label="Detalle del proyecto">
+  <section class="pr-col-datos card" aria-label="Detalle del proyecto">
     <header class="pr-col-header">
       <h2 id="pr-detalle-titulo">Selecciona un proyecto</h2>
     </header>
 
     <div id="pr-detalle" class="pr-detalle" hidden>
       <div class="pr-bloque">
-        <h3>Estado de sesión</h3>
+        <h3 class="eyebrow">Estado de sesión</h3>
         <p id="pr-activo-aviso" class="pr-activo-aviso"></p>
         <div class="pr-detalle-acciones">
           <button type="button" id="pr-btn-activar" class="boton-primario">Abrir proyecto</button>
@@ -59,26 +60,26 @@
       </div>
 
       <div class="pr-bloque">
-        <h3>Datos</h3>
+        <h3 class="eyebrow">Datos</h3>
         <dl class="pr-datos-lista">
-          <div><dt>Referencia catastral</dt><dd id="pr-d-rc">—</dd></div>
-          <div><dt>Dirección</dt><dd id="pr-d-direccion">—</dd></div>
-          <div><dt>Estado</dt><dd id="pr-d-estado">—</dd></div>
-          <div><dt>Actualizado</dt><dd id="pr-d-actualizado">—</dd></div>
+          <div><dt class="eyebrow">Referencia catastral</dt><dd id="pr-d-rc">—</dd></div>
+          <div><dt class="eyebrow">Dirección</dt><dd id="pr-d-direccion">—</dd></div>
+          <div><dt class="eyebrow">Estado</dt><dd><span id="pr-d-estado" class="status-pill badge--gris">—</span></dd></div>
+          <div><dt class="eyebrow">Actualizado</dt><dd id="pr-d-actualizado">—</dd></div>
         </dl>
       </div>
 
       {% if puede_editar %}
       <div class="pr-bloque">
-        <h3>Organización</h3>
+        <h3 class="eyebrow">Organización</h3>
         <label class="pr-campo">
           <span class="pr-campo-label">Carpeta</span>
-          <select id="pr-d-carpeta" class="pr-select"></select>
+          <select id="pr-d-carpeta" class="select"></select>
         </label>
       </div>
 
       <div class="pr-bloque pr-bloque-peligro">
-        <h3>Zona de peligro</h3>
+        <h3 class="eyebrow">Zona de peligro</h3>
         <button type="button" id="pr-btn-eliminar" class="boton-peligro">Eliminar proyecto</button>
       </div>
       {% endif %}
@@ -93,20 +94,20 @@
 {% endif %}
 
 {# Submodal: crear carpeta #}
-<dialog id="pr-submodal-carpeta" class="pr-submodal">
-  <article class="pr-submodal-card">
-    <header class="pr-submodal-header">
+<dialog id="pr-submodal-carpeta" class="modal modal--sm">
+  <article class="modal-card">
+    <header class="modal-header">
       <h3>Nueva carpeta</h3>
-      <button type="button" class="pr-modal-cerrar" data-cerrar="pr-submodal-carpeta">×</button>
+      <button type="button" class="modal-cerrar" data-cerrar="pr-submodal-carpeta" aria-label="Cerrar">×</button>
     </header>
-    <div class="pr-submodal-cuerpo">
+    <div class="modal-cuerpo">
       <label class="pr-campo">
         <span class="pr-campo-label">Nombre</span>
-        <input type="text" id="pr-submodal-carpeta-nombre" maxlength="120" autocomplete="off"
+        <input type="text" id="pr-submodal-carpeta-nombre" class="campo-input" maxlength="120" autocomplete="off"
                placeholder="Ej. Sevilla 2026">
       </label>
     </div>
-    <footer class="pr-submodal-acciones">
+    <footer class="modal-acciones">
       <button type="button" class="boton-secundario" data-cerrar="pr-submodal-carpeta">Cancelar</button>
       <button type="button" id="pr-submodal-carpeta-guardar" class="boton-primario">Guardar</button>
     </footer>
@@ -114,28 +115,28 @@
 </dialog>
 
 {# Submodal: nuevo proyecto #}
-<dialog id="pr-submodal-proyecto" class="pr-submodal">
-  <article class="pr-submodal-card">
-    <header class="pr-submodal-header">
+<dialog id="pr-submodal-proyecto" class="modal modal--sm">
+  <article class="modal-card">
+    <header class="modal-header">
       <h3>Nuevo proyecto</h3>
-      <button type="button" class="pr-modal-cerrar" data-cerrar="pr-submodal-proyecto">×</button>
+      <button type="button" class="modal-cerrar" data-cerrar="pr-submodal-proyecto" aria-label="Cerrar">×</button>
     </header>
-    <div class="pr-submodal-cuerpo">
+    <div class="modal-cuerpo">
       <label class="pr-campo">
         <span class="pr-campo-label">Nombre</span>
-        <input type="text" id="pr-submodal-proyecto-nombre" maxlength="200" autocomplete="off"
+        <input type="text" id="pr-submodal-proyecto-nombre" class="campo-input" maxlength="200" autocomplete="off"
                placeholder="Ej. Residencial Macarena 12">
       </label>
       <label class="pr-campo">
         <span class="pr-campo-label">Carpeta</span>
-        <select id="pr-submodal-proyecto-carpeta" class="pr-select"></select>
+        <select id="pr-submodal-proyecto-carpeta" class="select"></select>
       </label>
-      <p class="pr-submodal-nota">
+      <p class="modal-sub">
         La referencia catastral y la dirección se completan solas al guardar una
         parcela en el proyecto desde «Buscar parcela».
       </p>
     </div>
-    <footer class="pr-submodal-acciones">
+    <footer class="modal-acciones">
       <button type="button" class="boton-secundario" data-cerrar="pr-submodal-proyecto">Cancelar</button>
       <button type="button" id="pr-submodal-proyecto-guardar" class="boton-primario">Crear</button>
     </footer>
@@ -143,18 +144,18 @@
 </dialog>
 
 {# Submodal: confirmar eliminación #}
-<dialog id="pr-submodal-confirmar" class="pr-submodal">
-  <article class="pr-submodal-card">
-    <header class="pr-submodal-header">
+<dialog id="pr-submodal-confirmar" class="modal modal--sm">
+  <article class="modal-card">
+    <header class="modal-header">
       <h3>Confirmar eliminación</h3>
-      <button type="button" class="pr-modal-cerrar" data-cerrar="pr-submodal-confirmar">×</button>
+      <button type="button" class="modal-cerrar" data-cerrar="pr-submodal-confirmar" aria-label="Cerrar">×</button>
     </header>
-    <div class="pr-submodal-cuerpo">
+    <div class="modal-cuerpo">
       <p id="pr-submodal-confirmar-msg">¿Estás seguro?</p>
     </div>
-    <footer class="pr-submodal-acciones">
+    <footer class="modal-acciones">
       <button type="button" class="boton-secundario" data-cerrar="pr-submodal-confirmar">Cancelar</button>
-      <button type="button" id="pr-submodal-confirmar-ok" class="boton-primario pr-boton-peligro">Eliminar</button>
+      <button type="button" id="pr-submodal-confirmar-ok" class="boton-peligro--solido">Eliminar</button>
     </footer>
   </article>
 </dialog>

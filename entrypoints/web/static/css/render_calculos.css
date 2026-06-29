@@ -1,7 +1,12 @@
 /* §2.4–2.7 — Render y cálculos. Layout 3 columnas + tabla en tiempo real.
-   Hereda variables de puccetti.css (--negro, --dorado, --dorado-claro, --blanco, --gris-suave). */
+   Consume los tokens de puccetti.css (única fuente de verdad); este módulo no
+   reescribe literales de color/sombra/radio. */
 
-/* ── Override del .contenido para aprovechar todo el ancho ───────── */
+/* ── Ancho extendido del .contenido para esta vista densa ─────────
+   base.html fija <main class="contenido"> sin bloque de clase, así que no se
+   puede añadir "contenido--ancho" desde la plantilla; el :has() lo aplica solo
+   cuando está presente el layout de render (la landing no lo lleva). Equivale a
+   la primitiva .contenido--ancho de puccetti.css. */
 .contenido:has(.rc-layout) {
   max-width: 1440px;
 }
@@ -11,11 +16,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: var(--space-xl);
   flex-wrap: wrap;
 }
-.rc-hero-titulo h1 { margin-bottom: 4px; }
-.rc-hero-sub { font-size: 13px; color: #555; margin: 0; }
+.rc-hero-titulo h1 { margin-bottom: var(--space-xs); }
+.rc-hero-sub { font-size: var(--text-base); color: var(--on-surface-secondary); margin: 0; }
 .rc-hero-acciones { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
 /* ── Layout 3 columnas ───────────────────────────────────────────── */
@@ -23,7 +28,7 @@
   display: grid;
   grid-template-columns: 320px 1fr 380px;
   gap: 18px;
-  margin-top: 8px;
+  margin-top: var(--space-sm);
   align-items: stretch;
 }
 @media (max-width: 1280px) {
@@ -33,185 +38,177 @@
 /* ── Asides: parámetros y tabla ──────────────────────────────────── */
 .rc-params, .rc-tabla {
   background: var(--blanco);
-  border: 1px solid #E4DFCC;
+  border: 1px solid var(--outline);
   border-radius: var(--radio);
-  padding: 16px;
+  padding: var(--space-lg);
   max-height: 80vh;
   overflow-y: auto;
 }
 
-.rc-grupo { border-bottom: 1px solid #EEE9D5; padding: 8px 0; }
-.rc-grupo[open] { padding-bottom: 12px; }
+.rc-grupo { border-bottom: 1px solid var(--outline-subtle); padding: var(--space-sm) 0; }
+.rc-grupo[open] { padding-bottom: var(--space-md); }
 .rc-grupo > summary {
   cursor: pointer;
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--text-md);
   padding: 6px 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-sm);
   list-style: none;
 }
 .rc-grupo > summary::before {
   content: "▸";
   color: var(--dorado);
-  font-size: 11px;
+  font-size: var(--text-eyebrow);
   transition: transform 120ms ease;
   display: inline-block;
 }
 .rc-grupo[open] > summary::before { transform: rotate(90deg); }
 .rc-grupo-titulo { letter-spacing: 0.03em; }
-.rc-grupo-cuerpo { padding: 8px 4px 0; display: flex; flex-direction: column; gap: 10px; }
-.rc-subgrupo { margin-top: 6px; padding: 6px 0; }
-.rc-subgrupo summary {
-  font-size: 12px; cursor: pointer; color: var(--dorado);
-  text-transform: uppercase; letter-spacing: 0.1em;
-}
+.rc-grupo-cuerpo { padding: var(--space-sm) var(--space-xs) 0; display: flex; flex-direction: column; gap: 10px; }
 
 /* ── Campos ──────────────────────────────────────────────────────── */
 .rc-campo {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
+  gap: var(--space-xs);
+  font-size: var(--text-base);
 }
 .rc-campo[hidden] { display: none; }
 .rc-campo-label {
-  font-size: 12px; color: #444;
+  font-size: var(--text-sm); color: var(--on-surface-body);
   display: inline-flex; align-items: center; gap: 6px;
 }
 .rc-campo input[type="number"], .rc-campo input[type="text"],
 .rc-campo textarea, .rc-campo select {
-  padding: 7px 10px; font-size: 13px; font-family: inherit;
-  border: 1px solid #C9C5B5; border-radius: var(--radio); background: var(--blanco);
+  padding: 7px 10px; font-size: var(--text-base); font-family: inherit;
+  border: 1px solid var(--outline-input); border-radius: var(--radio); background: var(--blanco);
 }
 .rc-campo input:focus, .rc-campo textarea:focus, .rc-campo select:focus {
-  outline: 2px solid var(--dorado); outline-offset: 1px;
+  outline: var(--focus-ring); outline-offset: 1px;
 }
-.rc-hint { color: #666; font-size: 11px; line-height: 1.4; }
+.rc-hint { color: var(--on-surface-muted); font-size: var(--text-eyebrow); line-height: 1.4; }
 .rc-hint em { color: var(--dorado); font-style: normal; font-weight: 600; }
 
-.rc-fila { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.rc-fila { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-sm); }
 .rc-fila:has(.rc-campo:nth-child(2):last-child) { grid-template-columns: 1fr 1fr; }
 
 .rc-checkbox {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: 13px; cursor: pointer; padding: 4px 0;
+  display: inline-flex; align-items: center; gap: var(--space-sm);
+  font-size: var(--text-base); cursor: pointer; padding: var(--space-xs) 0;
 }
 .rc-checkbox[hidden] { display: none; }
 .rc-checkbox input { accent-color: var(--dorado); }
 
-.rc-usos { border: 1px solid #E4DFCC; border-radius: var(--radio); padding: 10px 12px; }
-.rc-usos legend { font-size: 11px; color: #555; padding: 0 6px; text-transform: uppercase; letter-spacing: 0.1em; }
+.rc-usos { border: 1px solid var(--outline); border-radius: var(--radio); padding: 10px 12px; }
+.rc-usos legend { font-size: var(--text-eyebrow); color: var(--on-surface-secondary); padding: 0 6px; text-transform: uppercase; letter-spacing: 0.1em; }
 
 /* ─── Selector dinámico de tipologías ─────────────────────────────── */
 .rc-tipologias { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
 .rc-tipologia-extra { display: flex; align-items: center; gap: 6px; }
 .rc-tipologia-extra select { flex: 1; }
+/* Botón-icono de quitar tipología (mirror de .icon-btn--peligro de puccetti.css;
+   se conserva el prefijo porque el JS clona/inserta filas con esta clase). */
 .rc-tip-quitar {
+  display: inline-flex; align-items: center; justify-content: center;
   background: var(--blanco); border: 1px solid var(--error); color: var(--error);
-  border-radius: 3px; width: 28px; height: 28px; cursor: pointer;
-  font-size: 16px; line-height: 1; padding: 0;
+  border-radius: var(--radio-chip); min-width: 32px; min-height: 32px; cursor: pointer;
+  font-size: var(--text-lg); line-height: 1; padding: 0;
 }
-.rc-tip-quitar:hover { background: rgba(140,42,31,0.08); }
-.rc-btn-pequeno { font-size: 12px; padding: 4px 10px; }
+.rc-tip-quitar:hover { background: var(--tint-error-8); }
+.rc-btn-pequeno { font-size: var(--text-sm); padding: var(--space-xs) 10px; }
 
 /* ─── Patios del edificio (lista editable) ───────────────────────── */
-.rc-patios { border: 1px solid #E4DFCC; border-radius: var(--radio); padding: 10px 12px; }
-.rc-patios legend { font-size: 11px; color: #555; padding: 0 6px; text-transform: uppercase; letter-spacing: 0.1em; }
-.rc-patios-ayuda { font-size: 11px; color: #777; margin: 0 0 8px; }
-.rc-patios-lista { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-.rc-patio-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 4px; border-left: 3px solid transparent; border-radius: 3px; }
+.rc-patios { border: 1px solid var(--outline); border-radius: var(--radio); padding: 10px 12px; }
+.rc-patios legend { font-size: var(--text-eyebrow); color: var(--on-surface-secondary); padding: 0 6px; text-transform: uppercase; letter-spacing: 0.1em; }
+.rc-patios-ayuda { font-size: var(--text-eyebrow); color: var(--on-surface-muted); margin: 0 0 var(--space-sm); }
+.rc-patios-lista { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--space-sm); }
+.rc-patio-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: var(--space-xs); border-left: 3px solid transparent; border-radius: var(--radio-chip); }
 .rc-patio-fila input { flex: 1; }
 /* Patio seleccionado en el lienzo: resalta su fila en el panel. */
-.rc-patio-fila-activa { border-left-color: var(--dorado); background: rgba(184,150,12,0.06); }
+.rc-patio-fila-activa { border-left-color: var(--dorado); background: var(--tint-primary-6); }
 /* Patio que, tras adaptarse al borde, no alcanza sus m²: aviso en rojo. */
-.rc-patio-fila-nocabe { border-left-color: var(--error); background: rgba(140,42,31,0.05); }
+.rc-patio-fila-nocabe { border-left-color: var(--error); background: var(--tint-error-6); }
 .rc-patio-fila-nocabe input { border-color: var(--error); }
-.rc-patio-aviso { flex-basis: 100%; color: var(--error); font-size: 11px; line-height: 1.3; }
+.rc-patio-aviso { flex-basis: 100%; color: var(--error); font-size: var(--text-eyebrow); line-height: 1.3; }
 /* Botón «Adaptar»: fija el patio a los m² que caben en el hueco. Pequeño, en línea. */
 .rc-patio-adaptar {
-  margin-left: 6px; padding: 1px 8px; font-size: 11px; line-height: 1.4;
+  margin-left: 6px; padding: 1px var(--space-sm); font-size: var(--text-eyebrow); line-height: 1.4;
   vertical-align: baseline; background: var(--blanco); border: 1px solid var(--dorado);
-  color: var(--negro); border-radius: 3px; cursor: pointer;
+  color: var(--negro); border-radius: var(--radio-chip); cursor: pointer;
 }
-.rc-patio-adaptar:hover { background: rgba(184,150,12,0.12); }
+.rc-patio-adaptar:hover { background: var(--tint-primary-12); }
+/* Botón-icono de quitar patio (mirror de .icon-btn--peligro; prefijo conservado
+   porque el JS crea filas de patio con esta clase). */
 .rc-patio-quitar {
+  display: inline-flex; align-items: center; justify-content: center;
   background: var(--blanco); border: 1px solid var(--error); color: var(--error);
-  border-radius: 3px; width: 28px; height: 28px; cursor: pointer;
-  font-size: 16px; line-height: 1; padding: 0;
+  border-radius: var(--radio-chip); min-width: 32px; min-height: 32px; cursor: pointer;
+  font-size: var(--text-lg); line-height: 1; padding: 0;
 }
-.rc-patio-quitar:hover { background: rgba(140,42,31,0.08); }
+.rc-patio-quitar:hover { background: var(--tint-error-8); }
 .rc-patio-add {
-  background: var(--blanco); border: 1px solid var(--dorado); color: #555;
-  border-radius: 3px; font-size: 12px; padding: 4px 10px; cursor: pointer;
+  background: var(--blanco); border: 1px solid var(--dorado); color: var(--on-surface-secondary);
+  border-radius: var(--radio-chip); font-size: var(--text-sm); padding: var(--space-xs) 10px; cursor: pointer;
 }
-.rc-patio-add:hover { background: rgba(184,150,12,0.08); }
+.rc-patio-add:hover { background: var(--tint-primary-8); }
 
 /* ─── Apartamentos turísticos: nº de dormitorios + combinación (§2.5) ── */
-.rc-ndorms { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.rc-ndorms { display: flex; align-items: center; gap: var(--space-sm); margin-bottom: var(--space-xs); }
 .rc-ndorms input[type="number"] { width: 72px; }
 .rc-ndorms .rc-btn-pequeno { white-space: nowrap; }
-.rc-combo-elegido { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-.rc-combo-elegido-pre { font-size: 11px; color: #666; }
+.rc-combo-elegido { display: flex; align-items: center; gap: 6px; margin-top: var(--space-sm); flex-wrap: wrap; }
+.rc-combo-elegido-pre { font-size: var(--text-eyebrow); color: var(--on-surface-muted); }
 .rc-modal-tip-card { max-width: 640px; width: 92vw; }
-.rc-modal-tip-sub { color: #555; font-size: 13px; margin: 0 0 10px; }
+.rc-modal-tip-sub { color: var(--on-surface-secondary); font-size: var(--text-base); margin: 0 0 10px; }
 .rc-modal-tip-tabla { width: 100%; }
-.rc-modal-tip-fila:hover { background: rgba(184,150,12,0.06); }
-.rc-modal-tip-elegida { background: rgba(184,150,12,0.12); }
+.rc-modal-tip-fila:hover { background: var(--tint-primary-6); }
+.rc-modal-tip-elegida { background: var(--tint-primary-12); }
 .rc-modal-tip-elegir { white-space: nowrap; }
 
 .rc-fila-unidad-local {
-  background: rgba(184,150,12,0.06);
-  color: #555; font-style: italic; cursor: default;
+  background: var(--tint-primary-6);
+  color: var(--on-surface-secondary); font-style: italic; cursor: default;
 }
-.rc-fila-unidad-local small { color: #888; font-style: normal; }
+.rc-fila-unidad-local small { color: var(--on-surface-muted); font-style: normal; }
 
 /* Columnas de la tabla "por planta" ocultadas según el uso (Local / Usos com.). */
 .rc-col-oculta { display: none; }
 
+/* Fila «Total» de la tabla por planta (la inyecta el JS con esta clase). */
+.rc-fila-total td { font-weight: 600; background: var(--gris-suave); }
+
 .rc-tip {
-  width: 18px; height: 18px; border-radius: 999px;
+  width: 18px; height: 18px; border-radius: var(--radio-pill);
   border: 1px solid var(--dorado); background: var(--blanco); color: var(--dorado);
-  font-size: 10px; font-weight: 700; cursor: help;
+  font-size: var(--text-2xs); font-weight: 700; cursor: help;
   display: inline-flex; align-items: center; justify-content: center;
 }
 .rc-tip:hover { background: var(--dorado); color: var(--blanco); }
 
 .rc-badge {
-  display: inline-block; padding: 2px 8px; font-size: 10px;
-  border-radius: 999px; letter-spacing: 0.05em; font-weight: 600;
+  display: inline-block; padding: 2px var(--space-sm); font-size: var(--text-2xs);
+  border-radius: var(--radio-pill); letter-spacing: 0.05em; font-weight: 600;
 }
-.rc-badge-dorado { background: rgba(184,150,12,0.10); color: var(--dorado); border: 1px solid var(--dorado-claro); }
-
-.rc-resumen-activos {
-  margin-top: 12px; padding: 10px 12px;
-  background: var(--gris-suave); border-radius: var(--radio);
-}
-.rc-resumen-activos h3 {
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
-  color: #555; margin: 0 0 6px;
-}
-.rc-resumen-activos ul { list-style: none; padding: 0; margin: 0; font-size: 12px; }
-.rc-resumen-activos li { padding: 2px 0; color: #333; }
-.rc-resumen-activos strong { color: var(--negro); }
+.rc-badge-dorado { background: var(--tint-primary-10); color: var(--dorado); border: 1px solid var(--dorado-claro); }
 
 /* ── Visualización centro ────────────────────────────────────────── */
 .rc-viz {
   background: var(--blanco);
-  border: 1px solid #E4DFCC;
+  border: 1px solid var(--outline);
   border-radius: var(--radio);
-  padding: 16px;
-  display: flex; flex-direction: column; gap: 12px;
+  padding: var(--space-lg);
+  display: flex; flex-direction: column; gap: var(--space-md);
 }
 .rc-plantas {
   display: flex; flex-wrap: wrap; gap: 6px;
-  border-bottom: 1px solid #EEE9D5; padding-bottom: 10px;
+  border-bottom: 1px solid var(--outline-subtle); padding-bottom: 10px;
 }
 .rc-tab {
   padding: 5px 12px;
-  border: 1px solid #C9C5B5; border-radius: 999px;
-  font-size: 12px; cursor: pointer; background: var(--blanco);
+  border: 1px solid var(--outline-input); border-radius: var(--radio-pill);
+  font-size: var(--text-sm); cursor: pointer; background: var(--blanco);
   transition: all 100ms ease;
 }
 .rc-tab:hover { border-color: var(--dorado); }
@@ -229,17 +226,17 @@
 .rc-brujula {
   position: absolute; top: 14px; right: 14px;
   width: 84px; height: 84px;
-  background: rgba(255,255,255,0.92);
+  background: var(--veil-strong);
   border: 1px solid var(--dorado);
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
 }
 .rc-spinner {
   position: absolute; inset: 0;
-  background: rgba(255,255,255,0.75);
+  background: var(--veil);
   display: flex; flex-direction: column; gap: 10px;
   align-items: center; justify-content: center;
-  font-size: 13px; color: var(--negro);
+  font-size: var(--text-base); color: var(--negro);
 }
 .rc-spinner[hidden] { display: none; }
 .rc-spinner-circ {
@@ -249,45 +246,26 @@
 }
 @keyframes rc-spin { to { transform: rotate(360deg); } }
 
-.rc-leyenda {
-  display: flex; flex-wrap: wrap; gap: 14px;
-  font-size: 11px; color: #444;
-  padding-top: 6px; border-top: 1px solid #EEE9D5;
-}
-.rc-leg { display: inline-flex; align-items: center; gap: 6px; }
-.rc-leg::before {
-  content: ""; width: 14px; height: 14px; border-radius: 3px; display: inline-block;
-}
-.rc-leg-fachada::before { background: var(--dorado); }
-.rc-leg-medianera::before { background: var(--negro); }
-.rc-leg-unidad::before { background: rgba(201,168,76,0.30); border: 1px solid var(--dorado); }
-.rc-leg-adaptada::before { background: rgba(184,150,12,0.45); border: 1px dashed var(--dorado); }
-.rc-leg-nucleo::before { background: rgba(10,10,10,0.20); border: 1px solid var(--negro); }
-.rc-leg-patio::before {
-  background: repeating-linear-gradient(45deg, var(--gris-medio) 0 2px, transparent 2px 6px),
-              var(--gris-suave);
-}
-
 /* ── Tabla derecha ───────────────────────────────────────────────── */
 .rc-kpis {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
-  margin-bottom: 12px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm);
+  margin-bottom: var(--space-md);
 }
 .rc-kpi {
   background: var(--gris-suave); padding: 10px 12px;
   border-radius: var(--radio); display: flex; flex-direction: column;
 }
-.rc-kpi-destacada { background: rgba(184,150,12,0.10); border: 1px solid var(--dorado-claro); }
-.rc-kpi-label { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.1em; }
-.rc-kpi-valor { font-size: 17px; font-weight: 600; color: var(--negro); margin-top: 2px; }
+.rc-kpi-destacada { background: var(--tint-primary-10); border: 1px solid var(--dorado-claro); }
+.rc-kpi-label { font-size: var(--text-2xs); color: var(--on-surface-secondary); text-transform: uppercase; letter-spacing: 0.1em; }
+.rc-kpi-valor { font-size: 17px; font-weight: 600; color: var(--negro); margin-top: 2px; font-variant-numeric: tabular-nums; }
 
 .rc-tabla-tabs {
-  display: flex; gap: 4px; border-bottom: 1px solid #EEE9D5;
-  margin-bottom: 8px;
+  display: flex; gap: var(--space-xs); border-bottom: 1px solid var(--outline-subtle);
+  margin-bottom: var(--space-sm);
 }
 .rc-tabla-tab {
-  border: none; background: transparent; padding: 8px 12px;
-  font-size: 12px; cursor: pointer; color: #555;
+  border: none; background: transparent; padding: var(--space-sm) 12px;
+  font-size: var(--text-sm); cursor: pointer; color: var(--on-surface-secondary);
   border-bottom: 2px solid transparent;
 }
 .rc-tabla-tab:hover { color: var(--negro); }
@@ -296,67 +274,67 @@
 .rc-tabla-wrap { max-height: 380px; overflow-y: auto; }
 .rc-tabla-wrap[hidden] { display: none; }
 .rc-alertas[hidden] { display: none; }
-.rc-tabla-tabla { width: 100%; border-collapse: collapse; font-size: 12px; }
+.rc-tabla-tabla { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 .rc-tabla-tabla th, .rc-tabla-tabla td {
-  padding: 6px 8px; text-align: right; border-bottom: 1px solid #EEE9D5;
+  padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--outline-subtle);
 }
 .rc-tabla-tabla th:first-child, .rc-tabla-tabla td:first-child {
   text-align: left;
 }
 .rc-thead-sticky th {
   position: sticky; top: 0; background: var(--blanco);
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #666;
+  font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--on-surface-muted);
   z-index: 1;
 }
 .rc-fila-incumple {
-  background: rgba(140,42,31,0.06);
+  background: var(--tint-error-6);
   border-left: 3px solid var(--error);
 }
 .rc-celda-incumple { color: var(--error); font-weight: 600; }
 
-.rc-vacio { color: var(--gris-medio); font-size: 12px; font-style: italic; padding: 16px; text-align: center; }
+.rc-vacio { color: var(--gris-medio); font-size: var(--text-sm); font-style: italic; padding: var(--space-lg); text-align: center; }
 
-.rc-export { margin-top: 10px; display: flex; gap: 8px; }
+.rc-export { margin-top: 10px; display: flex; gap: var(--space-sm); }
 
 /* ── Modo «inmueble»: ficha central + tabla de estancias ─────────────── */
 .rc-viz-inmueble { justify-content: flex-start; }
-.rc-inmueble-ficha h2 { font-size: 15px; margin: 0 0 12px; color: var(--negro); }
+.rc-inmueble-ficha h2 { font-size: 15px; margin: 0 0 var(--space-md); color: var(--negro); }
 .rc-inmueble-datos { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 0; }
 .rc-inmueble-datos > div {
   display: flex; flex-direction: column;
-  border-bottom: 1px solid #EEE9D5; padding-bottom: 8px;
+  border-bottom: 1px solid var(--outline-subtle); padding-bottom: var(--space-sm);
 }
-.rc-inmueble-datos dt { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; }
+.rc-inmueble-datos dt { font-size: var(--text-2xs); color: var(--on-surface-secondary); text-transform: uppercase; letter-spacing: 0.08em; }
 .rc-inmueble-datos dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; color: var(--negro); }
-.rc-inmueble-nota { font-size: 12px; color: #555; margin: 14px 0 0; line-height: 1.5; }
+.rc-inmueble-nota { font-size: var(--text-sm); color: var(--on-surface-secondary); margin: 14px 0 0; line-height: 1.5; }
 #rc-tabla-estancias th:nth-child(2), #rc-tabla-estancias td:nth-child(2) { text-align: left; }
 #rc-tabla-estancias tfoot th, #rc-tabla-estancias tfoot td {
-  border-top: 2px solid #E4DFCC; font-weight: 600;
+  border-top: 2px solid var(--outline); font-weight: 600;
 }
 
 /* ── Alertas ─────────────────────────────────────────────────────── */
 .rc-alertas {
   background: var(--blanco); border-radius: var(--radio);
-  border: 1px solid #E4DFCC; padding: 14px 18px; margin-top: 20px;
+  border: 1px solid var(--outline); padding: 14px 18px; margin-top: var(--space-xl);
 }
-.rc-alertas header h2 { font-size: 14px; margin: 0 0 8px; }
-.rc-alertas ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
-.rc-alertas li { padding: 8px 12px; border-radius: 4px; font-size: 12px; border-left: 3px solid; }
-.rc-alerta-info { background: rgba(184,150,12,0.06); border-color: var(--dorado-claro); color: #444; }
-.rc-alerta-aviso { background: rgba(184,150,12,0.12); border-color: var(--dorado); color: #2a2a2a; }
-.rc-alerta-incumplimiento { background: rgba(140,42,31,0.08); border-color: var(--error); color: var(--error); }
+.rc-alertas header h2 { font-size: var(--text-md); margin: 0 0 var(--space-sm); }
+.rc-alertas ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-xs); }
+.rc-alertas li { padding: var(--space-sm) 12px; border-radius: var(--radio-inner); font-size: var(--text-sm); border-left: 3px solid; }
+.rc-alerta-info { background: var(--tint-primary-6); border-color: var(--dorado-claro); color: var(--on-surface-body); }
+.rc-alerta-aviso { background: var(--tint-primary-12); border-color: var(--dorado); color: var(--on-surface-body); }
+.rc-alerta-incumplimiento { background: var(--tint-error-8); border-color: var(--error); color: var(--error); }
 .rc-alerta-regla {
-  display: inline-block; font-size: 10px; padding: 1px 6px;
-  background: var(--negro); color: var(--dorado); border-radius: 2px;
-  letter-spacing: 0.05em; margin-right: 8px; font-weight: 600;
+  display: inline-block; font-size: var(--text-2xs); padding: 1px 6px;
+  background: var(--negro); color: var(--dorado); border-radius: var(--radio-xs);
+  letter-spacing: 0.05em; margin-right: var(--space-sm); font-weight: 600;
 }
 /* "error" = fallo técnico / dato ausente (no se pudo calcular): se distingue del
    incumplimiento normativo (rojo) con un tono neutro oscuro corporativo, para no
    connotar "violación de norma" donde lo que falla es la entrada o el cálculo. */
-.rc-alerta-error { background: rgba(10,10,10,0.07); border-color: var(--negro); color: var(--negro); }
+.rc-alerta-error { background: var(--tint-neutral-7); border-color: var(--negro); color: var(--negro); }
 .rc-alerta-detalles summary {
   cursor: pointer; list-style: none;
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-sm);
 }
 .rc-alerta-detalles summary::-webkit-details-marker { display: none; }
 .rc-alerta-detalles summary::before {
@@ -365,57 +343,59 @@
 }
 .rc-alerta-detalles[open] summary::before { transform: rotate(90deg); }
 .rc-alerta-contador {
-  font-size: 10px; padding: 1px 6px; background: var(--dorado-claro);
-  color: var(--negro); border-radius: 999px; font-weight: 600;
+  font-size: var(--text-2xs); padding: 1px 6px; background: var(--dorado-claro);
+  color: var(--negro); border-radius: var(--radio-pill); font-weight: 600;
 }
-.rc-alerta-resumen { color: #666; font-style: italic; flex: 1;
+.rc-alerta-resumen { color: var(--on-surface-muted); font-style: italic; flex: 1;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rc-alerta-sublista {
-  list-style: disc; margin: 8px 0 0 24px; padding: 0;
+  list-style: disc; margin: var(--space-sm) 0 0 24px; padding: 0;
   display: flex; flex-direction: column; gap: 2px;
 }
 .rc-alerta-sublista li {
-  padding: 4px 8px; border-left-width: 2px; font-size: 11px;
+  padding: var(--space-xs) var(--space-sm); border-left-width: 2px; font-size: var(--text-eyebrow);
 }
 
 /* ── Bloques homogéneos del modal (Carpetas + Parámetros del PGOU) ─── */
 .rc-modal-bloque {
-  background: var(--blanco); border: 1px solid #E4DFCC;
+  background: var(--blanco); border: 1px solid var(--outline);
   border-radius: var(--radio); padding: 14px 16px;
-  display: flex; flex-direction: column; gap: 12px;
+  display: flex; flex-direction: column; gap: var(--space-md);
 }
 .rc-modal-bloque-header {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; flex-wrap: wrap; padding-bottom: 8px;
-  border-bottom: 1px solid #EEE9D5;
+  gap: var(--space-sm); flex-wrap: wrap; padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--outline-subtle);
 }
 .rc-modal-bloque-header h3 {
-  font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em;
-  color: #555; margin: 0;
+  font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--on-surface-secondary); margin: 0;
 }
 .rc-carpetas-acciones { display: flex; gap: 6px; align-items: center; }
 
-/* Buscador con lupa */
+/* Buscador con lupa (mirror de .buscador de puccetti.css; prefijo conservado
+   porque el resumen/foco se referencia por estructura local). */
 .rc-buscador-lupa {
-  display: flex; align-items: center; gap: 4px;
-  border: 1px solid #C9C5B5; border-radius: 4px;
+  display: flex; align-items: center; gap: var(--space-xs);
+  border: 1px solid var(--outline-input); border-radius: var(--radio-inner);
   padding: 2px 6px; background: var(--blanco);
 }
-.rc-buscador-lupa:focus-within { border-color: var(--dorado); }
-.rc-icono-lupa { color: var(--dorado); font-size: 14px; line-height: 1; }
+.rc-buscador-lupa:focus-within { border-color: var(--dorado); box-shadow: 0 0 0 2px var(--tint-primary-16); }
+.rc-icono-lupa { color: var(--dorado); font-size: var(--text-md); line-height: 1; }
 .rc-buscador-lupa input[type="text"] {
-  font-size: 12px; padding: 4px 6px; border: none; outline: none;
-  background: transparent; min-width: 140px;
+  font-size: var(--text-sm); padding: var(--space-xs) 6px; border: none;
+  background: transparent; min-width: 140px; color: var(--on-surface);
 }
+.rc-buscador-lupa input[type="text"]:focus { outline: none; }
 
 .rc-carpetas-lista { display: flex; flex-direction: column; gap: 6px; }
 .rc-carpeta {
-  background: var(--blanco); border: 1px solid #E4DFCC;
-  border-radius: 4px; padding: 6px 10px;
+  background: var(--blanco); border: 1px solid var(--outline);
+  border-radius: var(--radio-inner); padding: 6px 10px;
 }
 .rc-carpeta summary {
   cursor: pointer; list-style: none;
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm);
 }
 .rc-carpeta summary::-webkit-details-marker { display: none; }
 .rc-carpeta summary::before {
@@ -423,81 +403,88 @@
   transition: transform 150ms ease; margin-right: 6px;
 }
 .rc-carpeta[open] summary::before { transform: rotate(90deg); }
-.rc-carpeta-nombre { font-weight: 600; font-size: 13px; flex: 1; }
-.rc-carpeta-acciones { display: flex; gap: 4px; }
+.rc-carpeta-nombre { font-weight: 600; font-size: var(--text-base); flex: 1; }
+.rc-carpeta-acciones { display: flex; gap: var(--space-xs); }
 .rc-carpeta-acciones button {
-  font-size: 11px; padding: 2px 8px; border: 1px solid var(--dorado);
-  background: var(--blanco); color: var(--negro); border-radius: 3px;
+  font-size: var(--text-eyebrow); padding: 2px var(--space-sm); border: 1px solid var(--dorado);
+  background: var(--blanco); color: var(--negro); border-radius: var(--radio-chip);
   cursor: pointer;
 }
 .rc-carpeta-acciones .rc-carpeta-borrar { color: var(--error); border-color: var(--error); }
 .rc-carpeta-normativas {
-  list-style: none; padding: 8px 0 0 18px; margin: 6px 0 0 0;
-  display: flex; flex-direction: column; gap: 4px;
-  border-top: 1px dashed #E4DFCC;
+  list-style: none; padding: var(--space-sm) 0 0 18px; margin: 6px 0 0 0;
+  display: flex; flex-direction: column; gap: var(--space-xs);
+  border-top: 1px dashed var(--outline);
 }
 .rc-carpeta-normativa-item {
-  display: flex; align-items: stretch; gap: 4px;
+  display: flex; align-items: stretch; gap: var(--space-xs);
 }
 .rc-carpeta-normativa-item .rc-carpeta-cargar {
   flex: 1; text-align: left; padding: 6px 10px;
-  background: var(--gris-suave); border: 1px solid #E4DFCC; border-radius: 3px;
+  background: var(--gris-suave); border: 1px solid var(--outline); border-radius: var(--radio-chip);
   cursor: pointer;
 }
-.rc-carpeta-normativa-item .rc-carpeta-cargar:hover { background: rgba(184,150,12,0.10); }
-.rc-carpeta-normativa-item small { display: block; color: #666; font-size: 11px; margin-top: 2px; }
+.rc-carpeta-normativa-item .rc-carpeta-cargar:hover { background: var(--tint-primary-10); }
+.rc-carpeta-normativa-item small { display: block; color: var(--on-surface-muted); font-size: var(--text-eyebrow); margin-top: 2px; }
+/* Botón-icono de borrar normativa (mirror de .icon-btn--peligro; prefijo
+   conservado por su uso en estructura de lista del modal). */
 .rc-carpeta-norm-borrar {
+  display: inline-flex; align-items: center; justify-content: center;
   background: var(--blanco); border: 1px solid var(--error); color: var(--error);
-  border-radius: 3px; padding: 0 8px; cursor: pointer;
+  border-radius: var(--radio-chip); min-width: 32px; padding: 0 var(--space-sm); cursor: pointer;
 }
+.rc-carpeta-norm-borrar:hover { background: var(--tint-error-8); }
 
 /* Resumen de la normativa seleccionada (modal) — par clave/valor con el mismo
    tratamiento que .rc-inmueble-datos para coherencia entre fichas de datos. */
 .rc-norm-resumen-lista { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin: 0; }
 .rc-norm-resumen-lista > div { display: flex; flex-direction: column; }
-.rc-norm-resumen-lista dt { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; }
+.rc-norm-resumen-lista dt { font-size: var(--text-2xs); color: var(--on-surface-secondary); text-transform: uppercase; letter-spacing: 0.08em; }
 .rc-norm-resumen-lista dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; color: var(--negro); }
 
 /* Bloque "Normativa aplicada actualmente" (modal) — realce dorado para
    distinguir la normativa vigente del selector y del resumen de selección.
    Compacto: muestra TODOS los parámetros en una rejilla densa y tipografía
    reducida para que ocupen poco. */
-.rc-norm-actual { border-color: var(--dorado); background: rgba(184,150,12,0.06); padding: 10px 12px; gap: 8px; }
+.rc-norm-actual { border-color: var(--dorado); background: var(--tint-primary-6); padding: 10px 12px; gap: var(--space-sm); }
 .rc-norm-actual .rc-modal-bloque-header { padding-bottom: 6px; }
-.rc-norm-actual-nombre { font-size: 13px; font-weight: 700; color: var(--negro); text-align: right; }
+.rc-norm-actual-nombre { font-size: var(--text-base); font-weight: 700; color: var(--negro); text-align: right; }
 .rc-norm-actual-lista {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
   gap: 6px 14px; margin: 0;
 }
 .rc-norm-actual-lista > div { display: flex; flex-direction: column; min-width: 0; }
 .rc-norm-actual-lista dt {
-  font-size: 9px; color: #6a6a6a; text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 9px; color: var(--on-surface-muted); text-transform: uppercase; letter-spacing: 0.05em;
 }
-.rc-norm-actual-lista dd { margin: 1px 0 0; font-size: 12px; font-weight: 600; color: var(--negro); }
+.rc-norm-actual-lista dd { margin: 1px 0 0; font-size: var(--text-sm); font-weight: 600; color: var(--negro); }
 .rc-norm-actual-lista .rc-norm-actual-usos { grid-column: 1 / -1; }
 .rc-norm-actual-lista .rc-norm-actual-usos dd { text-transform: capitalize; }
 
 /* Item de normativa seleccionado en el modal — mismo realce dorado que
    .nm-normativa-activa en el módulo Normativa municipal. */
 .rc-carpeta-normativa-item.rc-norm-seleccionada .rc-carpeta-cargar {
-  border-color: var(--dorado); background: rgba(184,150,12,0.16);
+  border-color: var(--dorado); background: var(--tint-primary-16);
 }
 
-/* ── Toast ───────────────────────────────────────────────────────── */
+/* ── Toast (mirror de .toast de puccetti.css; prefijo conservado porque el JS
+   alterna rc-toast-on / rc-toast-error sobre el span por id). ──────────── */
 .rc-toast {
-  font-size: 12px; color: #444; padding: 4px 10px;
-  border-radius: 999px; opacity: 0; transition: opacity 200ms ease;
-  background: var(--blanco); border: 1px solid #E4DFCC;
+  font-size: var(--text-sm); color: var(--on-surface-body); padding: var(--space-xs) 10px;
+  border-radius: var(--radio-pill); opacity: 0; transition: opacity 200ms ease;
+  background: var(--blanco); border: 1px solid var(--outline);
 }
 .rc-toast-on { opacity: 1; }
 .rc-toast-error { color: var(--error); border-color: var(--error); }
 
-/* ── Modal normativa ─────────────────────────────────────────────── */
+/* ── Modal normativa (mirror de .modal de puccetti.css; se conserva el prefijo
+   rc-modal-* porque 7 diálogos + render_calculos.js lo referencian por clase
+   además de por id). Solo tokenizado. ────────────────────────────────────── */
 .rc-modal {
   border: none; padding: 0; background: transparent;
   max-width: 800px; width: 90vw;
 }
-.rc-modal::backdrop { background: rgba(10,10,10,0.6); }
+.rc-modal::backdrop { background: var(--scrim); }
 .rc-modal-card {
   background: var(--blanco); border-radius: var(--radio);
   border-top: 4px solid var(--dorado); box-shadow: var(--sombra);
@@ -505,79 +492,50 @@
 }
 .rc-modal-header {
   padding: 20px 24px 12px;
-  border-bottom: 1px solid #EEE9D5;
+  border-bottom: 1px solid var(--outline-subtle);
   position: relative;
 }
-.rc-modal-header h2 { margin: 0; font-size: 19px; }
-.rc-modal-sub { font-size: 13px; color: #555; margin: 6px 0 0; line-height: 1.45; }
+.rc-modal-header h2 { margin: 0; font-size: var(--text-xl); }
+.rc-modal-sub { font-size: var(--text-base); color: var(--on-surface-secondary); margin: 6px 0 0; line-height: 1.45; }
 .rc-modal-cerrar {
   position: absolute; top: 16px; right: 16px;
-  border: none; background: transparent; font-size: 22px; cursor: pointer;
-  color: var(--gris-medio); width: 32px; height: 32px;
-  border-radius: 999px;
+  border: none; background: transparent; font-size: var(--text-2xl); cursor: pointer;
+  color: var(--gris-medio); width: 36px; height: 36px;
+  border-radius: var(--radio-pill);
+  display: inline-flex; align-items: center; justify-content: center; line-height: 1;
 }
 .rc-modal-cerrar:hover { background: var(--gris-suave); color: var(--negro); }
 .rc-modal-cuerpo {
   padding: 16px 24px; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 16px;
+  display: flex; flex-direction: column; gap: var(--space-lg);
 }
-.rc-modal-buscador { display: flex; gap: 8px; align-items: flex-end; }
-.rc-modal-buscador .rc-campo { flex: 1; }
 .rc-modal-ayuda {
-  font-size: 12px; color: #555; line-height: 1.45;
-  background: var(--gris-suave); padding: 8px 12px; border-radius: var(--radio);
-  margin: 0 0 12px;
+  font-size: var(--text-sm); color: var(--on-surface-secondary); line-height: 1.45;
+  background: var(--gris-suave); padding: var(--space-sm) 12px; border-radius: var(--radio);
+  margin: 0 0 var(--space-md);
 }
-.rc-modal-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.rc-modal-acciones { display: flex; gap: var(--space-sm); flex-wrap: wrap; margin-top: var(--space-xs); }
 
 /* ── Editor de superficies mínimas de estancias (vivienda) ───────────── */
-.rc-sup-secciones { display: flex; flex-direction: column; gap: 16px; }
+.rc-sup-secciones { display: flex; flex-direction: column; gap: var(--space-lg); }
 .rc-sup-seccion h3 {
-  margin: 0 0 6px; font-size: 14px; color: var(--dorado);
-  border-bottom: 1px solid #EEE9D5; padding-bottom: 4px;
+  margin: 0 0 6px; font-size: var(--text-md); color: var(--dorado);
+  border-bottom: 1px solid var(--outline-subtle); padding-bottom: var(--space-xs);
 }
 .rc-sup-tabla { width: 100%; border-collapse: collapse; }
 .rc-sup-tabla th, .rc-sup-tabla td {
-  text-align: left; padding: 5px 8px; font-size: 13px;
+  text-align: left; padding: 5px 8px; font-size: var(--text-base);
   border-bottom: 1px solid var(--gris-suave);
 }
 .rc-sup-tabla th { font-weight: 600; color: var(--gris-medio); }
 .rc-sup-tabla th:last-child, .rc-sup-tabla td:last-child { text-align: right; width: 120px; }
 .rc-sup-input {
-  width: 90px; text-align: right; padding: 4px 8px;
-  border: 1px solid #C9C5B5; border-radius: var(--radio); font-size: 13px;
+  width: 90px; text-align: right; padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--outline-input); border-radius: var(--radio); font-size: var(--text-base);
 }
-.rc-sup-input:focus { outline: 2px solid var(--dorado); outline-offset: 1px; }
+.rc-sup-input:focus { outline: var(--focus-ring); outline-offset: 1px; }
 .rc-sup-input:disabled { background: var(--gris-suave); color: var(--gris-medio); }
-.rc-sup-acciones { justify-content: flex-end; margin-top: 8px; }
-
-/* ── Submodales (crear carpeta, archivar, confirmar) ─────────────────── */
-.rc-submodal {
-  border: none; padding: 0; background: transparent;
-  max-width: 460px; width: 90vw;
-}
-.rc-submodal::backdrop { background: rgba(10,10,10,0.45); }
-.rc-submodal-card {
-  background: var(--blanco); border-radius: var(--radio);
-  border-top: 3px solid var(--dorado); box-shadow: var(--sombra);
-  display: flex; flex-direction: column;
-}
-.rc-submodal-header {
-  position: relative; padding: 16px 20px 10px;
-  border-bottom: 1px solid #EEE9D5;
-}
-.rc-submodal-header h3 { margin: 0; font-size: 15px; }
-.rc-submodal-cuerpo {
-  padding: 14px 20px; display: flex; flex-direction: column; gap: 10px;
-}
-.rc-submodal-acciones {
-  padding: 12px 20px; border-top: 1px solid #EEE9D5;
-  display: flex; gap: 8px; justify-content: flex-end;
-}
-.rc-boton-peligro {
-  background: var(--error); border-color: var(--error); color: var(--blanco);
-}
-.rc-boton-peligro:hover { filter: brightness(0.92); }
+.rc-sup-acciones { justify-content: flex-end; margin-top: var(--space-sm); }
 
 /* ── data-puede-editar=false (rol inversor): inputs en solo lectura ── */
 .rc-layout[data-puede-editar="false"] input,
@@ -587,41 +545,30 @@
   pointer-events: none; opacity: 0.7;
 }
 
-/* ── Iteración 3: banner "render en desarrollo" + tipos de planta ── */
-.rc-banner-render {
-  margin: 6px 0 0;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--gris-medio, #6e6a60);
-  background: rgba(184, 150, 12, 0.08);
-  border-left: 3px solid var(--dorado);
-  border-radius: 2px;
-  font-style: italic;
-}
+/* ── Iteración 3: tipos de planta ── */
 .rc-fila-tipo-sotano td {
-  background: rgba(10, 10, 10, 0.04);
-  color: #6e6a60;
+  background: var(--tint-neutral-4);
+  color: var(--on-surface-muted);
   font-style: italic;
 }
 .rc-fila-tipo-atico td {
-  background: rgba(184, 150, 12, 0.06);
+  background: var(--tint-primary-6);
 }
 .rc-fila-tipo-comunes td {
-  background: rgba(184, 150, 12, 0.10);
+  background: var(--tint-primary-10);
   font-weight: 500;
 }
 
-/* ── Iteración 4: KPI texto + filas unidad clicables + modal unidad ── */
-.rc-kpi-valor-texto { font-size: 13px; font-weight: 500; }
+/* ── Iteración 4: filas unidad clicables + modal unidad ── */
 .rc-fila-unidad-clicable { cursor: pointer; }
-.rc-fila-unidad-clicable:hover td { background: rgba(184, 150, 12, 0.10); }
+.rc-fila-unidad-clicable:hover td { background: var(--tint-primary-10); }
 /* Unidad adaptada (DB-SUA): señalada levemente con un fondo dorado tenue y una
    barra dorada a la izquierda. El hover (0.16) sigue distinguiéndose. */
-.rc-fila-unidad-adaptada td { background: rgba(184, 150, 12, 0.08); }
+.rc-fila-unidad-adaptada td { background: var(--tint-primary-8); }
 .rc-fila-unidad-adaptada td:first-child { box-shadow: inset 3px 0 0 var(--dorado); }
-.rc-fila-unidad-adaptada:hover td { background: rgba(184, 150, 12, 0.16); }
+.rc-fila-unidad-adaptada:hover td { background: var(--tint-primary-16); }
 .rc-mu-help {
-  font-size: 12px; color: #6e6a60; margin: 0 0 6px; font-style: italic;
+  font-size: var(--text-sm); color: var(--on-surface-muted); margin: 0 0 6px; font-style: italic;
 }
 
 .rc-modal-unidad-card { max-width: 520px; }
@@ -631,57 +578,57 @@
   margin: 0;
 }
 .rc-mu-meta-lista > div { display: flex; justify-content: space-between; }
-.rc-mu-meta-lista dt { font-size: 11px; color: #6e6a60; text-transform: uppercase; letter-spacing: 0.06em; }
+.rc-mu-meta-lista dt { font-size: var(--text-eyebrow); color: var(--on-surface-muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .rc-mu-meta-lista dd { margin: 0; font-weight: 600; }
 
 .rc-mu-reparto h3, .rc-mu-estancias h3 {
-  font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
-  color: #6e6a60; margin: 0 0 6px;
+  font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--on-surface-muted); margin: 0 0 6px;
 }
 .rc-mu-tabla {
-  width: 100%; border-collapse: collapse; font-size: 13px;
+  width: 100%; border-collapse: collapse; font-size: var(--text-base);
 }
 .rc-mu-tabla th {
-  text-align: left; font-weight: 500; color: #444; padding: 4px 8px;
+  text-align: left; font-weight: 500; color: var(--on-surface-body); padding: var(--space-xs) var(--space-sm);
 }
 .rc-mu-tabla td {
-  text-align: right; padding: 4px 8px; font-weight: 600;
+  text-align: right; padding: var(--space-xs) var(--space-sm); font-weight: 600;
 }
-.rc-mu-tabla tr + tr { border-top: 1px solid rgba(0,0,0,0.06); }
+.rc-mu-tabla tr + tr { border-top: 1px solid var(--hairline-soft); }
 
-.rc-mu-est-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rc-mu-est-tabla { width: 100%; border-collapse: collapse; font-size: var(--text-base); }
 .rc-mu-est-tabla thead th {
-  text-align: left; font-size: 11px; font-weight: 500; color: #6e6a60;
-  text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 8px;
-  border-bottom: 1px solid rgba(0,0,0,0.1);
+  text-align: left; font-size: var(--text-eyebrow); font-weight: 500; color: var(--on-surface-muted);
+  text-transform: uppercase; letter-spacing: 0.04em; padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--hairline);
 }
-.rc-mu-est-tabla td { padding: 4px 8px; }
+.rc-mu-est-tabla td { padding: var(--space-xs) var(--space-sm); }
 .rc-mu-est-tabla .rc-num { text-align: right; font-weight: 600; white-space: nowrap; }
-.rc-mu-est-tabla tbody tr { background: var(--gris-suave, #f4f2ec); }
+.rc-mu-est-tabla tbody tr { background: var(--gris-suave); }
 .rc-mu-est-tabla tbody tr + tr { border-top: 2px solid var(--blanco); }
-.rc-mu-est-tabla tbody td:first-child { border-left: 3px solid #ccc; }
+.rc-mu-est-tabla tbody td:first-child { border-left: 3px solid var(--outline); }
 .rc-mu-estancia-publica td:first-child { border-left-color: var(--dorado); }
-.rc-mu-estancia-privada td:first-child { border-left-color: #6e6a60; }
-.rc-mu-estancia-servicio td:first-child { border-left-color: #9b9b9b; }
+.rc-mu-estancia-privada td:first-child { border-left-color: var(--on-surface-muted); }
+.rc-mu-estancia-servicio td:first-child { border-left-color: var(--gris-medio); }
 .rc-mu-estancia-circulacion { font-style: italic; }
 .rc-mu-estancia-circulacion td:first-child { border-left-color: var(--dorado-claro); }
 .rc-mu-est-nombre { font-weight: 600; }
-.rc-mu-est-cat { font-size: 11px; color: #6e6a60; text-transform: uppercase; }
-.rc-mu-nocomp { color: #9b9b9b; font-style: italic; font-weight: 400; }
-.rc-mu-est-warn { font-size: 14px; margin-right: 4px; cursor: help; }
+.rc-mu-est-cat { font-size: var(--text-eyebrow); color: var(--on-surface-muted); text-transform: uppercase; }
+.rc-mu-nocomp { color: var(--gris-medio); font-style: italic; font-weight: 400; }
+.rc-mu-est-warn { font-size: var(--text-md); margin-right: var(--space-xs); cursor: help; }
 /* Rojo: el círculo no cabe ni en planta cuadrada (área < Ø²) — imposible. */
 .rc-mu-est-warn-rojo { color: var(--error); }
-.rc-mu-estancia-rojo td { background: rgba(140,42,31,0.10); }
+.rc-mu-estancia-rojo td { background: var(--tint-error-10); }
 /* Amarillo: cabe en cuadrado pero no con la proporción realista 1:1.5. */
 .rc-mu-est-warn-amarillo { color: var(--dorado); }
-.rc-mu-estancia-amarillo td { background: rgba(184,150,12,0.12); }
+.rc-mu-estancia-amarillo td { background: var(--tint-primary-12); }
 .rc-mu-est-tabla tfoot th,
 .rc-mu-est-tabla tfoot td {
   padding: 6px 8px; font-weight: 700;
-  border-top: 2px solid rgba(0,0,0,0.18);
+  border-top: 2px solid var(--hairline-strong);
 }
 .rc-mu-est-tabla tfoot th { text-align: left; }
-.rc-mu-nota { font-size: 11px; color: #6e6a60; margin: 8px 0 0; line-height: 1.4; }
+.rc-mu-nota { font-size: var(--text-eyebrow); color: var(--on-surface-muted); margin: var(--space-sm) 0 0; line-height: 1.4; }
 /* La columna/fila "Computable" se muestra en vivienda y turismo; solo se oculta
    donde no aplica (local, sin estancias). */
 .rc-mu-no-comp .rc-mu-col-comp,
@@ -691,11 +638,11 @@
 
 /* ── Barra de datos catastrales (siempre visible en el módulo) ──────── */
 .rc-catastro-bar {
-  display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: center;
-  background: var(--blanco); border: 1px solid #EEE9D5;
+  display: flex; flex-wrap: wrap; gap: var(--space-sm) 28px; align-items: center;
+  background: var(--blanco); border: 1px solid var(--outline-subtle);
   border-left: 4px solid var(--dorado);
   border-radius: var(--radio); box-shadow: var(--sombra);
-  padding: 10px 18px; margin: 0 0 16px;
+  padding: 10px 18px; margin: 0 0 var(--space-lg);
 }
 .rc-cat-item { display: flex; flex-direction: column; gap: 1px; }
 .rc-cat-k {
@@ -704,32 +651,63 @@
 }
 .rc-cat-v { font-size: 15px; font-weight: 600; color: var(--negro); }
 
-/* ── Aviso inferior de exceso de construida (rehabilitación) ────────── */
+/* ── Aviso inferior de exceso de construida (rehabilitación) ──────────
+   Ámbar deliberado (decisión de diseño): estado de advertencia tokenizado. */
 .rc-aviso-exceso {
   display: flex; align-items: center; gap: 10px;
-  background: #FFF8E1; border: 1px solid #E0A800; border-left: 4px solid #E0A800;
-  color: #7A5B00; border-radius: var(--radio);
-  padding: 10px 16px; margin: 16px 0 0; font-size: 13px; line-height: 1.4;
+  background: var(--state-warning-bg); border: 1px solid var(--state-warning-border);
+  border-left: 4px solid var(--state-warning-border);
+  color: var(--state-warning-text); border-radius: var(--radio);
+  padding: 10px 16px; margin: var(--space-lg) 0 0; font-size: var(--text-base); line-height: 1.4;
 }
 .rc-aviso-exceso[hidden] { display: none; }
-.rc-aviso-exceso strong { color: #5e4600; }
-.rc-aviso-exceso-icono { font-size: 18px; line-height: 1; }
+.rc-aviso-exceso strong { color: var(--state-warning-text); }
+.rc-aviso-exceso-icono { font-size: var(--text-md); line-height: 1; }
 
 /* ── Aviso de procedencia del ático (rehabilitación) ───────────────────
-   Amarillo = ático calculado por nº de plantas (verificar).
-   Naranja  = sin datos: comprobar manualmente. */
+   Amarillo (ámbar) = ático calculado por nº de plantas (verificar).
+   Naranja  = sin datos: comprobar manualmente. Estados deliberados, tokenizados. */
 .rc-aviso-atico {
   border-radius: var(--radio);
-  padding: 10px 16px; margin: 0 0 16px;
-  font-size: 13px; line-height: 1.4; border-left: 4px solid;
+  padding: 10px 16px; margin: 0 0 var(--space-lg);
+  font-size: var(--text-base); line-height: 1.4; border-left: 4px solid;
 }
-.rc-aviso-atico--amarillo { background: #FFF8E1; border-color: #E5B800; color: #5C4A00; }
-.rc-aviso-atico--naranja  { background: #FFF1E0; border-color: #E8730C; color: #7A3B00; }
+.rc-aviso-atico--amarillo { background: var(--state-warning-bg); border-color: var(--state-warning-border); color: var(--state-warning-text); }
+.rc-aviso-atico--naranja  { background: var(--state-warning-strong-bg); border-color: var(--state-warning-strong-border); color: var(--state-warning-strong-text); }
 
-/* ── Modal de exceso ────────────────────────────────────────────────── */
+/* ── Modal de exceso (sin × de cierre, a propósito) ─────────────────── */
 .rc-modal-exceso-card { max-width: 520px; width: 92vw; }
-.rc-exceso-sub { font-size: 13px; color: #555; line-height: 1.5; margin: 8px 0 0; }
+.rc-exceso-sub { font-size: var(--text-base); color: var(--on-surface-secondary); line-height: 1.5; margin: var(--space-sm) 0 0; }
 .rc-modal-pie {
-  display: flex; justify-content: flex-end; gap: 8px;
-  padding: 12px 24px 20px; border-top: 1px solid #EEE9D5;
+  display: flex; justify-content: flex-end; gap: var(--space-sm);
+  padding: var(--space-md) 24px 20px; border-top: 1px solid var(--outline-subtle);
+}
+
+/* ── Landing: selección de modo de Render y cálculos ──────────────────
+   Estilos propios .rcl-* (antes inline en render_calculos_landing.html). */
+.rcl-preview {
+  background: var(--blanco);
+  border: 1px solid var(--outline);
+  border-left: 4px solid var(--dorado);
+  border-radius: var(--radio);
+  padding: 16px 18px;
+  margin: 20px 0 28px;
+}
+.rcl-preview h2 { margin: 0 0 3px; font-size: 17px; }
+.rcl-preview .rcl-sub { margin: 0 0 14px; color: var(--dorado); font-size: var(--text-md); }
+.rcl-datos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-md) 22px;
+}
+.rcl-dato { display: flex; flex-direction: column; gap: 2px; }
+.rcl-dato .rcl-k { font-size: var(--text-eyebrow); text-transform: uppercase; letter-spacing: .04em; color: var(--on-surface-secondary); }
+.rcl-dato .rcl-v { font-size: 15px; color: var(--negro); }
+.rcl-dato.rcl-destacado .rcl-v { color: var(--dorado); font-weight: 600; font-size: 18px; }
+.rcl-pregunta { margin: 0 0 14px; font-size: 17px; }
+.rcl-modos .tarjeta { cursor: pointer; }
+.rcl-modos .tarjeta header h2 { display: flex; align-items: center; gap: var(--space-sm); }
+.rcl-badge {
+  font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: .05em;
+  padding: 2px var(--space-sm); border-radius: var(--radio-pill); background: var(--dorado); color: var(--negro);
 }

@@ -355,8 +355,7 @@
       tablaPlantaBody.appendChild(tr);
     });
     const trTot = document.createElement("tr");
-    trTot.style.fontWeight = "600";
-    trTot.style.background = "var(--gris-suave)";
+    trTot.className = "rc-fila-total";
     trTot.innerHTML = `
       <td>Total</td>
       <td>${fmt.int.format(tot.viv)}</td>
@@ -1749,7 +1748,7 @@
     const inicial = DEFAULT_TIPOLOGIA[opciones] || Object.keys(OPCIONES_TIPOLOGIA[opciones])[0];
     const wrap = document.createElement("div");
     wrap.className = "rc-tipologia-extra";
-    wrap.innerHTML = `<select name="tipologias_extra" data-bloque="${bloque}">${_opcionesTipologia(opciones, inicial)}</select>
+    wrap.innerHTML = `<select name="tipologias_extra" class="select" data-bloque="${bloque}">${_opcionesTipologia(opciones, inicial)}</select>
       <button type="button" class="rc-tip-quitar" aria-label="Eliminar tipología">−</button>`;
     contenedor.appendChild(wrap);
   }

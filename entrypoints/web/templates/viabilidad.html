@@ -8,7 +8,10 @@
 {% block contenido %}
 
 <section class="hero">
-  <h1>{{ tarjeta.titulo }}</h1>
+  <div class="hero-titulo">
+    <span class="eyebrow eyebrow--oro">Estudio económico</span>
+    <h1>{{ tarjeta.titulo }}</h1>
+  </div>
 </section>
 
 {% if proyecto_activo is none %}
@@ -27,17 +30,17 @@
   <!-- ───────────────────── Columna izquierda: parámetros ───────────────────── -->
   <div class="vb-col vb-col-params">
 
-    <article class="vb-card">
+    <article class="vb-card card">
       <header class="vb-card-h">
-        <h2>Parcela del proyecto</h2>
+        <h2 class="eyebrow">Parcela del proyecto</h2>
         {% if parcela %}
-          <span class="vb-badge vb-badge-dorado">Asociada</span>
+          <span class="badge badge--oro">Asociada</span>
         {% else %}
-          <span class="vb-badge vb-badge-gris">Sin parcela</span>
+          <span class="badge badge--gris">Sin parcela</span>
         {% endif %}
       </header>
       {% if parcela %}
-        <dl class="vb-dl">
+        <dl class="dl-ficha">
           <div><dt>Ref. catastral</dt><dd>{{ parcela.referencia_catastral or "—" }}</dd></div>
           <div><dt>Municipio</dt><dd>{{ parcela.municipio or "—" }}</dd></div>
           <div><dt>Sup. parcela</dt><dd>{{ "%.0f"|format(parcela.superficie_m2 or 0) }} m²</dd></div>
@@ -57,8 +60,8 @@
       {% endif %}
     </article>
 
-    <article class="vb-card">
-      <header class="vb-card-h"><h2>Operación</h2></header>
+    <article class="vb-card card">
+      <header class="vb-card-h"><h2 class="eyebrow">Operación</h2></header>
       <div class="vb-radios" role="radiogroup" aria-label="Tipo de operación">
         <label class="vb-radio">
           <input type="radio" name="operacion" value="venta"
@@ -73,8 +76,8 @@
       </div>
     </article>
 
-    <article class="vb-card">
-      <header class="vb-card-h"><h2>Intervención</h2></header>
+    <article class="vb-card card">
+      <header class="vb-card-h"><h2 class="eyebrow">Intervención</h2></header>
       <div class="vb-radios" role="radiogroup" aria-label="Tipo de intervención">
         <label class="vb-radio">
           <input type="radio" name="intervencion" value="obra_nueva"
@@ -89,51 +92,53 @@
       </div>
     </article>
 
-    <article class="vb-card">
-      <header class="vb-card-h"><h2>Parámetros económicos</h2></header>
+    <article class="vb-card card">
+      <header class="vb-card-h"><h2 class="eyebrow">Parámetros económicos</h2></header>
 
       <label class="vb-campo">
-        <span class="vb-campo-label" id="lbl-precio">Precio venta (€/m²)</span>
+        <span class="vb-campo-label eyebrow" id="lbl-precio">Precio venta (€/m²)</span>
         <input type="number" name="precio_eur_m2" min="0" step="50"
                value="{{ parametros.precio_eur_m2 }}">
       </label>
 
       <label class="vb-campo">
-        <span class="vb-campo-label" id="lbl-coste">Coste de construcción (€/m²)</span>
+        <span class="vb-campo-label eyebrow" id="lbl-coste">Coste de construcción (€/m²)</span>
         <input type="number" name="coste_construccion_eur_m2" min="0" step="50"
                value="{{ parametros.coste_construccion_eur_m2 }}">
       </label>
 
       <label class="vb-campo">
-        <span class="vb-campo-label">Superficie a aplicar (m²)</span>
+        <span class="vb-campo-label eyebrow">Superficie a aplicar (m²)</span>
         <input type="number" name="superficie_construida_m2" min="0" step="10"
                value="{{ parametros.superficie_construida_m2 }}"
-               placeholder="0 = autocalcular">
-        <small class="vb-hint">Deja en 0 para autocalcular según el tipo de intervención.</small>
+               placeholder="0 = autocalcular"
+               aria-describedby="hint-superficie">
+        <small class="vb-hint" id="hint-superficie">Deja en 0 para autocalcular según el tipo de intervención.</small>
       </label>
 
       <label class="vb-campo vb-campo-obra-nueva">
-        <span class="vb-campo-label">Edificabilidad (m²t/m²s)</span>
+        <span class="vb-campo-label eyebrow">Edificabilidad (m²t/m²s)</span>
         <input type="number" name="edificabilidad_m2t_m2s" min="0" step="0.05"
                value="{{ parametros.edificabilidad_m2t_m2s }}">
       </label>
 
       <label class="vb-campo vb-campo-renta">
-        <span class="vb-campo-label">Ocupación anual (%)</span>
+        <span class="vb-campo-label eyebrow">Ocupación anual (%)</span>
         <input type="number" name="ocupacion_anual_pct" min="0" max="100" step="1"
-               value="{{ (parametros.ocupacion_anual_pct * 100) | round(0) | int }}">
-        <small class="vb-hint">Solo aplica a renta.</small>
+               value="{{ (parametros.ocupacion_anual_pct * 100) | round(0) | int }}"
+               aria-describedby="hint-ocupacion">
+        <small class="vb-hint" id="hint-ocupacion">Solo aplica a renta.</small>
       </label>
 
       <details class="vb-avanzado">
-        <summary>Avanzado</summary>
+        <summary class="eyebrow eyebrow--oro disclosure">Avanzado</summary>
         <label class="vb-campo">
-          <span class="vb-campo-label">Coste del suelo (€)</span>
+          <span class="vb-campo-label eyebrow">Coste del suelo (€)</span>
           <input type="number" name="coste_suelo_eur" min="0" step="1000"
                  value="{{ parametros.coste_suelo_eur }}">
         </label>
         <label class="vb-campo">
-          <span class="vb-campo-label">% costes indirectos</span>
+          <span class="vb-campo-label eyebrow">% costes indirectos</span>
           <input type="number" name="pct_costes_indirectos_pct" min="0" max="100" step="1"
                  value="{{ (parametros.pct_costes_indirectos * 100) | round(0) | int }}">
         </label>
@@ -143,36 +148,36 @@
     <div class="vb-acciones">
       <button type="button" id="btn-calcular" class="boton-secundario">Calcular</button>
       <button type="submit" id="btn-guardar" class="boton-primario">Guardar</button>
-      <span class="vb-toast" id="vb-toast" role="status" aria-live="polite"></span>
+      <span class="toast" id="vb-toast" role="status" aria-live="polite"></span>
     </div>
   </div>
 
   <!-- ───────────────────── Columna derecha: resultados ────────────────────── -->
   <aside class="vb-col vb-col-resultados" aria-live="polite">
 
-    <div class="vb-kpis">
-      <article class="vb-kpi">
-        <span class="vb-kpi-label">Ingresos estimados</span>
-        <span class="vb-kpi-valor" data-kpi="ingresos_eur">{{ "{:,.0f}".format(estudio.ingresos_eur).replace(",", ".") }} €</span>
+    <div class="kpi-strip">
+      <article class="kpi">
+        <span class="kpi-label">Ingresos estimados</span>
+        <span class="kpi-valor" data-kpi="ingresos_eur">{{ "{:,.0f}".format(estudio.ingresos_eur).replace(",", ".") }} €</span>
       </article>
-      <article class="vb-kpi">
-        <span class="vb-kpi-label">Coste total</span>
-        <span class="vb-kpi-valor" data-kpi="coste_total_eur">{{ "{:,.0f}".format(estudio.coste_total_eur).replace(",", ".") }} €</span>
+      <article class="kpi">
+        <span class="kpi-label">Coste total</span>
+        <span class="kpi-valor" data-kpi="coste_total_eur">{{ "{:,.0f}".format(estudio.coste_total_eur).replace(",", ".") }} €</span>
       </article>
-      <article class="vb-kpi vb-kpi-destacada">
-        <span class="vb-kpi-label">Margen bruto</span>
-        <span class="vb-kpi-valor" data-kpi="margen_eur">{{ "{:,.0f}".format(estudio.margen_eur).replace(",", ".") }} €</span>
+      <article class="kpi kpi--destacada">
+        <span class="kpi-label">Margen bruto</span>
+        <span class="kpi-valor" data-kpi="margen_eur">{{ "{:,.0f}".format(estudio.margen_eur).replace(",", ".") }} €</span>
       </article>
-      <article class="vb-kpi vb-kpi-destacada">
-        <span class="vb-kpi-label">Margen (% sobre coste)</span>
-        <span class="vb-kpi-valor" data-kpi="margen_pct">{{ "%.1f"|format(estudio.margen_pct) }} %</span>
+      <article class="kpi kpi--destacada">
+        <span class="kpi-label">Margen (% sobre coste)</span>
+        <span class="kpi-valor" data-kpi="margen_pct">{{ "%.1f"|format(estudio.margen_pct) }} %</span>
       </article>
     </div>
 
-    <article class="vb-card">
+    <article class="vb-card card">
       <header class="vb-card-h">
-        <h2>Desglose</h2>
-        <span class="vb-badge vb-badge-fuente" data-kpi="fuente_superficie">
+        <h2 class="eyebrow">Desglose</h2>
+        <span class="badge badge--fuente" data-kpi="fuente_superficie">
           {% if estudio.fuente_superficie == "catastro_existente" %}superficie · catastro
           {% elif estudio.fuente_superficie == "manual" %}superficie · manual
           {% elif estudio.fuente_superficie == "parcela_x_edificabilidad" %}superficie · parcela × edif.
@@ -180,7 +185,7 @@
           {% endif %}
         </span>
       </header>
-      <dl class="vb-dl vb-dl-desglose">
+      <dl class="dl-ficha vb-dl-desglose">
         <div><dt>Superficie aplicada</dt><dd><span data-kpi="superficie_aplicada_m2">{{ "%.1f"|format(estudio.superficie_aplicada_m2) }}</span> m²</dd></div>
         <div><dt>Coste de construcción</dt><dd><span data-kpi="coste_construccion_eur">{{ "{:,.0f}".format(estudio.coste_construccion_eur).replace(",", ".") }}</span> €</dd></div>
         <div><dt>Costes indirectos</dt><dd><span data-kpi="coste_indirectos_eur">{{ "{:,.0f}".format(estudio.coste_indirectos_eur).replace(",", ".") }}</span> €</dd></div>
@@ -189,7 +194,7 @@
     </article>
 
     <article class="vb-avisos {% if not estudio.avisos %}vb-oculto{% endif %}" id="vb-avisos">
-      <h2>Avisos</h2>
+      <h2 class="eyebrow">Avisos</h2>
       <ul>
         {% for aviso in estudio.avisos %}
           <li>{{ aviso }}</li>

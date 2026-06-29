@@ -15,14 +15,14 @@
   <div class="rc-campo" data-cuando-uso="{{ uso }}" data-visible-en-planta="{{ visible }}">
     <span class="rc-campo-label">Tipo de unidad</span>
     <div class="rc-tipologias" id="{{ cont_id }}" data-opciones="{{ opciones_key }}" data-bloque="{{ bloque }}">
-      <select name="{{ principal_name }}" data-bloque="{{ bloque }}">
+      <select name="{{ principal_name }}" class="select" data-bloque="{{ bloque }}">
         {% for c, label in lbl_map.items() %}
           <option value="{{ c }}" {% if prog[principal_name] == c %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
       {% if permitir_extra and prog.uso == uso %}{% for slug in prog.tipologias_extra %}
         <div class="rc-tipologia-extra">
-          <select name="tipologias_extra" data-bloque="{{ bloque }}">
+          <select name="tipologias_extra" class="select" data-bloque="{{ bloque }}">
             {% for c, label in lbl_map.items() %}
               <option value="{{ c }}" {% if slug == c %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
@@ -114,7 +114,7 @@
       {% endif %}
 
       <fieldset class="rc-usos" data-visible-en-planta="pb">
-        <legend>Usos permitidos por el PGOU</legend>
+        <legend class="eyebrow">Usos permitidos por el PGOU</legend>
         {% for u, label in [("residencial", "Residencial"), ("hotelero", "Hotelero"), ("terciario", "Terciario"), ("mixto", "Mixto")] %}
           <label class="rc-checkbox">
             <input type="checkbox" name="usos_permitidos" value="{{ u }}"
@@ -143,7 +143,7 @@
          lleva data-patio-id (identidad estable) y data-vertices (polígono UTM, si
          ya tiene posición). Inputs con name="patios" → el JS los recoge como objetos. #}
       <fieldset class="rc-patios" data-visible-en-planta="pb">
-        <legend>Patios del edificio</legend>
+        <legend class="eyebrow">Patios del edificio</legend>
         <p class="rc-patios-ayuda">Arrástralos en el plano para mover, estirar, girar o reformar.</p>
         <div class="rc-patios-lista" id="rc-patios-lista">
           {% for patio in urb.patios %}
@@ -214,7 +214,7 @@
 
       <label class="rc-campo" data-visible-en-planta="pb">
         <span class="rc-campo-label">Uso destino</span>
-        <select name="uso" data-bloque="programa">
+        <select name="uso" class="select" data-bloque="programa">
           {% for u in usos_edificio %}
             <option value="{{ u.value }}"
                     {% if prog.uso == u.value %}selected{% endif %}
@@ -255,7 +255,7 @@
       {# ── APARTAMENTOS TURÍSTICOS (Anexo I.3/I.4) — categoría global (PB) ── #}
       <label class="rc-campo" data-cuando-uso="apartamentos_turisticos" data-visible-en-planta="pb">
         <span class="rc-campo-label">Categoría</span>
-        <select name="categoria_apartamentos" data-bloque="programa">
+        <select name="categoria_apartamentos" class="select" data-bloque="programa">
           {% for c in ["1L","2L","3L","4L"] %}
             <option value="{{ c }}" {% if prog.categoria_apartamentos == c %}selected{% endif %}>
               {{ c[0] }} llave{{ "s" if c[0] != "1" }}
@@ -265,7 +265,7 @@
       </label>
       <label class="rc-campo" data-cuando-uso="apartamentos_turisticos" data-visible-en-planta="pb">
         <span class="rc-campo-label">Grupo</span>
-        <select name="grupo_apartamentos" data-bloque="programa">
+        <select name="grupo_apartamentos" class="select" data-bloque="programa">
           <option value="edificios" {% if prog.grupo_apartamentos == "edificios" %}selected{% endif %}>Edificios / complejos (1L–4L)</option>
           <option value="conjuntos" {% if prog.grupo_apartamentos == "conjuntos" %}selected{% endif %}>Conjuntos (solo 1L/2L)</option>
         </select>
@@ -307,7 +307,7 @@
       {# ── HOTELERO: hotel / hostal / pensión / albergue (Anexo I.1) — categoría global (PB) ── #}
       <label class="rc-campo" data-cuando-uso="hotelero" data-visible-en-planta="pb">
         <span class="rc-campo-label">Categoría</span>
-        <select name="categoria_hotelero" data-bloque="programa">
+        <select name="categoria_hotelero" class="select" data-bloque="programa">
           {% for c, label in lbl_hotelero.items() %}
             <option value="{{ c }}" {% if prog.categoria_hotelero == c %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
