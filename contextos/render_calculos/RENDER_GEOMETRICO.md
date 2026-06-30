@@ -7,8 +7,10 @@
 > cadena de **cálculo numérico** (que ya existe); esto documenta la capa de **dibujo**
 > (que está por construir) y su contrato.
 >
-> Rama de referencia: **`render-dev`** · Baseline al abrir el trabajo: **157** tests · hoy: **176**
-> (`python -m pytest app/tests -q`). Mantén este archivo al día (hay una bitácora al final).
+> Rama de origen del trabajo: **`render-dev`** · ya **integrado en `dev` → `pre` → `main`**
+> (2026-06-29/30; squash en `dev`: «Render de patios implementado», «Cambio de frontend»,
+> «Funcion de bloqueo y union de los patios»). Baseline al abrir el trabajo: **157** tests ·
+> hoy: **182** (`python -m pytest app/tests -q`). Mantén este archivo al día (hay una bitácora al final).
 
 ---
 
@@ -371,3 +373,13 @@ Notas del consumo en el canvas (verificadas en `rc_canvas.js`):
   **desplaza su centroide** → el patio camina hasta desaparecer. Toda edición que conserve el área debe ir por
   `_fijar`, **nunca** por `onCommit`; el único camino que aún reordena+recalcula es `_up` con arrastre deliberado
   ≥ COMMIT_PX (correcto). Sin cambios de backend; 176 verdes.
+- **2026-06-30** — **Sincronización del doc + integración de la rama.** Todo el trabajo de patios
+  hecho en `render-dev` (editable individual → base/efectiva → prioridad por orden + relleno local →
+  zoom/tiradores → anti-bowtie → bloqueo + fusión → doble-clic en sitio) **ya está fusionado en
+  `dev`, `pre` y `main`** (en `dev` aparece squashed en 3 commits del 2026-06-29). Recuento real
+  confirmado: **182 tests** (`pytest --collect-only`); el encabezado seguía en 176. **El hecho central
+  del documento NO cambia**: el render geométrico de **unidades** (rebanadas/núcleo/pasillos) sigue
+  **sin existir** — `CalcularLayout`/`CalcularEnvolvente` devuelven `edificio: None`
+  (casos_uso.py:410/430/494, comentario «render geométrico en backlog»). «Render de patios implementado»
+  se refiere a los PATIOS, no a las unidades; el §4 (plan de integración) y las preguntas abiertas del
+  §8 siguen vigentes como próximo trabajo.
