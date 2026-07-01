@@ -11,6 +11,7 @@ from .dominio import (
     ORIENTACIONES,
     Parcela,
     ParcelaNoEncontrada,
+    PatioCatastral,
     Subreferencia,
     TipoLado,
 )
@@ -91,6 +92,7 @@ def _construir_parcela(
         plantas_bajo_rasante=raw.plantas_bajo_rasante,
         n_patios=raw.n_patios,
         patios_m2=tuple(raw.patios_m2),
+        patios_geom=tuple(raw.patios_geom),
     )
 
 
@@ -399,9 +401,57 @@ def restaurar_parcela_desde_proyecto(datos: dict) -> Parcela | None:
             plantas_bajo_rasante=_entero_o_none(datos.get("plantas_bajo_rasante")),
             n_patios=_entero_o_none(datos.get("n_patios")),
             patios_m2=_tupla_flotantes(datos.get("patios_m2")),
+            patios_geom=_patios_geom_desde_dict(datos.get("patios_geom")),
         )
     except Exception:
         return None
+
+
+def _anillo_desde_lista(raw) -> list[tuple[float, float]]:
+    """Lista de (x, y) desde un anillo JSON, saltando vértices no numéricos."""
+    anillo: list[tuple[float, float]] = []
+    for pt in raw or []:
+        try:
+            anillo.append((float(pt[0]), float(pt[1])))
+        except (TypeError, ValueError, IndexError):
+            continue
+    return anillo
+
+
+def _patio_catastral_a_dict(p: PatioCatastral) -> dict:
+    """Serializa un patio catastral (tipo + área + anillo + huecos WGS84) a JSON-friendly dict."""
+    d: dict = {
+        "tipo": p.tipo,
+        "area_m2": float(p.area_m2),
+        "contorno_wgs84": [[float(x), float(y)] for x, y in p.contorno_wgs84],
+    }
+    if p.huecos_wgs84:
+        d["huecos_wgs84"] = [
+            [[float(x), float(y)] for x, y in h] for h in p.huecos_wgs84
+        ]
+    return d
+
+
+def _patios_geom_desde_dict(raw) -> tuple[PatioCatastral, ...]:
+    """Rehidrata `patios_geom` desde el JSON del proyecto. Tolera estructuras
+    parciales/corruptas: descarta patios sin anillo válido (≥ 3 vértices)."""
+    out: list[PatioCatastral] = []
+    for item in (raw or []):
+        if not isinstance(item, dict):
+            continue
+        anillo = _anillo_desde_lista(item.get("contorno_wgs84"))
+        if len(anillo) < 3:
+            continue
+        try:
+            area = float(item.get("area_m2") or 0.0)
+        except (TypeError, ValueError):
+            area = 0.0
+        huecos = [h for h in (_anillo_desde_lista(r) for r in item.get("huecos_wgs84") or []) if len(h) >= 3]
+        out.append(PatioCatastral(
+            tipo=str(item.get("tipo") or "cerrado"), area_m2=area,
+            contorno_wgs84=anillo, huecos_wgs84=huecos,
+        ))
+    return tuple(out)
 
 
 def _subref_a_dict(s: Subreferencia) -> dict:
@@ -446,6 +496,7 @@ def asociar_a_proyecto(parcela: Parcela, proyecto: Proyecto) -> None:
             "plantas_bajo_rasante": parcela.plantas_bajo_rasante,
             "n_patios": parcela.n_patios,
             "patios_m2": list(parcela.patios_m2),
+            "patios_geom": [_patio_catastral_a_dict(p) for p in parcela.patios_geom],
             "centroide_lonlat": list(parcela.centroide_lonlat),
             "contorno_wgs84": [list(p) for p in parcela.contorno_wgs84],
             "contorno_simplificado_wgs84": [

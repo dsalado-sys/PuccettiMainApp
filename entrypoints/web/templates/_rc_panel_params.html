@@ -150,6 +150,8 @@
           <div class="rc-patio-fila{% if patio.bloqueado %} rc-patio-fila-bloqueada{% endif %}"
                data-patio-id="{{ patio.id }}"
                {% if patio.bloqueado %}data-bloqueado="true"{% endif %}
+               {% if patio.origen %}data-origen="{{ patio.origen }}"{% endif %}
+               {% if patio.huecos %}data-huecos='{{ patio.huecos | tojson }}'{% endif %}
                {% if patio.vertices %}data-vertices='{{ patio.vertices | tojson }}'{% endif %}>
             <input type="number" name="patios" min="0" step="0.5"
                    value="{{ patio.area_m2 }}" data-bloque="urbanisticos"
@@ -160,6 +162,9 @@
                     title="{{ 'Desbloquear patio' if patio.bloqueado else 'Bloquear patio (no se podrá editar)' }}">{{ '🔒' if patio.bloqueado else '🔓' }}</button>
             <button type="button" class="rc-patio-quitar" aria-label="Quitar patio"
                     {% if patio.bloqueado %}disabled{% endif %}>×</button>
+            {# Procedencia catastral: caption en su PROPIA línea, para no empujar el botón × abajo. #}
+            {% if patio.origen %}<span class="rc-patio-origen"
+                  title="Patio del Catastro{{ ' (geometría aproximada)' if patio.origen == 'catastral_aprox' else '' }}">{{ 'Catastral · aprox.' if patio.origen == 'catastral_aprox' else 'Catastral' }}</span>{% endif %}
             <span class="rc-patio-aviso" hidden></span>
           </div>
           {% endfor %}

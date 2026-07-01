@@ -92,6 +92,7 @@ class PatioPlacement:
     id: str = ""
     vertices: Optional[list] = None
     bloqueado: bool = False   # patio congelado: prioridad máxima de colocación (los demás ceden ante él)
+    huecos: Optional[list] = None   # anillos interiores (edificio dentro del patio); None = patio macizo
 
 
 @dataclass

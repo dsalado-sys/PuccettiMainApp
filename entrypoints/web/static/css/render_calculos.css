@@ -167,6 +167,13 @@
   background: var(--surface-variant, var(--surface)); color: var(--on-surface-muted);
   cursor: not-allowed; opacity: 0.75;
 }
+/* Procedencia catastral del patio: caption en su PROPIA línea (flex-basis:100%),
+   para no competir con input + candado + × ni empujar el botón × a otra línea. */
+.rc-patio-origen {
+  flex-basis: 100%;
+  font-size: var(--text-eyebrow); line-height: 1.3; letter-spacing: 0.02em;
+  color: var(--dorado);
+}
 .rc-patio-add {
   background: var(--surface); border: 1px solid var(--dorado); color: var(--on-surface-secondary);
   border-radius: var(--radio-chip); font-size: var(--text-sm); padding: var(--space-xs) 10px; cursor: pointer;

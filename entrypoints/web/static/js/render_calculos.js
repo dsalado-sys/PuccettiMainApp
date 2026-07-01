@@ -152,6 +152,14 @@
             } catch (e) { /* geometría corrupta → se auto-coloca */ }
           }
           if (fila && fila.dataset.bloqueado === "true") obj.bloqueado = true;
+          if (fila && fila.dataset.origen) obj.origen = fila.dataset.origen;
+          if (fila && fila.dataset.huecos) {
+            // Anillos interiores (edificio dentro del patio → anillo). Corruptos → sin huecos.
+            try {
+              const hs = JSON.parse(fila.dataset.huecos);
+              if (Array.isArray(hs) && hs.length) obj.huecos = hs;
+            } catch (e) { /* huecos corruptos → patio macizo */ }
+          }
           bloques[bloque].patios.push(obj);
         }
       } else {
@@ -1750,6 +1758,9 @@
       aplicarEstadoBloqueo(fila, !!p.bloqueado);
       const forma = p.poligono || p.base;
       if (forma) fila.dataset.vertices = JSON.stringify(forma);
+      // Huecos (edificio dentro del patio → anillo): persisten para el siguiente recálculo/guardado.
+      if (Array.isArray(p.huecos) && p.huecos.length) fila.dataset.huecos = JSON.stringify(p.huecos);
+      else delete fila.dataset.huecos;
       const cabe = p.cabe !== false;
       fila.classList.toggle("rc-patio-fila-nocabe", !cabe);
       let aviso = fila.querySelector(".rc-patio-aviso");

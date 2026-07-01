@@ -433,13 +433,19 @@ def colocar_patios(interior_planta: Polygon, params: Parametros, footprint: Opti
             continue
         verts = getattr(d, "vertices", None)
         if verts and len(verts) >= 3:
+            # Huecos: anillos interiores (edificio dentro del patio) → patio en anillo.
+            huecos = getattr(d, "huecos", None) or []
+            anillos_int = [
+                [(float(x), float(y)) for x, y in h]
+                for h in huecos if h and len(h) >= 3
+            ]
             try:
-                geom = _normalizar(Polygon([(float(x), float(y)) for x, y in verts]))
+                geom = _normalizar(Polygon([(float(x), float(y)) for x, y in verts], anillos_int))
             except Exception:
                 geom = Polygon()
             if geom.is_empty:
                 continue
-            geom = _ajustar_area(geom, area)   # área fija: normaliza al área asignada
+            geom = _ajustar_area(geom, area)   # área fija: normaliza al área NETA asignada
             bases[idx] = (geom, area, str(getattr(d, "id", "") or ""), bool(getattr(d, "bloqueado", False)))
             residual = _normalizar(residual.difference(geom))
     # A2: patios sin posición → auto-colocado en el residual restante.

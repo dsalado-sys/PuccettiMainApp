@@ -35,6 +35,7 @@ from .geometria.envolvente import construir_envolvente
 from .geometria.parcelas import LadoParcela, azimut_normal_exterior, orientacion_cardinal
 from .geometria.serializacion import (
     _estancias_por_unidad_dorms,
+    huecos_de,
     lados_a_dict,
     ring,
     tabla_planta_desde_capacidad,
@@ -332,6 +333,7 @@ def _plantas_envolvente_a_dict(envolvente) -> list[dict[str, Any]]:
             "patios": [
                 {"id": getattr(p, "id", ""), "poligono": ring(p.geometry),
                  "base": ring(getattr(p, "base", None) or p.geometry),
+                 "huecos": huecos_de(p.geometry),
                  "area_m2": round(p.area_m2, 2), "luz_recta_m": round(p.luz_recta_m, 2),
                  "area_efectiva_m2": round(getattr(p, "area_efectiva_m2", 0.0) or p.area_m2, 2),
                  "cabe": bool(getattr(p, "cabe", True)),
@@ -1305,6 +1307,76 @@ def aviso_atico_catastral(proyecto: Proyecto) -> dict | None:
     return None
 
 
+def _sembrar_patios_catastrales(params: ParametrosRender, loc: dict) -> bool:
+    """Siembra los patios catastrales CON geometría (`patios_geom`, §2.1) como
+    `PatioDef` posicionados y bloqueados por defecto, para que el render los coloque
+    en su sitio EXACTO en lugar del patio sintético.
+
+    Reproyecta cada anillo WGS84 → UTM con el MISMO huso que usa
+    `construir_parcela_metrica` (derivado del primer vértice del contorno), de modo
+    que el patio caiga dentro de la huella renderizada. El área se mantiene en la
+    catastral (§2.1); el motor reescala el anillo a esa área respecto a su centroide
+    (sub-0,2 %, sin moverlo). Patio abierto → `origen=catastral_aprox` (aproximado).
+
+    Devuelve True si sembró ≥ 1 patio (y el llamante NO aplica el respaldo por áreas).
+    """
+    patios_geom = loc.get("patios_geom")
+    if not isinstance(patios_geom, list) or not patios_geom:
+        return False
+    contorno = loc.get("contorno_simplificado_wgs84") or loc.get("contorno_wgs84") or []
+    if not contorno:
+        return False
+    try:
+        lon_ref, lat_ref = float(contorno[0][0]), float(contorno[0][1])
+    except (TypeError, ValueError, IndexError):
+        return False
+    a_utm = _transformer_a_utm(_epsg_utm_para_lon(lon_ref, lat_ref))
+
+    def _ring_utm(anillo) -> list[list[float]] | None:
+        """Reproyecta un anillo WGS84 → UTM. None si degenerado o con vértice NaN/inf
+        (saneo en la frontera: un vértice envenenado rompería el Polygon)."""
+        pts: list[list[float]] = []
+        for pt in anillo or []:
+            try:
+                x, y = a_utm.transform(float(pt[0]), float(pt[1]))
+            except (TypeError, ValueError, IndexError):
+                return None
+            if not (math.isfinite(x) and math.isfinite(y)):
+                return None
+            pts.append([float(x), float(y)])
+        return pts if len(pts) >= 3 else None
+
+    defs: list[PatioDef] = []
+    for pg in patios_geom:
+        if not isinstance(pg, dict):
+            continue
+        verts = _ring_utm(pg.get("contorno_wgs84"))
+        if not verts:
+            continue
+        # Huecos (edificio dentro del patio → anillo): se reproyectan igual.
+        huecos = [h for h in (_ring_utm(r) for r in pg.get("huecos_wgs84") or []) if h]
+        try:
+            area = float(pg.get("area_m2") or 0.0)
+        except (TypeError, ValueError):
+            area = 0.0
+        if area <= 0:
+            try:  # área NETA (descuenta huecos) si el catastro no la dio
+                area = float(Polygon(verts, huecos).area)
+            except Exception:  # noqa: BLE001 — anillo degenerado → se descarta
+                area = 0.0
+        if area <= 0:
+            continue
+        origen = "catastral_aprox" if str(pg.get("tipo") or "") == "abierto" else "catastral"
+        defs.append(PatioDef(
+            area_m2=round(area, 2), vertices=verts, bloqueado=True, origen=origen,
+            huecos=(huecos or None),
+        ))
+    if not defs:
+        return False
+    params.urbanisticos.patios = defs
+    return True
+
+
 def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proyecto) -> None:
     """Ajusta los parámetros de partida al edificio catastral EXISTENTE de la parcela.
 
@@ -1343,11 +1415,14 @@ def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proy
 
     # Patios reales del edificio: el motor descuenta la SUMA de `urbanisticos.patios`
     # en cada planta y el panel los muestra editables ("Patios del edificio"). En
-    # rehabilitación partimos de los patios catastrales (anillos interiores de la
-    # huella, §2.1) en lugar del patio sintético por defecto.
-    #   - patios_m2 con áreas → se usan esas (1 entrada por patio).
-    #   - n_patios == 0       → el Catastro confirma que no hay patios (lista vacía).
-    #   - n_patios None       → sin dato del Catastro: se respeta el default.
+    # rehabilitación partimos de los patios catastrales (§2.1) en lugar del patio
+    # sintético por defecto.
+    #   - patios_geom (anillos) → patios POSICIONADOS + BLOQUEADOS (sitio exacto).
+    #   - patios_m2 (solo áreas) → respaldo histórico: 1 entrada por patio, sin posición.
+    #   - n_patios == 0         → el Catastro confirma que no hay patios (lista vacía).
+    #   - n_patios None         → sin dato del Catastro: se respeta el default.
+    if _sembrar_patios_catastrales(params, loc):
+        return
     patios_cat = loc.get("patios_m2")
     if isinstance(patios_cat, list) and patios_cat:
         areas = [

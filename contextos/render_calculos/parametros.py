@@ -53,6 +53,12 @@ class PatioDef:
     id: str = ""
     vertices: list | None = None
     bloqueado: bool = False   # patio congelado: el usuario no puede editarlo y el motor lo prioriza
+    # Procedencia: "" = lo añadió el usuario; "catastral" = hueco catastral exacto
+    # (gml:interior); "catastral_aprox" = patio abierto catastral (geometría aproximada).
+    origen: str = ""
+    # Anillos interiores (UTM) cuando el patio es un ANILLO: la construcción está en
+    # medio y el patio la rodea. None/[] = patio macizo. `area_m2` es el área NETA.
+    huecos: list | None = None
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -69,9 +75,23 @@ def area_de_patio(pd: Any) -> float:
         return 0.0
 
 
+def _parse_anillo(raw: Any) -> list[list[float]] | None:
+    """Anillo `[[x,y],...]` (≥ 3 vértices) desde JSON, o None si no es válido."""
+    if not isinstance(raw, (list, tuple)):
+        return None
+    pts: list[list[float]] = []
+    for v in raw:
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            try:
+                pts.append([float(v[0]), float(v[1])])
+            except (TypeError, ValueError):
+                return None
+    return pts if len(pts) >= 3 else None
+
+
 def _parse_patio(item: Any) -> PatioDef | None:
     """Parsea una entrada de `patios` del JSON: número suelto (solo área) u objeto
-    `{area_m2|area, id?, vertices?}`. Devuelve None si el área no es positiva."""
+    `{area_m2|area, id?, vertices?, huecos?}`. Devuelve None si el área no es positiva."""
     if isinstance(item, bool):
         return None
     if isinstance(item, (int, float)):
@@ -84,24 +104,15 @@ def _parse_patio(item: Any) -> PatioDef | None:
             return None
         if a <= 0:
             return None
-        verts: list | None = None
-        raw = item.get("vertices")
-        if isinstance(raw, (list, tuple)):
-            pts: list[list[float]] = []
-            for v in raw:
-                if isinstance(v, (list, tuple)) and len(v) >= 2:
-                    try:
-                        pts.append([float(v[0]), float(v[1])])
-                    except (TypeError, ValueError):
-                        pts = []
-                        break
-            if len(pts) >= 3:
-                verts = pts
+        verts = _parse_anillo(item.get("vertices"))
+        huecos = [h for h in (_parse_anillo(r) for r in (item.get("huecos") or [])) if h] or None
         return PatioDef(
             area_m2=a,
             id=str(item.get("id") or ""),
             vertices=verts,
             bloqueado=bool(item.get("bloqueado", False)),
+            origen=str(item.get("origen") or ""),
+            huecos=huecos,
         )
     return None
 
@@ -335,6 +346,7 @@ class ParametrosRender:
                     id=(pd.id if isinstance(pd, PatioDef) else ""),
                     vertices=(pd.vertices if isinstance(pd, PatioDef) else None),
                     bloqueado=(pd.bloqueado if isinstance(pd, PatioDef) else False),
+                    huecos=(pd.huecos if isinstance(pd, PatioDef) else None),
                 )
                 for pd in self.urbanisticos.patios
                 if area_de_patio(pd) > 0
@@ -353,6 +365,10 @@ def _patio_def_a_dict(pd: Any) -> dict[str, Any]:
             out["vertices"] = [[float(x), float(y)] for x, y in pd.vertices]
         if pd.bloqueado:
             out["bloqueado"] = True
+        if pd.origen:
+            out["origen"] = pd.origen
+        if pd.huecos:
+            out["huecos"] = [[[float(x), float(y)] for x, y in h] for h in pd.huecos]
         return out
     return {"id": "", "area_m2": float(pd)}
 

@@ -42,6 +42,25 @@ class Subreferencia:
 
 
 @dataclass
+class PatioCatastral:
+    """Patio del edificio catastral con su geometría (anillo) en WGS84.
+
+    `tipo`: "cerrado" (hueco interior real, `gml:interior` — geometría exacta) o
+    "abierto" (entrante de boca estrecha del contorno, detectado por aproximación
+    morfológica → geometría aproximada). `area_m2`: superficie catastral (m²,
+    calculada en EPSG:25830). `contorno_wgs84`: anillo del patio como (lon, lat)
+    WGS84, en el MISMO sistema que `Parcela.contorno_wgs84`, para reproyectarlo a
+    UTM con el mismo huso al renderizar (modo Rehabilitación).
+    """
+    tipo: str
+    area_m2: float
+    contorno_wgs84: list[tuple[float, float]] = field(default_factory=list)
+    # Anillos interiores (edificio(s) dentro del patio) cuando el patio es un anillo:
+    # la construcción está en medio y el patio la rodea. Vacío = patio macizo.
+    huecos_wgs84: list[list[tuple[float, float]]] = field(default_factory=list)
+
+
+@dataclass
 class AgregadosMetaparcela:
     """Métricas del conjunto cuando una parcela física tiene varios inmuebles."""
     num_referencias: int
@@ -81,6 +100,9 @@ class Parcela:
     # patios_m2: superficie de cada patio en m².
     n_patios: int | None = None
     patios_m2: tuple[float, ...] = field(default_factory=tuple)
+    # Geometría de cada patio (anillo WGS84 + tipo + área). Paralela a patios_m2
+    # pero CON posición, para colocar cada patio en su sitio exacto en el render.
+    patios_geom: tuple[PatioCatastral, ...] = field(default_factory=tuple)
 
 
 class ParcelaError(Exception):

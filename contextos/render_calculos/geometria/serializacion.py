@@ -28,6 +28,21 @@ def ring(geom: Polygon, tol: float = 0.03) -> list[list[float]]:
     return [[round(x, 2), round(y, 2)] for x, y in g.exterior.coords]
 
 
+def huecos_de(geom: Polygon, tol: float = 0.03) -> list[list[list[float]]]:
+    """Anillos INTERIORES de un Polygon como [[[x,y],...],...] (vacío si es macizo).
+
+    Un patio en anillo (edificio dentro) lleva su hueco aquí; el canvas lo recorta.
+    """
+    if geom is None or geom.is_empty or not hasattr(geom, "interiors"):
+        return []
+    g = geom.simplify(tol, preserve_topology=True)
+    fuente = g if (hasattr(g, "interiors") and len(g.interiors) == len(geom.interiors)) else geom
+    return [
+        [[round(x, 2), round(y, 2)] for x, y in anillo.coords]
+        for anillo in fuente.interiors
+    ]
+
+
 def lados_a_dict(lados: list[LadoParcela]) -> list[dict[str, Any]]:
     """Lados con orientación cardinal y bandera fachada/medianera (req. 10)."""
     return [

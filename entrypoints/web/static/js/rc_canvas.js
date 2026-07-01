@@ -182,21 +182,25 @@
       }
     }
 
-    _patronPatio(ring) {
+    _patronPatio(ring, huecos) {
       const ctx = this.ctx;
       ctx.save();
+      const trazar = (anillo) => {
+        anillo.forEach((p, i) => {
+          const px = this._x(p[0]), py = this._y(p[1]);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+      };
       ctx.beginPath();
-      ring.forEach((p, i) => {
-        const px = this._x(p[0]);
-        const py = this._y(p[1]);
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      });
-      ctx.closePath();
+      trazar(ring);
+      // Huecos (edificio dentro del patio → anillo): con "evenodd" recortan el relleno.
+      (huecos || []).forEach(h => { if (h && h.length >= 3) trazar(h); });
       ctx.fillStyle = COLOR.grisSuave;
-      ctx.fill();
-      ctx.clip();
-      // Rayas diagonales
+      ctx.fill("evenodd");
+      ctx.clip("evenodd");
+      // Rayas diagonales (el clip las limita al anillo menos los huecos)
       ctx.strokeStyle = COLOR.grisMedio;
       ctx.lineWidth = 1;
       const xs = ring.map(p => this._x(p[0]));
@@ -208,6 +212,42 @@
         ctx.moveTo(x, minY);
         ctx.lineTo(x + (maxY - minY), maxY);
         ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    _marcarPatioBloqueado(ring, huecos) {
+      // Patio bloqueado (catastral o fijado por el usuario): borde dorado
+      // discontinuo + candado, para distinguirlo de un patio editable.
+      if (!ring || ring.length < 2) return;
+      const ctx = this.ctx;
+      const xs = ring.map(p => this._x(p[0]));
+      const ys = ring.map(p => this._y(p[1]));
+      ctx.save();
+      ctx.strokeStyle = COLOR.dorado;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      const contorno = (anillo) => {
+        ctx.beginPath();
+        anillo.forEach((p, i) => {
+          const px = this._x(p[0]), py = this._y(p[1]);
+          (i === 0) ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+        ctx.stroke();
+      };
+      contorno(ring);
+      (huecos || []).forEach(h => { if (h && h.length >= 3) contorno(h); });   // borde del edificio interior
+      ctx.setLineDash([]);
+      const w = Math.max(...xs) - Math.min(...xs);
+      const h = Math.max(...ys) - Math.min(...ys);
+      if (Math.min(w, h) >= 16) {
+        const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+        const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+        ctx.font = "11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("🔒", cx, cy);
       }
       ctx.restore();
     }
@@ -381,7 +421,10 @@
           this._trazarPoligono(planta.footprint, "rgba(255,255,255,0.85)", null, 0);
         }
         // Patios
-        (planta.patios || []).forEach(p => this._patronPatio(p.poligono));
+        (planta.patios || []).forEach(p => {
+          this._patronPatio(p.poligono, p.huecos);
+          if (p.bloqueado) this._marcarPatioBloqueado(p.poligono, p.huecos);
+        });
         // Pasillos
         (planta.pasillos || []).forEach(p =>
           this._trazarPoligono(p.poligono, "rgba(255,255,255,0.95)", COLOR.grisMedio, 0.8)
