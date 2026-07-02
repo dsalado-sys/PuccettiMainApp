@@ -282,7 +282,7 @@ class CalcularEnvolvente:
             envolvente, ancho_cuello_min=params_motor.diseno.ancho_cuello_zona_min,
             viv_por_planta=cap.viv_por_planta,
         )
-        n_zonas = max((len(p["zonas"]) for p in plantas_dict), default=0)
+        n_zonas = cap.n_zonas
 
         return {
             "envolvente": {
@@ -527,7 +527,7 @@ class CalcularLayout:
             envolvente, ancho_cuello_min=params_motor.diseno.ancho_cuello_zona_min,
             viv_por_planta=cap.viv_por_planta,
         )
-        n_zonas = max((len(p["zonas"]) for p in plantas_dict), default=0)
+        n_zonas = cap.n_zonas
 
         return {
             "edificio": None,                          # render geométrico en backlog

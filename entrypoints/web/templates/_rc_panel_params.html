@@ -383,7 +383,7 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
       un inmueble suelto (se oculta en modo inmueble vía `_ocultas`). #}
       {% if "nucleo" not in _ocultas %}
       <label class="rc-campo" data-visible-en-planta="pb">
-        <span class="rc-campo-label">Núcleo escalera/ascensor (m²)</span>
+        <span class="rc-campo-label">Núcleo escalera/ascensor (m²)<span class="rc-campo-zonas" data-nucleo-zonas></span></span>
         <input type="number" name="nucleo_m2" min="0" max="200" step="1" value="{{ prog.nucleo_m2 }}"
           data-bloque="programa">
         <small class="rc-hint">Superficie del núcleo, reservada en todas las plantas.</small>

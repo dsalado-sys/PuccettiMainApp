@@ -320,6 +320,16 @@
     aplicarVisibilidad(payload);
   }
 
+  // Anotación «× N» junto al parámetro de núcleo: nº de zonas edificables
+  // detectadas (§2.4). El núcleo por planta se reserva por cada zona, así que la
+  // tabla ya muestra nucleo_m2 × N; aquí se explicita el multiplicador al usuario.
+  function actualizarNucleoZonas(data) {
+    const span = form.querySelector("[data-nucleo-zonas]");
+    if (!span) return;
+    const n = data && data.envolvente ? data.envolvente.n_zonas : null;
+    span.textContent = (typeof n === "number" && n >= 1) ? ` × ${n}` : "";
+  }
+
   // ─── Tabla por planta (iter. 4 — desglose muros/circulación/núcleo) ────
   function repintarTablaPlanta(filas) {
     if (!tablaPlantaBody) return;
@@ -658,6 +668,7 @@
         return;
       }
       ESTADO.fullPayload = data;
+      actualizarNucleoZonas(data);
       // Re-sella cada fila de patio con el polígono devuelto (identidad por id): así
       // un patio auto-colocado «se queda» donde el backend lo puso y se puede arrastrar.
       sincronizarPatiosDesdePayload(data);

@@ -35,7 +35,10 @@ por antigüedad en rehabilitación, que se usa como una planta más).
 from __future__ import annotations
 from dataclasses import dataclass, field
 
+from shapely.ops import unary_union
+
 from .config import Parametros
+from .zonas import detectar_zonas_edificables
 from .programa import (
     CONFIG_DEFAULT as CONFIG_VIVIENDA_DEFAULT,
     ProgramaViviendaConfig,
@@ -48,6 +51,26 @@ from .programa_uso import TipologiaUnidadDescriptor, reparto_multi_tipologia_gen
 def _truncar(x: float) -> int:
     """Política de redondeo del módulo: hacia abajo (truncar a entero)."""
     return max(0, int(x))
+
+
+def _contar_zonas_edificio(plantas, ancho_cuello_min: float) -> int:
+    """Nº de zonas edificables del EDIFICIO = máximo entre plantas (§2.4).
+
+    Cada planta puede quedar partida en varias masas (huella − patios) unidas o
+    no por cuellos estrechos. Como los núcleos son verticales (atraviesan todas
+    las plantas), el edificio necesita tantos núcleos como zonas tenga la planta
+    más partida. Suelo 1 (siempre hay al menos una zona).
+    """
+    n = 1
+    for p in plantas:
+        foot = getattr(p, "footprint", None)
+        if foot is None or not hasattr(foot, "difference"):
+            continue  # envolvente sin geometría real (p. ej. fixtures de test) → 1 zona
+        patios = [pt.geometry for pt in getattr(p, "patios", [])
+                  if getattr(pt, "geometry", None) is not None]
+        region = foot.difference(unary_union(patios)) if patios else foot
+        n = max(n, len(detectar_zonas_edificables(region, ancho_cuello_min=ancho_cuello_min)))
+    return n
 
 
 @dataclass(frozen=True)
@@ -102,6 +125,9 @@ class Capacidad:
     pct_local_pb: float = 0.0
     pct_otros_pb: float = 0.0
     pct_usos_comunes_pb: float = 0.0
+    # Nº de zonas edificables del edificio (§2.4): el núcleo se multiplica por él
+    # (un núcleo vertical por zona). 1 = huella de una sola pieza.
+    n_zonas: int = 1
     viv_por_planta: list[int] = field(default_factory=list)
     construida_por_planta: list[float] = field(default_factory=list)
     util_por_planta: list[float] = field(default_factory=list)
@@ -324,6 +350,11 @@ def calcular_capacidad(
     n_plantas_solicitadas = max(1, len(envolvente.plantas) or params.programa.n_plantas)
     plantas = list(envolvente.plantas)
 
+    # Zonas edificables del edificio (§2.4): el núcleo se reserva por cada zona
+    # (cada masa separada necesita su propio núcleo vertical de acceso).
+    ancho_cuello = max(0.0, float(getattr(params.diseno, "ancho_cuello_zona_min", 4.0)))
+    n_zonas = _contar_zonas_edificio(plantas, ancho_cuello)
+
     n_plantas_habitables = sum(1 for p in plantas if p.tipo != "sotano")
     if n_plantas_habitables <= 0:
         n_plantas_habitables = 1
@@ -409,8 +440,9 @@ def calcular_capacidad(
         muros_int_i = 0.0
         pct_muros_int = max(0.0, min(90.0, float(getattr(dis, "pct_muros_interior", 0.0))))
         muros_est_i = construida_i * pct_muros_normativo / 100.0
-        # Núcleo: área fija en m² (misma en todas las plantas), acotada a la huella.
-        nucl_i = min(nucleo_m2, construida_i)
+        # Núcleo: área fija en m² por zona (un núcleo vertical por zona edificable),
+        # misma en todas las plantas y acotada a la huella de la planta.
+        nucl_i = min(nucleo_m2 * n_zonas, construida_i)
         circ_i = construida_i * dis.pct_circulacion / 100.0
         patio_i = 0.0
         local_i = 0.0
@@ -558,6 +590,7 @@ def calcular_capacidad(
         pct_local_pb=pct_local_pb,
         pct_otros_pb=pct_otros_pb,
         pct_usos_comunes_pb=pct_usos_comunes_pb,
+        n_zonas=n_zonas,
         viv_por_planta=viv_por_planta,
         construida_por_planta=construida_por_planta,
         util_por_planta=util_por_planta,
@@ -608,6 +641,7 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "pct_circulacion_pb": cap.pct_circulacion_pb,
         "pct_circulacion_tipo": cap.pct_circulacion_tipo,
         "nucleo_m2": cap.nucleo_m2,
+        "n_zonas": cap.n_zonas,
         "pct_local_pb": cap.pct_local_pb,
         "pct_otros_pb": cap.pct_otros_pb,
         "pct_usos_comunes_pb": cap.pct_usos_comunes_pb,

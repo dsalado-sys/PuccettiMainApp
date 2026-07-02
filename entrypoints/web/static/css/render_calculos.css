@@ -80,6 +80,8 @@
   font-size: var(--text-sm); color: var(--on-surface-body);
   display: inline-flex; align-items: center; gap: 6px;
 }
+/* Anotación «× N» (nº de zonas) junto al parámetro de núcleo. */
+.rc-campo-zonas { color: var(--dorado); font-weight: 600; }
 .rc-campo input[type="number"], .rc-campo input[type="text"],
 .rc-campo textarea, .rc-campo select {
   padding: 7px 10px; font-size: var(--text-base); font-family: inherit;

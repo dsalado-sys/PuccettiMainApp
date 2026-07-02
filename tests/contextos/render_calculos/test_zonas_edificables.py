@@ -161,3 +161,89 @@ def test_zonas_de_planta_reparte_unidades():
     # La zona mayor (área) recibe al menos tantas como la menor.
     zonas_por_area = sorted(zonas, key=lambda z: z["area_m2"], reverse=True)
     assert zonas_por_area[0]["unidades"] >= zonas_por_area[1]["unidades"]
+
+
+# ─── Nº de zonas del edificio (para multiplicar el núcleo) ──────────────────
+def _planta_geom(footprint, patios_geoms=()):
+    from types import SimpleNamespace
+    patios = [SimpleNamespace(geometry=g) for g in patios_geoms]
+    return SimpleNamespace(footprint=footprint, patios=patios)
+
+
+def test_contar_zonas_una_sin_patios():
+    from app.contextos.render_calculos.geometria.capacidad import _contar_zonas_edificio
+    assert _contar_zonas_edificio([_planta_geom(box(0, 0, 40, 20))], 4.0) == 1
+
+
+def test_contar_zonas_patio_parte_la_huella():
+    from app.contextos.render_calculos.geometria.capacidad import _contar_zonas_edificio
+    pl = _planta_geom(box(0, 0, 40, 20), [box(18, 0, 22, 20)])   # atraviesa → 2
+    assert _contar_zonas_edificio([pl], 4.0) == 2
+
+
+def test_contar_zonas_maximo_entre_plantas():
+    from app.contextos.render_calculos.geometria.capacidad import _contar_zonas_edificio
+    pb = _planta_geom(box(0, 0, 40, 20), [box(18, 0, 22, 20)])   # 2 zonas
+    atico = _planta_geom(box(0, 0, 40, 20))                       # 1 zona
+    assert _contar_zonas_edificio([pb, atico], 4.0) == 2
+
+
+def test_contar_zonas_planta_sin_geometria_real():
+    # Fixture de test sin geometría (footprint sin `.difference`) → 1 zona.
+    from types import SimpleNamespace
+    from app.contextos.render_calculos.geometria.capacidad import _contar_zonas_edificio
+    pl = SimpleNamespace(footprint=SimpleNamespace(area=100.0))
+    assert _contar_zonas_edificio([pl], 4.0) == 1
+
+
+# ─── Integración: el núcleo se multiplica por el nº de zonas ─────────────────
+def _env_geom(footprint, patios_geoms=(), n_plantas=1):
+    from types import SimpleNamespace
+    patios = [SimpleNamespace(geometry=g) for g in patios_geoms]
+    plantas = [
+        SimpleNamespace(n=i, footprint=footprint, tipo="regular", computa_edif=True, patios=patios)
+        for i in range(n_plantas)
+    ]
+    return SimpleNamespace(
+        plantas=plantas,
+        parcela=SimpleNamespace(area=footprint.area),
+        superficie_referencia_m2=footprint.area,
+    )
+
+
+def test_capacidad_multiplica_nucleo_por_zonas():
+    from app.contextos.render_calculos.geometria.capacidad import calcular_capacidad
+    from app.contextos.render_calculos.parametros import ParametrosRender
+
+    footprint = box(0.0, 0.0, 40.0, 20.0)
+    env = _env_geom(footprint, [box(18.0, 0.0, 22.0, 20.0)])   # atraviesa → 2 zonas
+    cap = calcular_capacidad(env, ParametrosRender().a_parametros_motor())
+    assert cap.n_zonas == 2
+    assert cap.nucleo_por_planta[0] == pytest.approx(30.0)      # 15 (nucleo_m2) × 2
+
+
+def test_capacidad_una_zona_nucleo_sin_cambio():
+    from app.contextos.render_calculos.geometria.capacidad import calcular_capacidad
+    from app.contextos.render_calculos.parametros import ParametrosRender
+
+    footprint = box(0.0, 0.0, 40.0, 20.0)
+    cap = calcular_capacidad(_env_geom(footprint), ParametrosRender().a_parametros_motor())
+    assert cap.n_zonas == 1
+    assert cap.nucleo_por_planta[0] == pytest.approx(15.0)
+
+
+def test_nucleo_por_zonas_reduce_util():
+    # Mismo patio (deja un cuello de 3 m): con umbral 4 m → 2 zonas (núcleo ×2),
+    # con umbral 1 m → 1 zona (núcleo ×1). Aísla el efecto del núcleo sobre la útil.
+    from app.contextos.render_calculos.geometria.capacidad import calcular_capacidad
+    from app.contextos.render_calculos.parametros import ParametrosRender
+
+    env = _env_geom(box(0.0, 0.0, 40.0, 20.0), [box(10.0, 0.0, 30.0, 17.0)])
+    pm2 = ParametrosRender().a_parametros_motor(); pm2.diseno.ancho_cuello_zona_min = 4.0
+    pm1 = ParametrosRender().a_parametros_motor(); pm1.diseno.ancho_cuello_zona_min = 1.0
+    cap2 = calcular_capacidad(env, pm2)
+    cap1 = calcular_capacidad(env, pm1)
+    assert cap2.n_zonas == 2 and cap1.n_zonas == 1
+    assert cap2.nucleo_por_planta[0] == pytest.approx(30.0)
+    assert cap1.nucleo_por_planta[0] == pytest.approx(15.0)
+    assert cap2.util_por_planta[0] < cap1.util_por_planta[0]
