@@ -72,6 +72,18 @@
     const f = Math.sqrt(area / a);
     return escalar(v, f, f, centroide(v));
   }
+  // Como `escalarAArea` pero aplica el MISMO factor y centro a los anillos interiores
+  // (huecos), para que un patio en anillo conserve su hueco alineado al reescalar.
+  function escalarAAreaConHuecos(ext, huecos, area) {
+    const a = areaPoly(ext);
+    if (a <= 1e-9 || area <= 0) return { ext, huecos: huecos || [] };
+    const f = Math.sqrt(area / a);
+    const c = centroide(ext);
+    return {
+      ext: escalar(ext, f, f, c),
+      huecos: (huecos || []).map(h => escalar(h, f, f, c)),
+    };
+  }
   function puntoEnPoligono(pt, ring) {
     let dentro = false;
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -221,6 +233,14 @@
     // tiradores operan sobre lo que se dibuja, no sobre la ideal que pueda asomar fuera. Sin
     // adaptación `poligono == base`, así que coincide con la forma del usuario.
     _editable(patio) { return abrirAnillo(patio.poligono || patio.base); }
+    // Anillos INTERIORES (huecos) de un patio en anillo, abiertos para editar/transformar.
+    // Un patio macizo devuelve []. Estos huecos se mueven/giran/estiran CON el exterior
+    // (son un hueco REAL de la figura, no una capa pintada aparte).
+    _huecosDe(patio) {
+      const hs = patio && patio.huecos;
+      if (!Array.isArray(hs)) return [];
+      return hs.filter(h => Array.isArray(h) && h.length >= 3).map(abrirAnillo);
+    }
     // Un patio bloqueado (congelado) no admite ninguna interacción de edición.
     _bloqueado(patio) { return !!(patio && patio.bloqueado); }
 
@@ -365,8 +385,9 @@
       this.modo = h.modo;
       this.handleIdx = h.idx;
       this._patioObj = h.patio;
-      this._poly0 = this._editable(h.patio);       // snapshot de la BASE
-      this._ultimoValido = this._poly0;            // baseline simple (anti-autointersección al reformar)
+      this._poly0 = this._editable(h.patio);       // snapshot del exterior
+      this._huecos0 = this._huecosDe(h.patio).map(clon);   // snapshot de los huecos (se mueven con él)
+      this._ultimoValido = { ext: this._poly0, huecos: this._huecos0 };   // baseline (anti-autointersección)
       this._area0 = (typeof h.patio.area_m2 === "number") ? h.patio.area_m2 : areaPoly(this._poly0);
       this._startW = this.r._pantallaAMundo(px, py);
       this._startPx = [px, py];                     // origen en pantalla (umbral de arrastre)
@@ -374,40 +395,51 @@
       this.r.repintar();   // refleja la selección y el tirador resaltado (encima)
     }
 
+    // Devuelve el candidato como {ext, huecos}: los huecos se transforman CON el exterior
+    // (mover/girar/estirar aplican la misma transformación afín; reformar un vértice del
+    // exterior no toca los huecos). Así el hueco es real y se queda pegado a la figura.
     _candidato(w) {
       const c = centroide(this._poly0);
+      const hs = this._huecos0 || [];
       if (this.modo === "mover") {
-        return trasladar(this._poly0, w[0] - this._startW[0], w[1] - this._startW[1]);
+        const dx = w[0] - this._startW[0], dy = w[1] - this._startW[1];
+        return { ext: trasladar(this._poly0, dx, dy), huecos: hs.map(h => trasladar(h, dx, dy)) };
       }
       if (this.modo === "vertice") {
-        const v = clon(this._poly0); v[this.handleIdx] = [w[0], w[1]]; return v;
+        const v = clon(this._poly0); v[this.handleIdx] = [w[0], w[1]];
+        return { ext: v, huecos: hs.map(clon) };   // reformar exterior no mueve los huecos
       }
       if (this.modo === "rotar") {
         const a0 = Math.atan2(this._startW[1] - c[1], this._startW[0] - c[0]);
         const a1 = Math.atan2(w[1] - c[1], w[0] - c[0]);
-        return rotar(this._poly0, a1 - a0, c);
+        const ang = a1 - a0;
+        return { ext: rotar(this._poly0, ang, c), huecos: hs.map(h => rotar(h, ang, c)) };
       }
       if (this.modo === "estirar") {
         const b = bbox(this._poly0);
-        let k;
+        let fx, fy;
         if (this.handleIdx <= 1) {  // E/W → escala X por k, Y por 1/k (área constante)
           const half0 = Math.max(1e-6, Math.abs((this.handleIdx === 0 ? b.mxx : b.mnx) - c[0]));
-          k = Math.min(K_MAX, Math.max(K_MIN, Math.abs(w[0] - c[0]) / half0));
-          return escalar(this._poly0, k, 1 / k, c);
+          const k = Math.min(K_MAX, Math.max(K_MIN, Math.abs(w[0] - c[0]) / half0));
+          fx = k; fy = 1 / k;
+        } else {
+          const half0 = Math.max(1e-6, Math.abs((this.handleIdx === 2 ? b.mxy : b.mny) - c[1]));
+          const k = Math.min(K_MAX, Math.max(K_MIN, Math.abs(w[1] - c[1]) / half0));
+          fx = 1 / k; fy = k;
         }
-        const half0 = Math.max(1e-6, Math.abs((this.handleIdx === 2 ? b.mxy : b.mny) - c[1]));
-        k = Math.min(K_MAX, Math.max(K_MIN, Math.abs(w[1] - c[1]) / half0));
-        return escalar(this._poly0, 1 / k, k, c);
+        return { ext: escalar(this._poly0, fx, fy, c), huecos: hs.map(h => escalar(h, fx, fy, c)) };
       }
-      return clon(this._poly0);
+      return { ext: clon(this._poly0), huecos: hs.map(clon) };
     }
 
-    // Aplica una forma BASE en vivo: durante el arrastre se dibuja la base moviéndose
-    // (puede asomar fuera); al soltar, el backend la recorta/rellena (efectiva real).
+    // Aplica una forma en vivo (exterior + huecos): durante el arrastre se dibuja moviéndose
+    // (puede asomar fuera); al soltar, el backend la recorta/rellena (efectiva real). El
+    // canvas repinta `huecos` desde este mismo objeto → el hueco se mueve con el patio.
     _aplicarLive(cand) {
       if (!this._patioObj) return;
-      this._patioObj.base = cand;
-      this._patioObj.poligono = cand;
+      this._patioObj.base = cand.ext;
+      this._patioObj.poligono = cand.ext;
+      this._patioObj.huecos = cand.huecos && cand.huecos.length ? cand.huecos : undefined;
     }
 
     _move(ev) {
@@ -422,7 +454,7 @@
       const cand = this._candidato(w);   // libre: no se bloquea contra el borde
       // Reformar un vértice puede cruzar aristas (figura imposible que el backend no sabe
       // adaptar). Si el candidato se autointersecta, se mantiene el último válido.
-      if (autoCruza(cand)) {
+      if (autoCruza(cand.ext)) {
         if (this._ultimoValido) this._aplicarLive(this._ultimoValido);
       } else {
         this._ultimoValido = cand;
@@ -451,15 +483,19 @@
       const gateMover = (modo === "mover") ? (dist >= COMMIT_PX) : true;
       const confirmar = movido && !segundoClic && gateMover;
       // Se sella sobre la forma arrastrada en vivo (`poligono`), nunca sobre la ideal.
-      let forma = null;
+      let forma = null, huecosOut = null;
       if (confirmar && this._patioObj) {
         forma = abrirAnillo(this._patioObj.poligono);
-        if (modo === "vertice") forma = escalarAArea(forma, this._area0);  // reformar → reescala al área
-        this._aplicarLive(forma);
+        huecosOut = (this._patioObj.huecos || []).map(abrirAnillo);
+        if (modo === "vertice") {   // reformar → reescala al área asignada (exterior + huecos juntos)
+          const re = escalarAAreaConHuecos(forma, huecosOut, this._area0);
+          forma = re.ext; huecosOut = re.huecos;
+        }
+        this._aplicarLive({ ext: forma, huecos: huecosOut });
       } else if (movido && this._patioObj) {
         // Hubo preview en vivo pero NO se confirma (jitter / 2.º clic de un doble-clic): revierte
-        // el micro-arrastre para no dejar deriva colgando — el patio vuelve a su sitio.
-        this._aplicarLive(this._poly0);
+        // el micro-arrastre para no dejar deriva colgando — el patio (y su hueco) vuelve a su sitio.
+        this._aplicarLive({ ext: this._poly0, huecos: this._huecos0 });
       }
       this.modo = null; this.handleIdx = -1; this._patioObj = null; this._movido = false;
       // Clic suelto (sin arrastre) sobre un grupo de tiradores superpuestos → cicla al
@@ -470,16 +506,16 @@
       }
       this._avanzarEnUp = false;
       this.r.repintar();
-      if (confirmar && id) this.opts.onCommit && this.opts.onCommit(id, forma);
+      if (confirmar && id) this.opts.onCommit && this.opts.onCommit(id, forma, huecosOut);
     }
 
     // Fija una geometría EN SITIO (vía `onFijarGeom`): NO reordena a última prioridad ni
     // recalcula. Insertar/borrar un vértice CONSERVA el área asignada, así que la capacidad no
     // cambia y el backend no necesita re-adaptar; evita el teletransporte por re-adaptación.
     // Cae a `onCommit` solo si `onFijarGeom` no está cableado (compat).
-    _fijar(id, geom) {
+    _fijar(id, geom, huecos) {
       const fijar = this.opts.onFijarGeom || this.opts.onCommit;
-      fijar && fijar(id, geom);
+      fijar && fijar(id, geom, huecos);
     }
 
     _dblclick(ev) {   // doble-clic SOBRE una arista → inserta un vértice (EN SITIO, sin recálculo)
@@ -499,9 +535,12 @@
       if (mejor >= 0 && mejorD <= tolPx) {
         ev.preventDefault();
         const nuevo = clon(v); nuevo.splice(mejor + 1, 0, [w[0], w[1]]);
-        const re = escalarAArea(nuevo, (typeof sel.area_m2 === "number") ? sel.area_m2 : areaPoly(nuevo));
-        sel.base = re; sel.poligono = re; this.r.repintar();
-        this._fijar(sel.id, re);   // EN SITIO: insertar vértice conserva el área → sin reorden ni recálculo
+        const area = (typeof sel.area_m2 === "number") ? sel.area_m2 : areaPoly(nuevo);
+        const re = escalarAAreaConHuecos(nuevo, this._huecosDe(sel), area);   // exterior + huecos alineados
+        sel.base = re.ext; sel.poligono = re.ext;
+        sel.huecos = re.huecos.length ? re.huecos : undefined;
+        this.r.repintar();
+        this._fijar(sel.id, re.ext, re.huecos);   // EN SITIO: conserva el área → sin reorden ni recálculo
       }
     }
 
@@ -517,9 +556,12 @@
         if (Math.hypot(s[0] - px, s[1] - py) <= HIT_PX) {
           ev.preventDefault();
           const nuevo = clon(v); nuevo.splice(i, 1);
-          const re = escalarAArea(nuevo, (typeof sel.area_m2 === "number") ? sel.area_m2 : areaPoly(nuevo));
-          sel.base = re; sel.poligono = re; this.r.repintar();
-          this._fijar(sel.id, re);   // EN SITIO: borrar vértice conserva el área → sin reorden ni recálculo
+          const area = (typeof sel.area_m2 === "number") ? sel.area_m2 : areaPoly(nuevo);
+          const re = escalarAAreaConHuecos(nuevo, this._huecosDe(sel), area);   // exterior + huecos alineados
+          sel.base = re.ext; sel.poligono = re.ext;
+          sel.huecos = re.huecos.length ? re.huecos : undefined;
+          this.r.repintar();
+          this._fijar(sel.id, re.ext, re.huecos);   // EN SITIO: conserva el área → sin reorden ni recálculo
           return;
         }
       }

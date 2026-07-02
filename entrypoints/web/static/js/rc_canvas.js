@@ -268,19 +268,55 @@
       ctx.stroke();
     }
 
+    // Ray casting en coordenadas de mundo (mismas que p1/p2 de los lados).
+    _puntoEnPoligono(px, py, ring) {
+      let dentro = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const xi = ring[i][0], yi = ring[i][1];
+        const xj = ring[j][0], yj = ring[j][1];
+        const cruza = (yi > py) !== (yj > py) &&
+          px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+        if (cruza) dentro = !dentro;
+      }
+      return dentro;
+    }
+
     _etiquetaOrientacion(lado) {
       const a = lado.p1, b = lado.p2;
       const mx = (a[0] + b[0]) / 2;
       const my = (a[1] + b[1]) / 2;
-      // normal exterior (apuntando hacia fuera) — depende del winding del contorno
+      // normal perpendicular al lado; su signo depende del winding del contorno,
+      // así que la orientamos hacia FUERA para que la etiqueta quede siempre
+      // fuera del límite, no dentro. En polígonos cóncavos el centro del bbox
+      // no basta: probamos el punto candidato contra el polígono real
+      // (point-in-polygon) y lo colocamos en el lado que quede fuera.
       const dx = b[0] - a[0];
       const dy = b[1] - a[1];
       const L = Math.hypot(dx, dy) || 1;
       const nx = dy / L;
       const ny = -dx / L;
       const offset = 14 / this.scale;
-      const tx = mx + nx * offset;
-      const ty = my + ny * offset;
+      const poly = this._poligonoOrient;
+
+      let signo;
+      if (poly) {
+        // Punto de prueba muy pegado al lado para decidir qué lado es "dentro".
+        const eps = 1.0 / this.scale;
+        const dentroPos = this._puntoEnPoligono(mx + nx * eps, my + ny * eps, poly);
+        const dentroNeg = this._puntoEnPoligono(mx - nx * eps, my - ny * eps, poly);
+        if (dentroPos && !dentroNeg) signo = -1;
+        else if (!dentroPos && dentroNeg) signo = 1;
+        else signo = null; // ambos igual (borde/spike): usa respaldo por centro
+      }
+      if (signo == null) {
+        // Respaldo: alejar del centro del bbox.
+        const [mnx, mny, mxx, mxy] = this.bbox;
+        const cx = (mnx + mxx) / 2;
+        const cy = (mny + mxy) / 2;
+        signo = (nx * (mx - cx) + ny * (my - cy) < 0) ? -1 : 1;
+      }
+      const tx = mx + signo * nx * offset;
+      const ty = my + signo * ny * offset;
 
       const ctx = this.ctx;
       ctx.save();
@@ -401,6 +437,11 @@
         return;
       }
       this._calcViewport(bbox);
+
+      // Polígono de referencia para colocar las etiquetas de orientación FUERA
+      // del límite (point-in-polygon en _etiquetaOrientacion).
+      this._poligonoOrient = (parcela && parcela.poligono && parcela.poligono.length >= 3)
+        ? parcela.poligono : null;
 
       // Contorno de la parcela (fantasma)
       if (parcela && parcela.poligono) {

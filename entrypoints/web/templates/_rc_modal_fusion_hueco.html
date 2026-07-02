@@ -1,0 +1,22 @@
+{# Modal pequeño: al unir 3+ patios queda un hueco en el centro.
+   Dos opciones: rellenarlo (patio macizo) o dejarlo (patio en anillo). #}
+<dialog id="rc-modal-fusion-hueco" class="rc-modal" aria-labelledby="rc-modal-fusion-hueco-titulo">
+  <article class="rc-modal-card rc-modal-fusion-hueco-card">
+    <header class="rc-modal-header">
+      <h2 id="rc-modal-fusion-hueco-titulo">Los patios unidos dejan un hueco</h2>
+    </header>
+
+    <div class="rc-modal-cuerpo">
+      <p>
+        Al juntar los patios queda un hueco en el centro
+        (<strong id="rc-fusion-hueco-area">—</strong>).
+        ¿Quieres rellenarlo para que el patio sea macizo, o dejar el hueco?
+      </p>
+    </div>
+
+    <footer class="rc-modal-pie">
+      <button type="button" class="boton-secundario" id="rc-fusion-dejar-hueco">Dejar hueco</button>
+      <button type="button" class="boton-primario" id="rc-fusion-rellenar">Rellenar</button>
+    </footer>
+  </article>
+</dialog>

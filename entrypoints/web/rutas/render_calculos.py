@@ -23,6 +23,7 @@ _RESUMEN_MAX_BYTES = 100_000
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from shapely.geometry import Polygon
 from sqlalchemy.orm import Session
 
 from app.contextos.proyectos.puertos import ProyectoRepositorio
@@ -40,7 +41,7 @@ from app.contextos.render_calculos.casos_uso import (
 )
 from app.contextos.render_calculos.dominio import UsoEdificio
 from app.contextos.render_calculos.geometria.envolvente import fusionar_anillos
-from app.contextos.render_calculos.geometria.serializacion import ring
+from app.contextos.render_calculos.geometria.serializacion import huecos_de, ring
 from app.contextos.render_calculos.parametros import (
     ParametrosUrbanisticos,
     parametros_a_dict,
@@ -457,8 +458,14 @@ def fusionar_patios(
     rol: Rol = Depends(rol_activo),
 ):
     """Une dos anillos de patio (UTM) en un único polígono que conserva ambas formas,
-    conectadas por un cuello finísimo. Devuelve `{"poligono": [[x,y],...]}`. Geometría
-    pura (sin BBDD): el área la fija el frontend como la suma de las dos asignadas."""
+    conectadas por un cuello finísimo. Devuelve
+    `{"poligono": [[x,y],...], "huecos": [[[x,y],...]], "area_hueco": m2}`.
+
+    Cuando la unión encierra una zona vacía en el centro (solo posible al juntar 3 o
+    más patios en aro), la fusión resulta en un polígono con anillos interiores: se
+    devuelven en `huecos` (con su área total en `area_hueco`) para que el frontend
+    ofrezca «Rellenar» (patio macizo) o «Dejar hueco» (patio en anillo). Geometría pura
+    (sin BBDD): el área asignada la fija el frontend."""
     _exige_permiso(rol, PermisoModulo.EDITAR)
     a = _anillo_valido(payload.get("a"))
     b = _anillo_valido(payload.get("b"))
@@ -467,7 +474,23 @@ def fusionar_patios(
     fusion = fusionar_anillos(a, b)
     if fusion.is_empty:
         raise HTTPException(400, "No se pudo fusionar: los patios no forman una figura válida.")
-    return JSONResponse({"poligono": ring(fusion)})
+    # Anillos interiores = hueco central que dejan 3+ patios al cerrarse en aro.
+    # Se descartan slivers numéricos (< 0,10 m²) para no lanzar el modal sin motivo.
+    huecos: list[list[list[float]]] = []
+    area_hueco = 0.0
+    for anillo in huecos_de(fusion):
+        try:
+            ah = Polygon([(float(x), float(y)) for x, y in anillo]).area
+        except Exception:
+            ah = 0.0
+        if ah >= 0.10:
+            huecos.append(anillo)
+            area_hueco += ah
+    return JSONResponse({
+        "poligono": ring(fusion),
+        "huecos": huecos,
+        "area_hueco": round(area_hueco, 2),
+    })
 
 
 # ─── Estancias de un inmueble concreto (modo «inmueble») ────────────────────

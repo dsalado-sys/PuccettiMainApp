@@ -17,7 +17,7 @@ from app.contextos.render_calculos.geometria.envolvente import (
     construir_envolvente,
     fusionar_poligonos,
 )
-from app.contextos.render_calculos.geometria.config import PatioPlacement
+from app.contextos.render_calculos.geometria.config import Parametros, PatioPlacement
 from app.contextos.render_calculos.geometria.serializacion import ring
 from app.contextos.render_calculos.parametros import (
     ParametrosRender,
@@ -410,3 +410,57 @@ def test_fusionar_poligonos_tocandose():
     assert fused.area == pytest.approx(50.0, rel=0.02)
     assert fused.contains(a.representative_point())
     assert fused.contains(b.representative_point())
+
+
+# ─── 23. Fusión que cierra un aro (3+ patios) → deja un hueco interior ───────
+def test_fusionar_aro_deja_hueco_interior():
+    """Al unir formas que rodean un centro vacío, la fusión conserva el hueco como
+    anillo interior (base de «Rellenar / Dejar hueco»)."""
+    from app.contextos.render_calculos.geometria.serializacion import huecos_de
+    # ⊐ (tres lados de un marco) + tapa que cierra el cuarto lado.
+    u = Polygon([(0, 0), (10, 0), (10, 10), (8, 10), (8, 2),
+                 (2, 2), (2, 10), (0, 10)])
+    tapa = box(0.0, 10.0, 10.0, 12.0)
+    fused = fusionar_poligonos(u, tapa)
+    assert fused.geom_type == "Polygon"
+    huecos = huecos_de(fused)
+    assert len(huecos) == 1                       # un hueco central
+    area_hueco = Polygon([tuple(p) for p in huecos[0]]).area
+    assert area_hueco == pytest.approx(48.0, rel=0.02)   # zona vacía x2-8 · y2-10
+    # El exterior (rellenado) menos la neta (con hueco) == área del hueco.
+    ext = Polygon(fused.exterior)
+    assert ext.area - fused.area == pytest.approx(48.0, rel=0.02)
+
+
+# ─── 24. Dos patios simples NO deben dejar hueco (no dispara el modal) ───────
+def test_fusionar_dos_patios_sin_hueco():
+    from app.contextos.render_calculos.geometria.serializacion import huecos_de
+    a = box(0.0, 0.0, 6.0, 6.0)
+    b = box(6.05, 0.0, 12.0, 6.0)                 # a 0,05 m: se unen por cuello fino
+    fused = fusionar_poligonos(a, b)
+    assert huecos_de(fused) == []
+
+
+def test_colocar_patios_conserva_hueco_al_mover():
+    """Un patio en anillo (con hueco) mantiene el hueco al colocarse, quieto y movido:
+    el exterior y el hueco viajan juntos, así que `Polygon(ext, hueco)` es válido y el
+    agujero es REAL (no se queda anclado ni desaparece al mover)."""
+    planta = box(0.0, 0.0, 40.0, 40.0)                   # holgada: el patio no toca muros
+    params = Parametros()
+    params.diseno.luz_recta_patio_min = 3.0
+    ext = [(10, 10), (20, 10), (20, 20), (10, 20)]        # marco 10×10
+    hueco = [(13, 13), (17, 13), (17, 17), (13, 17)]      # hueco 4×4 = 16 m²
+    neta = 100.0 - 16.0
+    params.patios = [PatioPlacement(area_m2=neta, id="p1", vertices=ext, huecos=[hueco])]
+    p = colocar_patios(planta, params, footprint=planta)[0]
+    assert len(p.geometry.interiors) == 1
+    assert p.geometry.area == pytest.approx(neta, rel=0.02)
+
+    # «Movido»: exterior y hueco trasladados JUNTOS +5,+5 → el hueco se conserva alineado.
+    ext2 = [(x + 5, y + 5) for x, y in ext]
+    hue2 = [(x + 5, y + 5) for x, y in hueco]
+    params.patios = [PatioPlacement(area_m2=neta, id="p1", vertices=ext2, huecos=[hue2])]
+    p2 = colocar_patios(planta, params, footprint=planta)[0]
+    assert len(p2.geometry.interiors) == 1                # sigue habiendo un hueco real
+    assert p2.geometry.area == pytest.approx(neta, rel=0.02)
+    assert p2.geometry.bounds[0] == pytest.approx(15.0, abs=1e-6)   # se movió con el patio

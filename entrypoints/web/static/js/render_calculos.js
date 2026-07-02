@@ -59,8 +59,8 @@
   // la planta baja, donde se definen los patios. Sus callbacks (declaraciones
   // hoisteadas) sincronizan la edición con el formulario y el recálculo.
   const patioEditor = (renderer && window.PatioEditor) ? new window.PatioEditor(renderer, {
-    onCommit: (id, vertices) => commitPatioGeom(id, vertices),
-    onFijarGeom: (id, vertices) => fijarPatioGeom(id, vertices),
+    onCommit: (id, vertices, huecos) => commitPatioGeom(id, vertices, huecos),
+    onFijarGeom: (id, vertices, huecos) => fijarPatioGeom(id, vertices, huecos),
     onSelect: (id) => resaltarFilaPatio(id),
     onMerge: (idA, idB) => fusionarPatios(idA, idB),
   }) : null;
@@ -1631,12 +1631,23 @@
     catch (e) { return null; }
   }
 
-  // Tras editar un patio en el lienzo: guarda su polígono en la fila y recalcula
-  // UNA vez (sin debounce). `abortCalcular` cancela cualquier cálculo en vuelo.
-  function commitPatioGeom(id, vertices) {
+  // Escribe (o borra) los anillos interiores (huecos) de un patio en la fila. Un patio en
+  // anillo lleva su hueco aquí para que `leerFormulario` lo envíe y sea un hueco REAL de la
+  // figura (no una capa pintada). Se guardan alineados con el exterior recién editado.
+  function escribirHuecosFila(fila, huecos) {
+    if (!fila) return;
+    const hs = Array.isArray(huecos) ? huecos.filter(h => Array.isArray(h) && h.length >= 3) : [];
+    if (hs.length) fila.dataset.huecos = JSON.stringify(hs);
+    else delete fila.dataset.huecos;
+  }
+
+  // Tras editar un patio en el lienzo: guarda su polígono (y sus huecos, ya movidos con él)
+  // en la fila y recalcula UNA vez (sin debounce). `abortCalcular` cancela el cálculo en vuelo.
+  function commitPatioGeom(id, vertices, huecos) {
     const fila = filaPorPatioId(id);
     if (fila) {
       fila.dataset.vertices = JSON.stringify(vertices);
+      escribirHuecosFila(fila, huecos);   // el hueco viaja con el exterior → no se queda anclado
       // El patio recién editado pasa a tener la prioridad MÁS BAJA del reparto (último
       // de la lista): así es ÉL quien se adapta a los demás patios al borde, dejándolos
       // donde estaban. El backend cede solo ante los patios anteriores (ver colocar_patios).
@@ -1651,9 +1662,12 @@
   // cuadrar conserva el área asignada, así que la capacidad no cambia y el backend no necesita
   // tocar nada. El lienzo ya se ha repintado localmente; así el patio NO se mueve. El cuadrado
   // viaja al backend en el próximo recálculo real (otra edición) o al guardar.
-  function fijarPatioGeom(id, vertices) {
+  function fijarPatioGeom(id, vertices, huecos) {
     const fila = filaPorPatioId(id);
-    if (fila) fila.dataset.vertices = JSON.stringify(vertices);
+    if (fila) {
+      fila.dataset.vertices = JSON.stringify(vertices);
+      escribirHuecosFila(fila, huecos);
+    }
   }
 
   // Resalta la fila del panel correspondiente al patio seleccionado en el lienzo.
@@ -1683,10 +1697,45 @@
     return null;
   }
 
+  // Modal pequeño «Rellenar / Dejar hueco» cuando al unir 3+ patios queda un hueco
+  // central. Devuelve una promesa que resuelve "rellenar" | "hueco" (Escape = rellenar).
+  function pedirDecisionHueco(areaHueco) {
+    return new Promise(resolve => {
+      const modal = document.getElementById("rc-modal-fusion-hueco");
+      const btnR = document.getElementById("rc-fusion-rellenar");
+      const btnH = document.getElementById("rc-fusion-dejar-hueco");
+      if (!modal || !btnR || !btnH) { resolve("rellenar"); return; }
+      const areaEl = document.getElementById("rc-fusion-hueco-area");
+      if (areaEl) {
+        areaEl.textContent = (areaHueco > 0) ? (fmt.m2.format(areaHueco) + " m²") : "hueco central";
+      }
+      let resuelto = false;
+      const finalizar = (decision) => {
+        if (resuelto) return;
+        resuelto = true;
+        btnR.removeEventListener("click", onR);
+        btnH.removeEventListener("click", onH);
+        modal.removeEventListener("cancel", onCancel);
+        if (modal.close) { try { modal.close(); } catch (e) { modal.removeAttribute("open"); } }
+        else modal.removeAttribute("open");
+        resolve(decision);
+      };
+      const onR = () => finalizar("rellenar");
+      const onH = () => finalizar("hueco");
+      const onCancel = (ev) => { ev.preventDefault(); finalizar("rellenar"); };
+      btnR.addEventListener("click", onR);
+      btnH.addEventListener("click", onH);
+      modal.addEventListener("cancel", onCancel);
+      if (modal.showModal) { try { modal.showModal(); } catch (e) { modal.setAttribute("open", ""); } }
+      else modal.setAttribute("open", "");
+    });
+  }
+
   // Fusiona dos patios en uno conservando AMBAS formas exactas: el backend une los dos
   // anillos con un cuello finísimo (sin envolvente convexa ni relleno). Superficie = SUMA
   // de las dos áreas. El patio A se reutiliza como fusionado (al final de la lista, para
-  // que sea él quien se adapte); el B se elimina.
+  // que sea él quien se adapte); el B se elimina. Si la unión encierra un hueco central
+  // (3+ patios en aro), se pregunta al usuario si rellenarlo o dejarlo (patio en anillo).
   async function fusionarPatios(idA, idB) {
     const filaA = filaPorPatioId(idA), filaB = filaPorPatioId(idB);
     if (!filaA || !filaB) return;
@@ -1700,8 +1749,9 @@
     if (suma <= 0) return;
     const ringA = ringPatioPorId(idA), ringB = ringPatioPorId(idB);
     if (!ringA || !ringB) return;
-    // El backend (shapely) calcula la unión con cuello fino: conserva las dos formas.
-    let fused = null;
+    // El backend (shapely) calcula la unión con cuello fino: conserva las dos formas
+    // y, si al cerrarse en aro (3+ patios) queda un hueco central, lo devuelve en `huecos`.
+    let datos = null;
     try {
       const resp = await fetch("/modulos/render-calculos/fusionar-patios", {
         method: "POST",
@@ -1713,15 +1763,35 @@
         mostrarToast(err.detail || "No se pudieron fusionar los patios", true);
         return;
       }
-      fused = (await resp.json()).poligono;
+      datos = await resp.json();
     } catch (e) {
       mostrarToast("No se pudieron fusionar los patios", true);
       return;
     }
+    const fused = datos && datos.poligono;
     if (!Array.isArray(fused) || fused.length < 3) return;
-    // El patio A se queda como el fusionado (anillo unido + área = suma).
+
+    // ¿La unión encierra un hueco en el centro? (solo al juntar 3+ patios en aro).
+    const huecos = Array.isArray(datos.huecos)
+      ? datos.huecos.filter(h => Array.isArray(h) && h.length >= 3) : [];
+    let huecosFinal = null;
+    let area = suma;                       // sin hueco: área = suma de las dos asignadas
+    if (huecos.length) {
+      const decision = await pedirDecisionHueco(Number(datos.area_hueco) || 0);
+      if (decision === "hueco") {
+        huecosFinal = huecos;             // patio en anillo: el hueco NO cuenta como patio
+        area = suma;
+      } else {                            // «rellenar»: el hueco pasa a ser patio (macizo)
+        huecosFinal = null;
+        area = suma + (Number(datos.area_hueco) || 0);
+      }
+    }
+
+    // El patio A se queda como el fusionado (anillo unido + área asignada).
     filaA.dataset.vertices = JSON.stringify(fused);
-    if (inA) inA.value = String(Math.round(suma * 100) / 100);
+    if (huecosFinal) filaA.dataset.huecos = JSON.stringify(huecosFinal);
+    else delete filaA.dataset.huecos;
+    if (inA) inA.value = String(Math.round(area * 100) / 100);
     // Limpia el aviso «no cabe» heredado y baja la prioridad (al final de la lista).
     filaA.classList.remove("rc-patio-fila-nocabe");
     const avisoA = filaA.querySelector(".rc-patio-aviso");

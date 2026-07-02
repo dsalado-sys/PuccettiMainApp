@@ -703,6 +703,7 @@
 
 /* ── Modal de exceso (sin × de cierre, a propósito) ─────────────────── */
 .rc-modal-exceso-card { max-width: 520px; width: 92vw; }
+.rc-modal-fusion-hueco-card { max-width: 440px; width: 92vw; }
 .rc-exceso-sub { font-size: var(--text-base); color: var(--on-surface-secondary); line-height: 1.5; margin: var(--space-sm) 0 0; }
 .rc-modal-pie {
   display: flex; justify-content: flex-end; gap: var(--space-sm);
