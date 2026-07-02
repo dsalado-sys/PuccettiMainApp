@@ -9,8 +9,8 @@ Iteración 4 (2026-06-04):
 - `usos_permitidos` pasa de `list[UsoEdificio]` a `list[str]` con valores
   fijos del PGOU: "residencial" | "hotelero" | "terciario" | "mixto".
   Hoy es decorativo (sin mapeo al uso del programa).
-- Tres porcentajes explícitos: `pct_muros`, `pct_circulacion` y `pct_nucleo`
-  (porcentajes 0-100). Suma ≤ 90% (validado en motor).
+- Porcentajes explícitos: `pct_muros` y `pct_circulacion` (0-100). El núcleo
+  (escalera/ascensor) se define como área fija en m² en el programa (`nucleo_m2`).
 """
 from __future__ import annotations
 
@@ -169,8 +169,9 @@ class ParametrosUrbanisticos:
 class ParametrosDiseno:
     """§2.6 — defaults del Anexo II A2.x.
 
-    Iteración 4: tres porcentajes explícitos para muros, circulación y núcleo.
-    Suma de los tres ≤ 90% (validado en motor).
+    Iteración 4: porcentajes explícitos para muros y circulación (suma ≤ 90%,
+    validado en motor). El núcleo (escalera/ascensor) es área fija en m² y vive
+    en el programa (`ParametrosPrograma.nucleo_m2`).
     """
     espesor_muro_fachada_m: float = 0.25
     espesor_muro_medianero_m: float = 0.25
@@ -187,7 +188,6 @@ class ParametrosDiseno:
     pct_muros_interior: float = 0.0
     pct_circulacion_pb: float = 8.0     # % circulación en planta baja
     pct_circulacion_tipo: float = 8.0   # % circulación en plantas tipo / ático
-    pct_nucleo: float = 5.0
     # % circulación INTERIOR de la unidad (pasillos+vestíbulo dentro de cada
     # vivienda/apartamento/habitación). Único, compartido por todos los usos;
     # solo se lee del bloque de PB (`diseno`). Sustituye el 1.15 antes fijo.
@@ -212,6 +212,10 @@ class ParametrosPrograma:
     pct_local_pb: float = 0.0                       # % útil PB destinado a local no residencial
     pct_otros_pb: float = 0.0                       # % útil PB destinado a otros usos
     pct_usos_comunes_pb: float = 0.0                # % útil PB para usos comunes (AT / hoteles)
+    # Núcleo de comunicación vertical (escalera + ascensor): área FIJA en m² que se
+    # reserva en cada planta. Es de EDIFICIO (único y vertical); no aplica a un
+    # inmueble suelto.
+    nucleo_m2: float = 15.0
 
 
 @dataclass
@@ -271,7 +275,6 @@ class ParametrosRender:
         pct_muros_interior = max(0.0, min(80.0, float(getattr(diseno, "pct_muros_interior", 0.0))))
         pct_circulacion_pb = max(0.0, min(50.0, float(diseno.pct_circulacion_pb)))
         pct_circulacion_tipo = max(0.0, min(50.0, float(diseno.pct_circulacion_tipo)))
-        pct_nucleo = max(0.0, min(30.0, float(diseno.pct_nucleo)))
 
         # La vía int-based de `tipologias_extra` solo la consume el preview de
         # vivienda. Para el resto de usos la mezcla la resuelve `casos_uso`
@@ -309,7 +312,6 @@ class ParametrosRender:
                 pct_muros_interior=pct_muros_interior,
                 pct_circulacion_pb=pct_circulacion_pb,
                 pct_circulacion_tipo=pct_circulacion_tipo,
-                pct_nucleo=pct_nucleo,
                 pct_muros_normativo=max(0.0, min(80.0, float(self.urbanisticos.pct_muros_normativo))),
             ),
             urbanismo=UrbMotor(
@@ -336,6 +338,7 @@ class ParametrosRender:
                 pct_local_pb=max(0.0, min(100.0, float(programa.pct_local_pb))),
                 pct_otros_pb=max(0.0, min(100.0, float(programa.pct_otros_pb))),
                 pct_usos_comunes_pb=max(0.0, min(100.0, float(programa.pct_usos_comunes_pb))),
+                nucleo_m2=max(0.0, float(programa.nucleo_m2)),
             ),
             # Colocación individual de cada patio (polígono libre opcional). El motor
             # los dibuja uno a uno y los resta del interior; capacidad sigue usando solo
@@ -387,7 +390,6 @@ def _diseno_a_dict(d: ParametrosDiseno) -> dict[str, Any]:
         "pct_muros_interior": d.pct_muros_interior,
         "pct_circulacion_pb": d.pct_circulacion_pb,
         "pct_circulacion_tipo": d.pct_circulacion_tipo,
-        "pct_nucleo": d.pct_nucleo,
         "pct_circulacion_interior": d.pct_circulacion_interior,
     }
 
@@ -406,6 +408,7 @@ def _programa_a_dict(prog: ParametrosPrograma) -> dict[str, Any]:
         "pct_local_pb": prog.pct_local_pb,
         "pct_otros_pb": prog.pct_otros_pb,
         "pct_usos_comunes_pb": prog.pct_usos_comunes_pb,
+        "nucleo_m2": prog.nucleo_m2,
     }
 
 
@@ -513,7 +516,6 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             pct_muros_interior=max(0.0, min(80.0, _f(node, "pct_muros_interior", base_d.pct_muros_interior))),
             pct_circulacion_pb=_circ("pct_circulacion_pb", base_d.pct_circulacion_pb),
             pct_circulacion_tipo=_circ("pct_circulacion_tipo", base_d.pct_circulacion_tipo),
-            pct_nucleo=max(0.0, min(30.0, _f(node, "pct_nucleo", base_d.pct_nucleo))),
             pct_circulacion_interior=max(0.0, min(40.0, _f(node, "pct_circulacion_interior", base_d.pct_circulacion_interior))),
         )
 
@@ -562,6 +564,7 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             pct_local_pb=max(0.0, min(100.0, _f(node, "pct_local_pb", base_prog.pct_local_pb))),
             pct_otros_pb=max(0.0, min(100.0, _f(node, "pct_otros_pb", base_prog.pct_otros_pb))),
             pct_usos_comunes_pb=max(0.0, min(100.0, _f(node, "pct_usos_comunes_pb", base_prog.pct_usos_comunes_pb))),
+            nucleo_m2=max(0.0, _f(node, "nucleo_m2", base_prog.nucleo_m2)),
         )
 
     urb_in = d.get("urbanisticos") or {}

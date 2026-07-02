@@ -28,7 +28,7 @@ def _capacidad_3_plantas(uds_por_planta: int = 10, util: float = 30.0) -> Capaci
         factor_limitante="", n_dormitorios=1, util_objetivo_viv_m2=util,
         util_planta_disponible_m2=uds_por_planta * util, viv_por_planta_objetivo=uds_por_planta,
         n_viviendas_objetivo=3 * uds_por_planta, pct_muros=0, pct_circulacion_pb=0,
-        pct_circulacion_tipo=0, pct_nucleo=0,
+        pct_circulacion_tipo=0, nucleo_m2=0,
         viv_por_planta=[uds_por_planta] * 3,
         util_por_planta=[uds_por_planta * util] * 3,
         unidades_por_planta=[list(fila), list(fila), list(fila)],
