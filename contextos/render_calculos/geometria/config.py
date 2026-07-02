@@ -32,6 +32,10 @@ class ParametrosDiseno:
     luz_recta_patio_min: float = 3.00
     area_patio_min: float = 12.00
 
+    # Detección de zonas edificables (§2.4): dos masas de huella unidas por un
+    # cuello más estrecho que esto se cuentan como zonas separadas.
+    ancho_cuello_zona_min: float = 4.00
+
     # Porcentajes. Suma ≤ 90% por planta (validado en capacidad).
     pct_muros: float = 20.0
     # Tabiquería interior de las unidades (cálculo de unidad): se descuenta del útil

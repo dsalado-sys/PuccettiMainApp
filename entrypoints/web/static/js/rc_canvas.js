@@ -252,6 +252,47 @@
       ctx.restore();
     }
 
+    _dibujarZonas(zonas) {
+      // Zonas edificables (§2.4): la huella menos los patios puede quedar partida
+      // en varias masas. Solo se marca si hay MÁS DE UNA (si no, no molesta el
+      // caso normal). Contorno fino dorado + etiqueta con las unidades repartidas
+      // en la zona ("N uds"); SIN relleno, para no tapar el rayado de los patios.
+      if (!Array.isArray(zonas) || zonas.length < 2) return;
+      const ctx = this.ctx;
+      zonas.forEach(z => {
+        const ring = z.poligono;
+        if (!ring || ring.length < 3) return;
+        ctx.save();
+        ctx.strokeStyle = COLOR.dorado;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ring.forEach((p, i) => {
+          const px = this._x(p[0]), py = this._y(p[1]);
+          (i === 0) ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+        // Etiqueta en el centroide aproximado (media de vértices).
+        const xs = ring.map(p => this._x(p[0]));
+        const ys = ring.map(p => this._y(p[1]));
+        const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+        const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+        const n = z.unidades;
+        const texto = (typeof n === "number") ? `${n} ud${n === 1 ? "" : "s"}` : `Zona ${z.indice}`;
+        ctx.save();
+        ctx.font = "bold 12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const tw = ctx.measureText(texto).width;
+        ctx.fillStyle = "rgba(255,255,255,0.82)";
+        ctx.fillRect(cx - tw / 2 - 5, cy - 9, tw + 10, 18);
+        ctx.fillStyle = COLOR.negro;
+        ctx.fillText(texto, cx, cy);
+        ctx.restore();
+      });
+    }
+
     _dibujarLado(lado) {
       const ctx = this.ctx;
       const a = lado.p1, b = lado.p2;
@@ -489,6 +530,8 @@
           }
           this._etiquetaUnidad(u);
         });
+        // Zonas edificables detectadas (encima de todo, para que las etiquetas se lean).
+        this._dibujarZonas(planta.zonas);
       }
 
       // Lados (fachada/medianera) — req. 1 distinción visual

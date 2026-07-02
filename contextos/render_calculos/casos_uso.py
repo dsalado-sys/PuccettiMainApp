@@ -19,6 +19,7 @@ from typing import Any
 from pyproj import Transformer
 from shapely.geometry import Polygon
 from shapely.ops import transform as shp_transform
+from shapely.ops import unary_union
 
 from app.contextos.proyectos.puertos import ProyectoRepositorio
 from app.nucleo.modelo import ModuloPuccetti, Proyecto
@@ -33,6 +34,7 @@ from .geometria.accesibilidad import aplicar_adaptacion_capacidad
 from .geometria.capacidad import DisenoPlanta, calcular_capacidad, capacidad_a_dict
 from .geometria.envolvente import construir_envolvente
 from .geometria.parcelas import LadoParcela, azimut_normal_exterior, orientacion_cardinal
+from .geometria.zonas import detectar_zonas_edificables, repartir_por_area
 from .geometria.serializacion import (
     _estancias_por_unidad_dorms,
     huecos_de,
@@ -279,7 +281,11 @@ class CalcularEnvolvente:
             bbox_world=(round(bbox[0], 2), round(bbox[1], 2), round(bbox[2], 2), round(bbox[3], 2)),
         )
 
-        plantas_dict = _plantas_envolvente_a_dict(envolvente)
+        plantas_dict = _plantas_envolvente_a_dict(
+            envolvente, ancho_cuello_min=params_motor.diseno.ancho_cuello_zona_min,
+            viv_por_planta=cap.viv_por_planta,
+        )
+        n_zonas = max((len(p["zonas"]) for p in plantas_dict), default=0)
 
         return {
             "envolvente": {
@@ -289,6 +295,7 @@ class CalcularEnvolvente:
                 "edificabilidad_consumida_m2": resumen.edificabilidad_consumida_m2,
                 "n_viviendas_objetivo": resumen.n_viviendas_objetivo,
                 "factor_limitante": resumen.factor_limitante,
+                "n_zonas": n_zonas,
                 "bbox": list(resumen.bbox_world),
                 "plantas": plantas_dict,
             },
@@ -307,15 +314,41 @@ class CalcularEnvolvente:
         }
 
 
-def _plantas_envolvente_a_dict(envolvente) -> list[dict[str, Any]]:
+def _zonas_de_planta(pl, ancho_cuello_min: float, total_unidades: int = 0) -> list[dict[str, Any]]:
+    """Zonas edificables de una planta = huella − patios, partida por cuellos.
+
+    Detecta cuántas masas edificables independientes hay (§2.4): un patio grande
+    puede dejar la huella dividida en dos aunque sigan unidas por un cuello
+    estrecho. Reparte `total_unidades` (las unidades de esta planta) entre las
+    zonas proporcionalmente a su área. Devuelve una entrada por zona (1-based)
+    con `unidades` asignadas, para que el canvas la etiquete; con una sola zona
+    el frontend no dibuja nada.
+    """
+    patios = [p.geometry for p in pl.patios if getattr(p, "geometry", None) is not None]
+    region = pl.footprint.difference(unary_union(patios)) if patios else pl.footprint
+    zonas = detectar_zonas_edificables(region, ancho_cuello_min=ancho_cuello_min)
+    reparto = repartir_por_area(total_unidades, [z.area for z in zonas])
+    return [
+        {"indice": i + 1, "poligono": ring(z), "area_m2": round(z.area, 2),
+         "unidades": reparto[i]}
+        for i, z in enumerate(zonas)
+    ]
+
+
+def _plantas_envolvente_a_dict(
+    envolvente, ancho_cuello_min: float = 4.0, viv_por_planta=None,
+) -> list[dict[str, Any]]:
     """Serializa la lista de plantas de una envolvente para el canvas.
 
     No incluye unidades/núcleo/pasillos: el render geométrico de unidades
-    queda en backlog (ver iteración 3 — `edificio: null`).
+    queda en backlog (ver iteración 3 — `edificio: null`). Sí incluye las
+    `zonas` edificables detectadas por planta (§2.4), con el nº de unidades
+    repartidas por zona (`viv_por_planta[i]` alineado con `envolvente.plantas`).
     """
     out: list[dict[str, Any]] = []
     idx_visual = 0
-    for pl in envolvente.plantas:
+    for i, pl in enumerate(envolvente.plantas):
+        total_uni = viv_por_planta[i] if viv_por_planta and i < len(viv_por_planta) else 0
         tipo = getattr(pl, "tipo", "regular")
         if tipo == "sotano":
             nombre = "S1"
@@ -342,6 +375,7 @@ def _plantas_envolvente_a_dict(envolvente) -> list[dict[str, Any]]:
             ],
             "construida_m2": round(pl.area_construida_m2, 2),
             "util_m2": round(pl.area_util_m2, 2),
+            "zonas": _zonas_de_planta(pl, ancho_cuello_min, total_uni),
         })
     return out
 
@@ -492,6 +526,12 @@ class CalcularLayout:
         alertas = _alertas_envolvente(envolvente, parcela, params)
         alertas += _alertas_capacidad(cap, params, programa_uso)
 
+        plantas_dict = _plantas_envolvente_a_dict(
+            envolvente, ancho_cuello_min=params_motor.diseno.ancho_cuello_zona_min,
+            viv_por_planta=cap.viv_por_planta,
+        )
+        n_zonas = max((len(p["zonas"]) for p in plantas_dict), default=0)
+
         return {
             "edificio": None,                          # render geométrico en backlog
             "capacidad": capacidad_a_dict(cap),         # fuente de verdad
@@ -504,8 +544,9 @@ class CalcularLayout:
                 "n_plantas": len(envolvente.plantas),
                 "edificabilidad_max_m2": round(envolvente.edificabilidad_max, 2),
                 "edificabilidad_consumida_m2": round(envolvente.edificabilidad_consumida, 2),
+                "n_zonas": n_zonas,
                 "bbox": [round(v, 2) for v in envolvente.parcela.bounds],
-                "plantas": _plantas_envolvente_a_dict(envolvente),
+                "plantas": plantas_dict,
             },
             "parcela": {
                 "poligono": ring(parcela.poligono_utm),
