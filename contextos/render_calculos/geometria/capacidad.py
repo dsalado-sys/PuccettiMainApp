@@ -12,7 +12,7 @@ Planta baja (idx_visual == 0, tipo "regular"):
     huella_i      = huella_planta (ya con retranqueos + ocupación)
     muros_i       = huella_i × pct_muros / 100
     circ_i_pb     = huella_i × pct_circulacion_pb / 100
-    nucleo_i      = huella_i × pct_nucleo / 100
+    nucleo_i      = min(nucleo_m2, huella_i)   # área fija del núcleo, por planta
     patio_i       = min(area_patio_min, huella_i × 0.20)
     local_i       = (huella_i − muros_i − circ_i_pb − nucleo_i − patio_i) × pct_local_pb / 100
     util_unidades_pb = huella_i − muros_i − circ_i_pb − nucleo_i − patio_i − local_i − comunes_planta
@@ -52,15 +52,15 @@ def _truncar(x: float) -> int:
 
 @dataclass(frozen=True)
 class DisenoPlanta:
-    """Porcentajes de descuento de una categoría de planta (muros/circulación/núcleo).
+    """Porcentajes de descuento de una categoría de planta (muros/circulación).
 
     Iteración 6: cada categoría (pb / tipo / atico / sotano) trae los suyos, lo que
     permite que PB sea independiente de las plantas tipo y que ático y sótano tengan
-    su propio % muros y % circulación.
+    su propio % muros y % circulación. El núcleo (m² fijos) es de edificio y no
+    vive aquí: lo aporta el programa (`nucleo_m2`), igual en todas las plantas.
     """
     pct_muros: float
     pct_circulacion: float
-    pct_nucleo: float
     # % muros INTERIORES de la unidad (tabiquería). Se suma a `pct_muros` al descontar
     # de la construida; default 0 (sin él, comportamiento idéntico al previo).
     pct_muros_interior: float = 0.0
@@ -97,7 +97,7 @@ class Capacidad:
     pct_muros: float
     pct_circulacion_pb: float
     pct_circulacion_tipo: float
-    pct_nucleo: float
+    nucleo_m2: float
     pct_muros_normativo: float = 20.0
     pct_local_pb: float = 0.0
     pct_otros_pb: float = 0.0
@@ -255,12 +255,11 @@ def calcular_capacidad(
         _pmi = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_interior", 0.0))))
         _cpb = max(0.0, min(50.0, float(params.diseno.pct_circulacion_pb)))
         _ct = max(0.0, min(50.0, float(params.diseno.pct_circulacion_tipo)))
-        _nu = max(0.0, min(30.0, float(params.diseno.pct_nucleo)))
         disenos = {
-            "pb": DisenoPlanta(_pm, _cpb, _nu, _pmi),
-            "tipo": DisenoPlanta(_pm, _ct, _nu, _pmi),
-            "atico": DisenoPlanta(_pm, _ct, _nu, _pmi),
-            "sotano": DisenoPlanta(_pm, 0.0, _nu, _pmi),
+            "pb": DisenoPlanta(_pm, _cpb, _pmi),
+            "tipo": DisenoPlanta(_pm, _ct, _pmi),
+            "atico": DisenoPlanta(_pm, _ct, _pmi),
+            "sotano": DisenoPlanta(_pm, 0.0, _pmi),
         }
     dis_pb = disenos["pb"]
     dis_tipo = disenos["tipo"]
@@ -269,6 +268,9 @@ def calcular_capacidad(
     pct_local_pb = max(0.0, min(100.0, float(getattr(params.programa, "pct_local_pb", 0.0))))
     pct_otros_pb = max(0.0, min(100.0, float(getattr(params.programa, "pct_otros_pb", 0.0))))
     pct_usos_comunes_pb = max(0.0, min(100.0, float(getattr(params.programa, "pct_usos_comunes_pb", 0.0))))
+    # Núcleo (escalera/ascensor): área FIJA en m² reservada en cada planta. Es de
+    # edificio (vertical y única), no un % por planta. Se acota por planta a la huella.
+    nucleo_m2 = max(0.0, float(getattr(params.programa, "nucleo_m2", 15.0)))
     # Reservas de PB por uso (todas viven solo en planta baja):
     #   · "local"        → vivienda + apartamentos turísticos (no hoteles).
     #   · "usos comunes" → AT + hoteles (todo lo no residencial).
@@ -283,9 +285,12 @@ def calcular_capacidad(
     # tabiquería interior (pct_muros_interior) NO entra aquí: se descuenta a nivel
     # de unidad sobre el útil disponible, no sobre la huella, así que nunca puede
     # por sí sola dejar la planta sin útil.
+    # El núcleo ya no es un %: es un área fija en m². Se descuenta por planta más
+    # abajo y puede por sí solo dejar la planta sin útil (util cae a 0 con max(0,…)),
+    # pero no entra en esta suma de porcentajes de "no queda útil".
     pct_total_max = (
         dis_pb.pct_muros
-        + max(dis_pb.pct_circulacion, dis_tipo.pct_circulacion) + dis_pb.pct_nucleo
+        + max(dis_pb.pct_circulacion, dis_tipo.pct_circulacion)
     )
 
     huella = envolvente.plantas[0].footprint.area if envolvente.plantas else parcela_area
@@ -404,7 +409,8 @@ def calcular_capacidad(
         muros_int_i = 0.0
         pct_muros_int = max(0.0, min(90.0, float(getattr(dis, "pct_muros_interior", 0.0))))
         muros_est_i = construida_i * pct_muros_normativo / 100.0
-        nucl_i = construida_i * dis.pct_nucleo / 100.0
+        # Núcleo: área fija en m² (misma en todas las plantas), acotada a la huella.
+        nucl_i = min(nucleo_m2, construida_i)
         circ_i = construida_i * dis.pct_circulacion / 100.0
         patio_i = 0.0
         local_i = 0.0
@@ -417,8 +423,8 @@ def calcular_capacidad(
         tipologias_i: list[str] = []
 
         if cat == "sotano":
-            # El sótano aplica sus propios % muros/circulación/núcleo pero no aloja
-            # unidades (viv = 0, sin útil ni patio).
+            # El sótano aplica sus propios % muros/circulación y el núcleo (m² fijos,
+            # que también lo atraviesan), pero no aloja unidades (viv = 0, sin útil ni patio).
             patio_i = 0.0
             nombre = _nombre_planta(0, "sotano")
         else:
@@ -547,7 +553,7 @@ def calcular_capacidad(
         pct_muros=dis_pb.pct_muros,
         pct_circulacion_pb=dis_pb.pct_circulacion,
         pct_circulacion_tipo=dis_tipo.pct_circulacion,
-        pct_nucleo=dis_pb.pct_nucleo,
+        nucleo_m2=nucleo_m2,
         pct_muros_normativo=pct_muros_normativo,
         pct_local_pb=pct_local_pb,
         pct_otros_pb=pct_otros_pb,
@@ -601,7 +607,7 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "pct_muros_normativo": cap.pct_muros_normativo,
         "pct_circulacion_pb": cap.pct_circulacion_pb,
         "pct_circulacion_tipo": cap.pct_circulacion_tipo,
-        "pct_nucleo": cap.pct_nucleo,
+        "nucleo_m2": cap.nucleo_m2,
         "pct_local_pb": cap.pct_local_pb,
         "pct_otros_pb": cap.pct_otros_pb,
         "pct_usos_comunes_pb": cap.pct_usos_comunes_pb,

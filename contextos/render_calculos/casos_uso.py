@@ -95,24 +95,21 @@ def _lado_a_utm(
 
 
 def _disenos_por_categoria(params: ParametrosRender) -> dict[str, DisenoPlanta]:
-    """% muros/circulación/núcleo por categoría de planta (pb/tipo/atico/sotano).
+    """% muros/circulación por categoría de planta (pb/tipo/atico/sotano).
 
     PB lee `pct_circulacion_pb`; el resto de categorías `pct_circulacion_tipo` de su
     propio bucket. Permite que PB sea independiente de las plantas tipo y que ático y
-    sótano tengan su propio % muros y % circulación.
+    sótano tengan su propio % muros y % circulación. El núcleo (m² fijos) es de
+    edificio y lo lee el motor del programa, no de estos buckets por planta.
     """
-    # % núcleo y % muros interior son GLOBALES del edificio: se leen solo del bloque
-    # PB y aplican igual a todas las plantas. El núcleo es la caja de escaleras /
-    # ascensor, que es vertical y única para el edificio entero (no tiene sentido un
-    # núcleo distinto por planta). El % muros interior es la tabiquería de la unidad.
+    # El % muros interior es GLOBAL del edificio: se lee solo del bloque PB y aplica
+    # igual a todas las plantas (es la tabiquería de la unidad).
     _pmi = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_interior", 0.0))))
-    _nucleo = max(0.0, min(30.0, float(params.diseno.pct_nucleo)))
 
     def dp(diseno, circ_field: str) -> DisenoPlanta:
         return DisenoPlanta(
             max(0.0, min(80.0, float(diseno.pct_muros))),
             max(0.0, min(50.0, float(getattr(diseno, circ_field)))),
-            _nucleo,
             _pmi,
         )
 

@@ -50,10 +50,10 @@ def test_tabiqueria_no_cambia_los_muros_de_planta_y_baja_la_util():
 
     # Muros de planta IDÉNTICOS: la tabiquería no se suma aquí.
     assert abs(cap1.muros_por_planta[0] - cap0.muros_por_planta[0]) < 1e-6
-    # Ahora hay tabiquería = 10% del útil disponible (55 → 5.5).
-    assert abs(cap1.muros_interior_por_planta[0] - 5.5) < 1e-6
-    # Y la útil baja en esa misma cantidad (55 → 49.5).
-    assert abs(cap1.util_por_planta[0] - (util0 - 5.5)) < 1e-6
+    # Ahora hay tabiquería = 10% del útil disponible (45 → 4.5).
+    assert abs(cap1.muros_interior_por_planta[0] - 4.5) < 1e-6
+    # Y la útil baja en esa misma cantidad (45 → 40.5).
+    assert abs(cap1.util_por_planta[0] - (util0 - 4.5)) < 1e-6
     assert cap1.util_por_planta[0] < util0
 
 

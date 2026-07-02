@@ -121,10 +121,11 @@ su perfil de tipología (PB vs plantas tipo) de `params` / `params_tipo`.
 | **Ático** | `diseno_atico` | `programa_tipo` (como tipo) | No | No | `% muros` y `% circulación` propios; `computa_edif` opcional |
 | **Sótano** | `diseno_sotano` | — | 0 | 0 | `% muros` y `% circulación` propios; `viv = 0` |
 
-Cada categoría descuenta `muros = pct_muros × construida`,
-`circ = pct_circulacion × construida` y `núcleo = pct_nucleo × construida`
-con los `pct_*` de **su** bucket (antes de iter. 6, muros/núcleo eran únicos
-para todo el edificio y el sótano forzaba circulación 0).
+Cada categoría descuenta `muros = pct_muros × construida` y
+`circ = pct_circulacion × construida` con los `pct_*` de **su** bucket. El
+`núcleo = min(nucleo_m2, construida)` es un **área fija en m²** (bloque
+`programa.nucleo_m2`), igual en todas las plantas (antes de iter. 6,
+muros/núcleo eran únicos para todo el edificio y el sótano forzaba circulación 0).
 
 **Herencia por defecto** de los buckets (parser tolerante): `diseno_tipo`←
 `diseno`, `diseno_atico`←`diseno_tipo`, `diseno_sotano`←`diseno`,
@@ -330,7 +331,7 @@ filas no editadas por el usuario se resincronizan en cada seed.
 |----------|------------------|-------------------|
 | Muros (`pct_muros`) | Sí (m² total) | Sí (prorrateados por util) |
 | Circulación común (`pct_circ_pb/tipo`) | Sí (común planta) | **No** (no es de la unidad) |
-| Núcleo (`pct_nucleo`) | Sí (común edificio) | **No** |
+| Núcleo (`nucleo_m2`) | Sí (m² fijos, común edificio) | **No** |
 | Patio | Sí (descuento planta) | **No** |
 | Local PB | Sí (m² destinados) | Fila "Local" sin estancias |
 | Útil | Suma del útil consumido | Útil real por unidad |
