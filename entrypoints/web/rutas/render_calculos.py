@@ -420,12 +420,17 @@ def calcular(
     combo_override = payload.get("combo_dormitorios") or None
     if combo_override is not None:
         combo_override = str(combo_override).strip() or None
+    # §2.5 dibujo: el botón «Pintar render» pide la disposición geométrica interior.
+    # El cálculo automático (cada tecla) no envía el flag → sólo capacidad/envolvente.
+    disponer = bool(payload.get("disponer"))
     caso_uso = CalcularLayout(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
         catalogo_hotelero=catalogo_hot,
     )
-    resultado = caso_uso.ejecutar(parcela, params, combo_override=combo_override)
+    resultado = caso_uso.ejecutar(
+        parcela, params, combo_override=combo_override, disponer=disponer,
+    )
 
     alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
     resultado["alertas"] = list(resultado.get("alertas", [])) + [

@@ -647,10 +647,14 @@
     ESTADO.abortCalcular = new AbortController();
     if (!auto) spinner(true);
     try {
+      // §2.5 dibujo: sólo «Pintar render» (opts.disponer) pide la disposición
+      // geométrica interior; el recálculo automático deja `edificio` en null.
+      const cuerpo = payloadConNormativa(bloques);
+      if (opts.disponer === true) cuerpo.disponer = true;
       const resp = await fetch("/modulos/render-calculos/calcular", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payloadConNormativa(bloques)),
+        body: JSON.stringify(cuerpo),
         signal: ESTADO.abortCalcular.signal,
       });
       if (resp.status === 409) { mostrarToast("Localiza primero la parcela", true); return; }
@@ -2027,8 +2031,11 @@
   }
   form.addEventListener("input", calcularConDebounce);
   form.addEventListener("change", calcularConDebounce);
-  // El botón «Calcular capacidad» queda reservado para pintar el render (próxima
-  // iteración): el cálculo ya es automático con cada cambio, sin binding aquí.
+  // «Pintar render» (§2.5): dispara un cálculo pidiendo la disposición geométrica
+  // interior (núcleo + unidades + circulación). Editar un parámetro después vuelve a
+  // recalcular en automático SIN disponer, así que limpia el render hasta volver a
+  // pulsar: comportamiento esperado.
+  if (btnDistribuir) btnDistribuir.addEventListener("click", () => pedirCalculo({ disponer: true }));
   if (btnGuardar) btnGuardar.addEventListener("click", guardar);
   if (btnCsv) btnCsv.addEventListener("click", exportCsv);
 

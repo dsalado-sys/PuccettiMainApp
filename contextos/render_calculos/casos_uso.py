@@ -35,8 +35,10 @@ from .geometria.capacidad import DisenoPlanta, calcular_capacidad, capacidad_a_d
 from .geometria.envolvente import construir_envolvente
 from .geometria.parcelas import LadoParcela, azimut_normal_exterior, orientacion_cardinal
 from .geometria.zonas import detectar_zonas_edificables, repartir_por_area
+from .geometria.disposicion import disponer_edificio
 from .geometria.serializacion import (
     _estancias_por_unidad_dorms,
+    edificio_a_dict,
     huecos_de,
     lados_a_dict,
     ring,
@@ -424,11 +426,16 @@ class CalcularLayout:
         parcela: ParcelaMetrica,
         params: ParametrosRender,
         combo_override: str | None = None,
+        disponer: bool = False,
     ) -> dict[str, Any]:
         """`combo_override` (§2.5): slug de combinación de dormitorios elegida por
         el técnico. Si se indica y el uso es apartamentos turísticos, sustituye la
         tipología por la combinación (toda la unidad, PB y plantas tipo). Selección
-        temporal: el caso de uso no la persiste."""
+        temporal: el caso de uso no la persiste.
+
+        `disponer` (§2.5 dibujo): si es True, tras el cálculo se dispone la geometría
+        interior (núcleo + unidades + circulación) para el canvas. El cálculo
+        automático (cada tecla) NO dispone: sólo el botón «Pintar render» la pide."""
         # §3.8 — construye la config inmutable del motor (mínimos editados de BBDD +
         # % circulación del panel) para el uso activo y la pasa por la cadena de
         # cálculo. Sustituye al volcado a globals de módulo (concurrencia/aislamiento).
@@ -529,8 +536,27 @@ class CalcularLayout:
         )
         n_zonas = cap.n_zonas
 
+        # 6) Disposición geométrica interior (§2.5 «Pintar render»), solo bajo petición
+        # explícita. Se aísla en try/except geométrico: si el motor falla, la respuesta
+        # conserva los números (edificio None) y añade un aviso, sin tumbar el cálculo.
+        edificio_dict = None
+        if disponer:
+            # La disposición es una capa VISUAL best-effort: cualquier fallo (geométrico o
+            # no) deja `edificio` en None + aviso, sin propagar la excepción (los números
+            # son la fuente de verdad y no deben tumbarse por el dibujo).
+            try:
+                edificio_dict = edificio_a_dict(
+                    disponer_edificio(envolvente, cap, params_motor, lados=parcela.lados)
+                )
+            except Exception:  # noqa: BLE001 — best-effort; no debe tumbar el cálculo
+                edificio_dict = None
+                alertas.append(Alerta(
+                    "aviso", "Geometría",
+                    "No se pudo dibujar la disposición del edificio.",
+                ))
+
         return {
-            "edificio": None,                          # render geométrico en backlog
+            "edificio": edificio_dict,                  # disposición interior (o None)
             "capacidad": capacidad_a_dict(cap),         # fuente de verdad
             "tabla_planta": tabla_planta,
             "tabla_unidad": tabla_unidad,

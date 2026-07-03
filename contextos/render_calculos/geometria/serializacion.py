@@ -60,6 +60,65 @@ def lados_a_dict(lados: list[LadoParcela]) -> list[dict[str, Any]]:
     ]
 
 
+# ─── Edificio dispuesto → contrato del canvas (§2.5 «Pintar render») ─────────
+def _patio_a_dict(p) -> dict[str, Any]:
+    """Serializa un `envolvente.Patio` con las mismas claves que `_plantas_envolvente_a_dict`."""
+    return {
+        "id": getattr(p, "id", ""),
+        "poligono": ring(p.geometry),
+        "base": ring(getattr(p, "base", None) or p.geometry),
+        "huecos": huecos_de(p.geometry),
+        "area_m2": round(p.area_m2, 2),
+        "luz_recta_m": round(p.luz_recta_m, 2),
+        "area_efectiva_m2": round(getattr(p, "area_efectiva_m2", 0.0) or p.area_m2, 2),
+        "cabe": bool(getattr(p, "cabe", True)),
+        "bloqueado": bool(getattr(p, "bloqueado", False)),
+    }
+
+
+def edificio_a_dict(edificio) -> dict[str, Any] | None:
+    """Serializa un `disposicion.EdificioDispuesto` al contrato que consume
+    `rc_canvas.js` (`payload.edificio.plantas[i]`). Duck-typed (no importa el motor):
+    cada planta emite `footprint`, `patios[]`, `nucleo`, `unidades[]` y `pasillos[]`.
+
+    Devuelve `None` si `edificio` es `None` (el canvas cae entonces a `envolvente`).
+    """
+    if edificio is None:
+        return None
+    plantas: list[dict[str, Any]] = []
+    for pl in edificio.plantas:
+        nucleo = None
+        nucleo_obj = getattr(pl, "nucleo", None)
+        if nucleo_obj is not None and getattr(nucleo_obj, "poligono", None) is not None \
+                and not nucleo_obj.poligono.is_empty:
+            nucleo = {"poligono": ring(nucleo_obj.poligono)}
+        plantas.append({
+            "n": getattr(pl, "n", 0),
+            "nombre": getattr(pl, "nombre", ""),
+            "tipo": getattr(pl, "tipo", "regular"),
+            "footprint": ring(pl.footprint),
+            "patios": [_patio_a_dict(p) for p in getattr(pl, "patios", [])],
+            "nucleo": nucleo,
+            "unidades": [
+                {
+                    "id": u.id,
+                    "poligono_construido": ring(u.poligono_construido),
+                    "poligono_util": ring(u.poligono_util or u.poligono_construido),
+                    "area_util_m2": round(float(u.area_util_m2), 2),
+                    "cumple_minimos": bool(u.cumple_minimos),
+                    "es_adaptada": bool(u.es_adaptada),
+                }
+                for u in getattr(pl, "unidades", [])
+            ],
+            "pasillos": [
+                {"poligono": ring(g)}
+                for g in getattr(pl, "pasillos", [])
+                if g is not None and not g.is_empty
+            ],
+        })
+    return {"plantas": plantas}
+
+
 # ─── Tablas sintéticas iter. 4 — datos reales desde Capacidad ───────────────
 def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]:
     """Tabla por planta derivada del cálculo (muros / circulación / núcleo separados)."""
