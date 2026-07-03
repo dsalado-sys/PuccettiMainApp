@@ -12,3 +12,5 @@ pyproj==3.7.2
 requests==2.34.2
 ESCatastroLib==1.0.0
 geopandas==1.1.3
+# Solver CP-SAT para el reparto geométrico por rejilla (geometria/reparto_cpsat.py, §2.5).
+ortools==9.15.6755
