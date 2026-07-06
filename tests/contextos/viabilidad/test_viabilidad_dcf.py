@@ -1,9 +1,9 @@
-"""Tests del andamiaje DCF (§2.9, Fases 1-2 hasta la costura `construir_flujos`).
+"""Tests del motor DCF (§2.9, Fases 1-2, estructura estándar all-equity).
 
-Cubren solo lo spec-agnóstico: cómputo de métricas sobre una serie de flujos
-conocida, comportamiento del stub (serie vacía → métricas neutras + avisos),
-serialización tolerante y persistencia en el aggregate. El modelo financiero real
-(`modelo_dcf.construir_flujos`) queda fuera hasta recibir la spec del financiero.
+Cubren: cómputo de métricas sobre una serie conocida, el motor `construir_flujos`
+(VENTA promoción y RENTA con valor de salida, all-equity), el comportamiento sin
+timing (serie vacía + avisos), los factores de escenario, la serialización tolerante
+y la persistencia en el aggregate.
 """
 from __future__ import annotations
 
@@ -62,9 +62,9 @@ def test_metricas_escenario_serie_vacia_es_neutra():
     assert r.avisos == ["x"]
 
 
-# ── Caso de uso con el stub (modelo aún sin definir) ────────────────────────
-def test_dcf_stub_devuelve_tres_escenarios_no_disponible():
-    supuestos = SupuestosDCF()  # horizonte 0, tres escenarios identidad
+# ── Caso de uso sin timing (defaults neutros → no construye flujos) ─────────
+def test_dcf_sin_timing_devuelve_tres_escenarios_no_disponible():
+    supuestos = SupuestosDCF()  # horizonte 0, periodo de obra 0, tres escenarios identidad
     parametros = ParametrosEconomicos(superficie_construida_m2=1000.0)  # override manual
     estudio = CalcularViabilidadDCF().ejecutar(supuestos, Financiacion(), parametros, None)
 
@@ -74,11 +74,113 @@ def test_dcf_stub_devuelve_tres_escenarios_no_disponible():
     # Reutiliza la resolución de superficie del cálculo de margen.
     assert estudio.superficie_aplicada_m2 == 1000.0
     assert estudio.fuente_superficie == FuenteSuperficie.MANUAL
-    # Avisos: horizonte sin definir (global) + modelo sin definir (por escenario).
+    # Avisos: horizonte sin definir (global) + periodo de obra sin definir (por escenario).
     assert any("horizonte" in a.lower() for a in estudio.avisos)
     assert all(
         any("no está definido" in a.lower() for a in e.avisos) for e in estudio.escenarios
     )
+
+
+# ── Motor real: VENTA (promoción) all-equity ────────────────────────────────
+def _escenario(estudio, esc):
+    return next(e for e in estudio.escenarios if e.escenario == esc)
+
+
+def test_dcf_venta_promocion_construye_flujos_y_metricas():
+    supuestos = SupuestosDCF(periodo_obra_anios=2, tasa_descuento_anual=0.0)
+    parametros = ParametrosEconomicos(
+        operacion=Operacion.VENTA,
+        superficie_construida_m2=1000.0,
+        precio_eur_m2=3000.0,
+        coste_construccion_eur_m2=1000.0,
+        pct_costes_indirectos=0.0,
+        coste_suelo_eur=500_000.0,
+    )
+    estudio = CalcularViabilidadDCF().ejecutar(supuestos, Financiacion(), parametros, None)
+    assert estudio.disponible is True
+
+    base = _escenario(estudio, Escenario.BASE)
+    # t0: −suelo; año 1: −capex/2; año 2: −capex/2 + venta.
+    # capex_total = 1000·1000·(1+0) = 1.000.000 → 500.000/año; venta = 1000·3000 = 3.000.000.
+    assert base.flujo.neto == [-500_000.0, -500_000.0, 2_500_000.0]
+    assert base.van_eur == 1_500_000.0            # VAN a tasa 0 = suma simple
+    assert base.capital_necesario_eur == 1_000_000.0
+    assert base.moic == 2.5                        # 2.500.000 / 1.000.000
+    assert base.tir is not None and base.tir > 0
+
+
+def test_dcf_venta_escenario_estres_reduce_ingreso():
+    supuestos = SupuestosDCF(
+        periodo_obra_anios=1,
+        tasa_descuento_anual=0.0,
+        escenarios=[
+            DefinicionEscenario(Escenario.BASE),
+            DefinicionEscenario(Escenario.ESTRES, factor_precio=0.8, factor_capex=1.1),
+        ],
+    )
+    parametros = ParametrosEconomicos(
+        operacion=Operacion.VENTA,
+        superficie_construida_m2=1000.0,
+        precio_eur_m2=3000.0,
+        coste_construccion_eur_m2=1000.0,
+        pct_costes_indirectos=0.0,
+        coste_suelo_eur=0.0,
+    )
+    estudio = CalcularViabilidadDCF().ejecutar(supuestos, Financiacion(), parametros, None)
+    base = _escenario(estudio, Escenario.BASE)
+    estres = _escenario(estudio, Escenario.ESTRES)
+    # Estrés: menos ingreso (precio ×0,8) y más coste (capex ×1,1) → peor VAN.
+    assert estres.van_eur < base.van_eur
+
+
+# ── Motor real: RENTA (build-to-rent) all-equity + valor de salida ──────────
+def test_dcf_renta_incluye_rentas_y_valor_de_salida():
+    supuestos = SupuestosDCF(
+        periodo_obra_anios=1,
+        horizonte_anios=3,
+        tasa_descuento_anual=0.0,
+        exit_cap_rate=0.05,
+    )
+    parametros = ParametrosEconomicos(
+        operacion=Operacion.RENTA,
+        superficie_construida_m2=1000.0,
+        precio_eur_m2=10.0,          # €/m²·mes
+        ocupacion_anual_pct=1.0,
+        coste_construccion_eur_m2=500.0,
+        pct_costes_indirectos=0.0,
+        coste_suelo_eur=200_000.0,
+    )
+    estudio = CalcularViabilidadDCF().ejecutar(supuestos, Financiacion(), parametros, None)
+    assert estudio.disponible is True
+    base = _escenario(estudio, Escenario.BASE)
+    # renta_anual = 1000·10·12·1 = 120.000; salida = 120.000/0,05 = 2.400.000.
+    # t0: −200.000 suelo; año1: −500.000 capex; año2: +120.000; año3: +120.000 + 2.400.000.
+    assert base.flujo.neto == [-200_000.0, -500_000.0, 120_000.0, 2_520_000.0]
+    assert base.flujo.detalle["valor_salida"][3] == 2_400_000.0
+
+
+def test_dcf_renta_sin_exit_cap_avisa_y_sin_valor_de_salida():
+    supuestos = SupuestosDCF(periodo_obra_anios=1, horizonte_anios=2, exit_cap_rate=0.0)
+    parametros = ParametrosEconomicos(
+        operacion=Operacion.RENTA,
+        superficie_construida_m2=1000.0,
+        precio_eur_m2=10.0,
+        ocupacion_anual_pct=1.0,
+        coste_construccion_eur_m2=500.0,
+        pct_costes_indirectos=0.0,
+    )
+    estudio = CalcularViabilidadDCF().ejecutar(supuestos, Financiacion(), parametros, None)
+    base = _escenario(estudio, Escenario.BASE)
+    assert base.flujo.detalle["valor_salida"][-1] == 0.0
+    assert any("exit cap" in a.lower() for a in base.avisos)
+
+
+def test_dcf_con_deuda_avisa_all_equity():
+    supuestos = SupuestosDCF(periodo_obra_anios=1)
+    parametros = ParametrosEconomicos(operacion=Operacion.VENTA, superficie_construida_m2=100.0)
+    estudio = CalcularViabilidadDCF().ejecutar(supuestos, Financiacion(ltv=0.5), parametros, None)
+    base = _escenario(estudio, Escenario.BASE)
+    assert any("all-equity" in a.lower() or "capital propio" in a.lower() for a in base.avisos)
 
 
 def test_dcf_serializacion_estudio_es_json_amigable():

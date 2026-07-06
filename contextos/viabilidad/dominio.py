@@ -106,11 +106,17 @@ def _escenarios_por_defecto() -> list[DefinicionEscenario]:
 
 @dataclass
 class SupuestosDCF:
-    """Entradas del modelo DCF. `horizonte_anios`/`tasa_descuento_anual` son
-    universales a cualquier DCF; los campos de *timing* (periodo de obra, exit cap
-    rate, absorción de ventas, etc.) los añade la spec del financiero."""
-    horizonte_anios: int = 0          # 0 = sin definir (pendiente de spec)
+    """Entradas del modelo DCF (estructura estándar, all-equity — 1.ª iteración).
+
+    Todos los campos son configurables por el financiero. Los defaults son NEUTROS
+    (0 = sin definir): con ellos el motor no construye flujos y lo avisa, en vez de
+    inventar un timing. `periodo_obra_anios` y `exit_cap_rate` los introduce el
+    financiero por pantalla; la financiación (deuda) llega en una iteración posterior.
+    """
+    horizonte_anios: int = 0           # total (obra + explotación en renta); 0 = sin definir
+    periodo_obra_anios: int = 0        # años de obra sobre los que se reparte el CAPEX; 0 = sin definir
     tasa_descuento_anual: float = 0.0  # 0 = sin descuento (VAN == suma simple)
+    exit_cap_rate: float = 0.0         # solo renta: valor de salida = NOI / exit_cap_rate; 0 = sin salida
     tir_objetivo: float = 0.0          # para el precio máximo de compra (Fase 4)
     escenarios: list[DefinicionEscenario] = field(default_factory=_escenarios_por_defecto)
 
@@ -220,3 +226,16 @@ class UmbralesPR:
             TipologiaPR.HOTELERO: self.tir_min_hotelero,
             TipologiaPR.REHAB_INTENSIVA: self.tir_min_rehab_intensiva,
         }[tipologia]
+
+
+# ── Benchmarks de mercado (Fase 5) ──────────────────────────────────────────
+@dataclass
+class Benchmarks:
+    """Comparables de mercado (RevPAR/ADR/yield). 1.ª iteración: **entrada manual**
+    del técnico — aún no hay fuente automática (librería PR / STR / Idealista). Se
+    guardan en el aggregate. `fuente` documenta su procedencia. Defaults neutros (0)
+    = sin comparable introducido."""
+    revpar_eur: float = 0.0
+    adr_eur: float = 0.0
+    yield_comparable: float = 0.0
+    fuente: str = ""

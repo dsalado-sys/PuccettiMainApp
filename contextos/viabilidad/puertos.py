@@ -7,7 +7,16 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .dominio import UmbralesPR
+from .dominio import Benchmarks, UmbralesPR
+
+
+class BenchmarksPort(Protocol):
+    """Fuente de comparables de mercado (RevPAR/ADR/yield). Sin implementación
+    automática todavía (PR / STR / Idealista); de momento los comparables se
+    introducen a mano y se guardan en el aggregate. Este puerto es la costura para
+    cablear la fuente real cuando exista."""
+
+    def comparables(self, municipio: str, tipologia: str) -> Benchmarks | None: ...
 
 
 class UmbralesPRPort(Protocol):

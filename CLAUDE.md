@@ -202,8 +202,10 @@ subreferencia; usa ESCatastroLib + REST.
 - **localizacion** `/modulos/localizacion`: `GET ''`, `POST /buscar/{rc|direccion|coordenada}`,
   `/simplificar`, `/lado/{i}/{tipo|orientacion}`, `/subreferencia/{rc20}/detalle`,
   `/seleccionar-inmueble`, `/guardar-como-proyecto`; `GET /callejero/{provincias|municipios|vias}`.
-- **viabilidad** `/modulos/viabilidad`: `GET ''`, `POST /calcular` (preview JSON, no
-  persiste), `POST /guardar` (persiste en aggregate).
+- **viabilidad** `/modulos/viabilidad`: margen — `GET ''`, `POST /calcular` (preview
+  JSON), `POST /guardar`; DCF — `POST /calcular-dcf` (preview + semáforo), `/precio-maximo`,
+  `/sensibilidad`, `/guardar-dcf`, `GET/POST /umbrales` (config PR editable). UI DCF en
+  `viabilidad.html` + `viabilidad_dcf.js` (one-pager vía `@media print`).
 - **render_calculos** `/modulos/render-calculos`: `GET ''` (`?modo=` → landing o render),
   `POST /preview|/calcular|/estancias|/tipologias-dormitorios|/guardar|/aplicar-normativa`;
   `GET/POST /normativa[...]` (LEGADO, solo consulta), `/superficies-vivienda[/reset]`,

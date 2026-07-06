@@ -5,13 +5,15 @@ aggregate `Proyecto` (clave `ModuloPuccetti.VIABILIDAD`).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.nucleo.modelo import ModuloPuccetti, Proyecto
 
 from . import finanzas
+from ._comun import resolver_superficie, sanear_trazable
 from .dominio import (
+    Benchmarks,
     DefinicionEscenario,
     Escenario,
     Estado,
@@ -30,74 +32,9 @@ from .dominio import (
 )
 from .modelo_dcf import construir_flujos
 
-
-# ── Helpers compartidos (reutilizables por el motor DCF de Fases 1-2) ──────
-def sanear_trazable(
-    valor: float,
-    etiqueta: str,
-    avisos: list[str],
-    maximo: float | None = None,
-) -> float:
-    """Saneo TRAZABLE de un parámetro económico: un valor negativo (o por encima
-    de `maximo`) se corrige y se anota un aviso en `avisos`, en vez de absorberlo
-    en silencio con `max(...)`. Un coste negativo silenciado inflaba el margen sin
-    avisar — peligroso en una herramienta de decisión de inversión. Mantiene el
-    contrato de no-excepción de los casos de uso (los KPI siguen siendo números
-    válidos)."""
-    v = float(valor)
-    if v < 0:
-        avisos.append(f"{etiqueta} no puede ser negativo; se ha usado 0.")
-        v = 0.0
-    if maximo is not None and v > maximo:
-        avisos.append(f"{etiqueta} excede el máximo; se ha limitado.")
-        v = maximo
-    return v
-
-
-def resolver_superficie(
-    p: ParametrosEconomicos,
-    datos_parcela: dict[str, Any] | None,
-    avisos: list[str],
-) -> tuple[float, FuenteSuperficie]:
-    """Superficie construida a aplicar, con su procedencia. Prioridad:
-    manual (>0) → [vacío si no hay parcela] → catastro existente (solo rehab con
-    dato) → parcela × edificabilidad. Anota en `avisos` cada fallback o corrección."""
-    # 1) Override manual: si el usuario fijó una superficie > 0, manda él.
-    if p.superficie_construida_m2 and p.superficie_construida_m2 > 0:
-        return float(p.superficie_construida_m2), FuenteSuperficie.MANUAL
-    if p.superficie_construida_m2 and p.superficie_construida_m2 < 0:
-        # Superficie manual negativa: no se usa como override (se descartaba en
-        # silencio); se avisa y se cae al autocálculo por parcela × edificabilidad.
-        avisos.append("La superficie introducida es negativa; se ha autocalculado.")
-
-    if not datos_parcela:
-        avisos.append(
-            "No hay parcela asociada al proyecto. Asocia una desde "
-            "Buscar parcela o introduce una superficie manualmente."
-        )
-        return 0.0, FuenteSuperficie.VACIO
-
-    sup_parcela = float(datos_parcela.get("superficie_m2") or 0.0)
-
-    # 2) Rehabilitación: superficie construida ya existente según catastro.
-    if p.intervencion == Intervencion.REHABILITACION:
-        agregados = datos_parcela.get("agregados") or {}
-        existente = float(agregados.get("suma_superficie_construida_m2") or 0.0)
-        if existente > 0:
-            return existente, FuenteSuperficie.CATASTRO_EXISTENTE
-        avisos.append(
-            "Catastro no reporta superficie construida existente. "
-            "Usando parcela × edificabilidad como aproximación."
-        )
-
-    # 3) Obra nueva (o rehab. sin dato): parcela × edificabilidad.
-    edif = float(p.edificabilidad_m2t_m2s)
-    if edif < 0:
-        avisos.append("La edificabilidad no puede ser negativa; se ha usado 0.")
-        edif = 0.0
-    if sup_parcela <= 0:
-        avisos.append("La parcela del proyecto no tiene superficie registrada.")
-    return sup_parcela * edif, FuenteSuperficie.PARCELA_X_EDIFICABILIDAD
+# `resolver_superficie`/`sanear_trazable` viven en `_comun` (evita el ciclo con
+# `modelo_dcf`); se re-exponen aquí para el resto del contexto y los tests.
+__all_reexport__ = ("resolver_superficie", "sanear_trazable")
 
 
 # ── Cálculo ────────────────────────────────────────────────────────────────
@@ -319,6 +256,131 @@ class CalcularViabilidadDCF:
         )
 
 
+# ── Fase 4: precio máximo de compra + análisis de sensibilidad ──────────────
+def _tir_base(estudio: EstudioViabilidadDCF) -> float | None:
+    base = next((e for e in estudio.escenarios if e.escenario == Escenario.BASE), None)
+    return base.tir if base else None
+
+
+def precio_maximo_compra(
+    supuestos: SupuestosDCF,
+    financiacion: Financiacion,
+    parametros: ParametrosEconomicos,
+    datos_parcela: dict[str, Any] | None,
+    *,
+    uc: CalcularViabilidadDCF | None = None,
+    max_iter: int = 60,
+) -> float | None:
+    """Máximo coste de suelo (precio de compra) que mantiene la TIR del escenario BASE
+    ≥ `supuestos.tir_objetivo`. La TIR decrece monótonamente al subir el precio del
+    suelo, así que se resuelve por bisección. Devuelve:
+    - `None` si no hay TIR objetivo (≤ 0) o el motor no está disponible (sin timing);
+    - `0.0` si ni con el suelo gratis se alcanza el objetivo;
+    - en otro caso, el precio máximo redondeado a euros.
+    """
+    objetivo = supuestos.tir_objetivo
+    if objetivo <= 0:
+        return None
+    motor = uc or CalcularViabilidadDCF()
+
+    def van_base(suelo: float) -> float | None:
+        """VAN del escenario BASE a la tasa objetivo, con el suelo dado. `None` si el
+        motor no está disponible (sin timing). Criterio robusto: `VAN(objetivo) ≥ 0`
+        equivale a `TIR ≥ objetivo` y es siempre calculable (evita el caso degenerado
+        de TIR indefinida cuando el suelo es 0 y no hay desembolso negativo)."""
+        p = replace(parametros, coste_suelo_eur=suelo)
+        base = next(
+            (e for e in motor.ejecutar(supuestos, financiacion, p, datos_parcela).escenarios
+             if e.escenario == Escenario.BASE),
+            None,
+        )
+        if base is None or not base.flujo.neto:
+            return None
+        return finanzas.van(objetivo, base.flujo.neto)
+
+    v0 = van_base(0.0)
+    if v0 is None:
+        return None            # motor no disponible (sin timing)
+    if v0 < 0:
+        return 0.0             # ni con el suelo gratis se alcanza el objetivo
+
+    # El VAN decrece monótonamente al subir el suelo (−suelo en t0). Buscar cota alta.
+    hi, intentos = 1_000_000.0, 0
+    while True:
+        vh = van_base(hi)
+        if vh is None:
+            return None
+        if vh < 0:
+            break
+        hi *= 2.0
+        intentos += 1
+        if intentos > 40:
+            return None
+    lo = 0.0
+    for _ in range(max_iter):
+        mid = (lo + hi) / 2.0
+        vm = van_base(mid)
+        if vm is None:
+            return None
+        if vm >= 0:
+            lo = mid
+        else:
+            hi = mid
+    return round(lo, 0)
+
+
+def analizar_sensibilidad(
+    supuestos: SupuestosDCF,
+    financiacion: Financiacion,
+    parametros: ParametrosEconomicos,
+    datos_parcela: dict[str, Any] | None,
+    *,
+    uc: CalcularViabilidadDCF | None = None,
+    delta_precio_compra: float = 0.20,
+    delta_capex: float = 0.15,
+    delta_ingreso: float = 0.15,
+) -> dict[str, Any]:
+    """Sensibilidad de la TIR (escenario BASE) a ±delta en tres palancas: precio de
+    compra (coste de suelo), CAPEX (coste de construcción) e ingreso (precio de venta
+    en VENTA / renta en RENTA). Los deltas por defecto reflejan los rangos de la tabla
+    PR y son configurables. Un valor de TIR puede ser `None` si no es calculable."""
+    motor = uc or CalcularViabilidadDCF()
+    es_venta = parametros.operacion == Operacion.VENTA
+
+    def tir(*, suelo_factor: float = 1.0, factor_capex: float = 1.0, factor_ingreso: float = 1.0) -> float | None:
+        p = replace(parametros, coste_suelo_eur=parametros.coste_suelo_eur * suelo_factor)
+        # La palanca de ingreso mapea a factor_precio (venta) o factor_ingreso (renta).
+        fp = factor_ingreso if es_venta else 1.0
+        fi = 1.0 if es_venta else factor_ingreso
+        definicion = DefinicionEscenario(
+            Escenario.BASE, factor_precio=fp, factor_capex=factor_capex, factor_ingreso=fi
+        )
+        s = replace(supuestos, escenarios=[definicion])
+        return _tir_base(motor.ejecutar(s, financiacion, p, datos_parcela))
+
+    drivers = [
+        {
+            "driver": "precio_compra",
+            "delta": delta_precio_compra,
+            "tir_abajo": tir(suelo_factor=1.0 - delta_precio_compra),
+            "tir_arriba": tir(suelo_factor=1.0 + delta_precio_compra),
+        },
+        {
+            "driver": "capex",
+            "delta": delta_capex,
+            "tir_abajo": tir(factor_capex=1.0 - delta_capex),
+            "tir_arriba": tir(factor_capex=1.0 + delta_capex),
+        },
+        {
+            "driver": "ingreso",
+            "delta": delta_ingreso,
+            "tir_abajo": tir(factor_ingreso=1.0 - delta_ingreso),
+            "tir_arriba": tir(factor_ingreso=1.0 + delta_ingreso),
+        },
+    ]
+    return {"base_tir": tir(), "drivers": drivers}
+
+
 # ── DCF: serialización ──────────────────────────────────────────────────────
 def _num(d: dict[str, Any], clave: str, defecto: float) -> float:
     """Lee `clave` de `d` como float, cayendo a `defecto` si falta o es inválido."""
@@ -356,20 +418,25 @@ def definicion_escenario_desde_dict(d: dict[str, Any] | None) -> DefinicionEscen
 def supuestos_dcf_a_dict(s: SupuestosDCF) -> dict[str, Any]:
     return {
         "horizonte_anios": int(s.horizonte_anios),
+        "periodo_obra_anios": int(s.periodo_obra_anios),
         "tasa_descuento_anual": float(s.tasa_descuento_anual),
+        "exit_cap_rate": float(s.exit_cap_rate),
         "tir_objetivo": float(s.tir_objetivo),
         "escenarios": [definicion_escenario_a_dict(e) for e in s.escenarios],
     }
+
+
+def _int_tolerante(d: dict[str, Any], clave: str, defecto: int) -> int:
+    try:
+        return int(d.get(clave, defecto))
+    except (TypeError, ValueError):
+        return defecto
 
 
 def supuestos_dcf_desde_dict(d: dict[str, Any] | None) -> SupuestosDCF:
     base = SupuestosDCF()
     if not d:
         return base
-    try:
-        horizonte = int(d.get("horizonte_anios", base.horizonte_anios))
-    except (TypeError, ValueError):
-        horizonte = base.horizonte_anios
     escenarios_raw = d.get("escenarios")
     escenarios = (
         [definicion_escenario_desde_dict(e) for e in escenarios_raw]
@@ -377,8 +444,10 @@ def supuestos_dcf_desde_dict(d: dict[str, Any] | None) -> SupuestosDCF:
         else base.escenarios
     )
     return SupuestosDCF(
-        horizonte_anios=horizonte,
+        horizonte_anios=_int_tolerante(d, "horizonte_anios", base.horizonte_anios),
+        periodo_obra_anios=_int_tolerante(d, "periodo_obra_anios", base.periodo_obra_anios),
         tasa_descuento_anual=_num(d, "tasa_descuento_anual", base.tasa_descuento_anual),
+        exit_cap_rate=_num(d, "exit_cap_rate", base.exit_cap_rate),
         tir_objetivo=_num(d, "tir_objetivo", base.tir_objetivo),
         escenarios=escenarios,
     )
@@ -441,13 +510,18 @@ def asociar_dcf_a_proyecto(
     financiacion: Financiacion,
     parametros: ParametrosEconomicos,
     proyecto: Proyecto,
+    benchmarks: Benchmarks | None = None,
 ) -> None:
-    """Guarda supuestos DCF + financiación bajo `dcf`, junto a los parámetros de
-    margen (mismo rincón `VIABILIDAD`). Solo entradas, nunca el resultado."""
+    """Guarda supuestos DCF + financiación (+ benchmarks manuales) bajo `dcf`, junto a
+    los parámetros de margen (mismo rincón `VIABILIDAD`). Solo entradas, nunca el
+    resultado. Preserva los benchmarks previos si no se pasan nuevos."""
     datos = parametros_a_dict(parametros)
+    previo = _rincon_viabilidad(proyecto).get("dcf") or {}
+    bench = benchmarks if benchmarks is not None else benchmarks_desde_dict(previo.get("benchmarks"))
     datos["dcf"] = {
         "supuestos": supuestos_dcf_a_dict(supuestos),
         "financiacion": financiacion_a_dict(financiacion),
+        "benchmarks": benchmarks_a_dict(bench),
     }
     proyecto.fijar_datos(ModuloPuccetti.VIABILIDAD, datos)
 
@@ -464,6 +538,35 @@ def financiacion_desde_proyecto(proyecto: Proyecto | None) -> Financiacion:
         return Financiacion()
     dcf = _rincon_viabilidad(proyecto).get("dcf") or {}
     return financiacion_desde_dict(dcf.get("financiacion"))
+
+
+# ── Benchmarks: serialización + persistencia (Fase 5) ───────────────────────
+def benchmarks_a_dict(b: Benchmarks) -> dict[str, Any]:
+    return {
+        "revpar_eur": float(b.revpar_eur),
+        "adr_eur": float(b.adr_eur),
+        "yield_comparable": float(b.yield_comparable),
+        "fuente": str(b.fuente or ""),
+    }
+
+
+def benchmarks_desde_dict(d: dict[str, Any] | None) -> Benchmarks:
+    base = Benchmarks()
+    if not d:
+        return base
+    return Benchmarks(
+        revpar_eur=_num(d, "revpar_eur", base.revpar_eur),
+        adr_eur=_num(d, "adr_eur", base.adr_eur),
+        yield_comparable=_num(d, "yield_comparable", base.yield_comparable),
+        fuente=str(d.get("fuente") or ""),
+    )
+
+
+def benchmarks_desde_proyecto(proyecto: Proyecto | None) -> Benchmarks:
+    if proyecto is None:
+        return Benchmarks()
+    dcf = _rincon_viabilidad(proyecto).get("dcf") or {}
+    return benchmarks_desde_dict(dcf.get("benchmarks"))
 
 
 # ── Umbrales PR: semáforo (Fase 3) ──────────────────────────────────────────

@@ -278,6 +278,19 @@ def catalogo_hotelero_adapter(session: Session = Depends(sesion_bbdd)):
     return CatalogoHoteleroSQLAlchemy(session)
 
 
+# ── Viabilidad: motor DCF + umbrales PR ────────────────────────────────────
+def calcular_viabilidad_dcf_uc():
+    """Motor DCF (puro, sin repositorio)."""
+    from app.contextos.viabilidad import CalcularViabilidadDCF
+    return CalcularViabilidadDCF()
+
+
+def umbrales_pr_adapter(session: Session = Depends(sesion_bbdd)):
+    """Adapter de umbrales internos PR (config editable, singleton en BBDD)."""
+    from app.plataforma.persistencia.umbrales_pr_sqlalchemy import UmbralesPRSQLAlchemy
+    return UmbralesPRSQLAlchemy(session)
+
+
 def obtener_parcela_temporal(
     request: Request,
     repo: ParcelaTemporalRepositorio = Depends(parcelas_temporales),
