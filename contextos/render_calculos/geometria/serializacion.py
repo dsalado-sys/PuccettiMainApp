@@ -60,6 +60,89 @@ def lados_a_dict(lados: list[LadoParcela]) -> list[dict[str, Any]]:
     ]
 
 
+# ─── Edificio dispuesto CP-SAT → contrato del canvas (rc_canvas.js) ─────────
+def _piezas_poligonales(g) -> list:
+    """Piezas Polygon no vacías de una geometría (helper local, sin ortools).
+
+    Definido aquí (y no importado de `disposicion_cpsat`) a propósito: `serializacion`
+    lo importa medio módulo, y `disposicion_cpsat` arrastra ortools vía `reparto_cpsat`.
+    """
+    if g is None or getattr(g, "is_empty", True):
+        return []
+    if isinstance(g, Polygon):
+        return [g]
+    if hasattr(g, "geoms"):
+        return [p for p in g.geoms if getattr(p, "geom_type", "") == "Polygon" and not p.is_empty]
+    return []
+
+
+def _unidad_cpsat_dict(u, n_dorms: int, es_adaptada: bool) -> dict[str, Any]:
+    """Serializa una `UnidadUbicada` (ubicada o no) al contrato de unidad del canvas.
+
+    `poligono_util == poligono_construido` (sin offset de muros en esta fase). Las no
+    ubicadas llevan `ubicada=False` y `cumple_minimos=False` → el canvas las pinta en
+    rojo sobre su placeholder; su superficie mostrada es el objetivo (área real = 0).
+    """
+    anillo = ring(u.poligono)
+    area = u.area_real if u.ubicada else u.area_objetivo
+    return {
+        "id": u.id,
+        "tipo": getattr(u, "tipo", ""),
+        "n_dormitorios": int(n_dorms),
+        "poligono_construido": anillo,
+        "poligono_util": anillo,
+        "area_util_m2": round(float(area), 2),
+        "ubicada": bool(u.ubicada),
+        "cumple_minimos": bool(u.ubicada),
+        "es_adaptada": bool(es_adaptada),
+    }
+
+
+def _zonas_cpsat_dict(zonas: list, reparto: list) -> list[dict[str, Any]]:
+    """Zonas de la planta (solo útil al canvas con ≥2: si no, no las dibuja)."""
+    if len(zonas) < 2:
+        return []
+    return [
+        {"indice": i + 1, "poligono": ring(z), "area_m2": round(z.area, 2),
+         "unidades": reparto[i] if i < len(reparto) else 0}
+        for i, z in enumerate(zonas)
+    ]
+
+
+def _planta_cpsat_dict(pd) -> dict[str, Any]:
+    return {
+        "n": pd.n,
+        "nombre": pd.nombre,
+        "tipo": pd.tipo,
+        "footprint": ring(pd.footprint),
+        "patios": [
+            {"id": getattr(p, "id", ""), "poligono": ring(p.geometry),
+             "huecos": huecos_de(p.geometry),
+             "area_m2": round(getattr(p, "area_m2", 0.0), 2),
+             "luz_recta_m": round(getattr(p, "luz_recta_m", 0.0), 2),
+             "bloqueado": bool(getattr(p, "bloqueado", False))}
+            for p in pd.patios
+        ],
+        "pasillos": [{"poligono": ring(g)} for g in _piezas_poligonales(pd.circulacion)],
+        "nucleo": None,   # el núcleo no se coloca geométricamente en esta fase
+        "unidades": [
+            _unidad_cpsat_dict(u, pd.n_dorms[k] if k < len(pd.n_dorms) else 0, u.id in pd.adaptadas)
+            for k, u in enumerate(pd.unidades)
+        ],
+        "zonas": _zonas_cpsat_dict(pd.zonas, pd.zonas_reparto),
+    }
+
+
+def edificio_cpsat_a_dict(plantas_dispuestas: list, envolvente=None) -> dict[str, Any]:
+    """Serializa la disposición CP-SAT (`list[PlantaDispuesta]`) al `edificio` del canvas.
+
+    Contrato consumido por `rc_canvas.js` (`payload.edificio.plantas[]`): por planta,
+    `footprint`, `patios`, `pasillos`, `unidades` y `zonas`. Recibe objetos duck-typed
+    (no importa `disposicion_cpsat` para no arrastrar ortools).
+    """
+    return {"plantas": [_planta_cpsat_dict(pd) for pd in plantas_dispuestas]}
+
+
 # ─── Tablas sintéticas iter. 4 — datos reales desde Capacidad ───────────────
 def tabla_planta_desde_capacidad(cap, programa_uso=None) -> list[dict[str, Any]]:
     """Tabla por planta derivada del cálculo (muros / circulación / núcleo separados)."""

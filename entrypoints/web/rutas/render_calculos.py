@@ -420,12 +420,19 @@ def calcular(
     combo_override = payload.get("combo_dormitorios") or None
     if combo_override is not None:
         combo_override = str(combo_override).strip() or None
+    # §2.4 — motor de disposición geométrica (opcional). "cpsat" dispone las unidades
+    # por zona y rellena `edificio`; ausente/"numerico" → solo cálculo (`edificio: null`).
+    algoritmo = payload.get("algoritmo") or None
+    if algoritmo is not None:
+        algoritmo = str(algoritmo).strip() or None
     caso_uso = CalcularLayout(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
         catalogo_hotelero=catalogo_hot,
     )
-    resultado = caso_uso.ejecutar(parcela, params, combo_override=combo_override)
+    resultado = caso_uso.ejecutar(
+        parcela, params, combo_override=combo_override, algoritmo=algoritmo,
+    )
 
     alertas_extra = ValidarCumplimiento().ejecutar(parcela, params, normativa)
     resultado["alertas"] = list(resultado.get("alertas", [])) + [

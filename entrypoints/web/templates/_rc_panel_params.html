@@ -480,4 +480,27 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
       "40", "1", "pb") }}
     </div>
   </details>
+
+  {# Disposición geométrica CP-SAT (§2.4). Controla la rejilla con la que «Pintar
+  render» reparte las unidades por zona. No aplica a un inmueble suelto. #}
+  {% if not es_inmueble %}
+  <details class="rc-grupo" data-visible-en-planta="pb tipo">
+    <summary><span class="rc-grupo-titulo">Diseño · disposición (Pintar render)</span></summary>
+    <div class="rc-grupo-cuerpo">
+      {% set d = parametros.diseno %}
+      <label class="rc-campo" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Tamaño de celda (m)</span>
+        <input type="number" name="tam_celda_cpsat" min="0.8" max="3.0" step="0.1" value="{{ d.tam_celda_cpsat }}"
+          data-bloque="diseno">
+        <small class="rc-hint">Resolución de la rejilla: menor = área más precisa pero más lento.</small>
+      </label>
+      <label class="rc-campo" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Tolerancia de área (±)</span>
+        <input type="number" name="tol_area_cpsat" min="0.02" max="0.5" step="0.01" value="{{ d.tol_area_cpsat }}"
+          data-bloque="diseno">
+        <small class="rc-hint">Margen del área de cada unidad respecto a su objetivo (0.10 = ±10%).</small>
+      </label>
+    </div>
+  </details>
+  {% endif %}
 </aside>

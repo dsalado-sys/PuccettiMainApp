@@ -37,6 +37,14 @@ class ParametrosDiseno:
     # cuello más estrecho que esto se cuentan como zonas separadas.
     ancho_cuello_zona_min: float = 4.00
 
+    # Disposición CP-SAT (§2.4). Trade-off tamaño de celda: más pequeño → área más
+    # precisa pero el nº de celdas (y el coste de conectividad por flujo) explota
+    # >~150-200 celdas; ~1.6 m es el punto viable (área ±½ celda). El timeout es el
+    # tope wall-clock por zona (backstop; el límite primario es determinista en el motor).
+    tam_celda_cpsat: float = 1.6
+    tol_area_cpsat: float = 0.10
+    timeout_cpsat_s: float = 10.0
+
     # Porcentajes. Suma ≤ 90% por planta (validado en capacidad).
     pct_muros: float = 20.0
     # Tabiquería interior de las unidades (cálculo de unidad): se descuenta del útil

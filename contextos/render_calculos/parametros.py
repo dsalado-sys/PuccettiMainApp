@@ -192,6 +192,11 @@ class ParametrosDiseno:
     # vivienda/apartamento/habitación). Único, compartido por todos los usos;
     # solo se lee del bloque de PB (`diseno`). Sustituye el 1.15 antes fijo.
     pct_circulacion_interior: float = 15.0
+    # Disposición geométrica CP-SAT (§2.4). Resolución de la rejilla (m) y
+    # tolerancia de área por unidad (fracción, ±). Se propagan al motor vía
+    # `_motor_desde`; el motor usa sus propios defaults si no llegan.
+    tam_celda_cpsat: float = 1.6
+    tol_area_cpsat: float = 0.10
 
 
 @dataclass
@@ -313,6 +318,8 @@ class ParametrosRender:
                 pct_circulacion_pb=pct_circulacion_pb,
                 pct_circulacion_tipo=pct_circulacion_tipo,
                 pct_muros_normativo=max(0.0, min(80.0, float(self.urbanisticos.pct_muros_normativo))),
+                tam_celda_cpsat=diseno.tam_celda_cpsat,
+                tol_area_cpsat=diseno.tol_area_cpsat,
             ),
             urbanismo=UrbMotor(
                 coeficiente_edificabilidad=self.urbanisticos.coeficiente_edificabilidad,
@@ -517,6 +524,8 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             pct_circulacion_pb=_circ("pct_circulacion_pb", base_d.pct_circulacion_pb),
             pct_circulacion_tipo=_circ("pct_circulacion_tipo", base_d.pct_circulacion_tipo),
             pct_circulacion_interior=max(0.0, min(40.0, _f(node, "pct_circulacion_interior", base_d.pct_circulacion_interior))),
+            tam_celda_cpsat=max(0.8, min(3.0, _f(node, "tam_celda_cpsat", base_d.tam_celda_cpsat))),
+            tol_area_cpsat=max(0.02, min(0.50, _f(node, "tol_area_cpsat", base_d.tol_area_cpsat))),
         )
 
     def _parse_programa(node: dict[str, Any] | None, base_prog: ParametrosPrograma) -> ParametrosPrograma:

@@ -637,10 +637,15 @@
     ESTADO.abortCalcular = new AbortController();
     if (!auto) spinner(true);
     try {
+      const payload = payloadConNormativa(bloques);
+      // §2.4 — «Pintar render» pide disposición geométrica (motor CP-SAT). Un solo
+      // disparo explícito: los recálculos automáticos posteriores (auto) no repiten
+      // el flag y vuelven al cálculo numérico rápido.
+      if (opts.algoritmo) payload.algoritmo = opts.algoritmo;
       const resp = await fetch("/modulos/render-calculos/calcular", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payloadConNormativa(bloques)),
+        body: JSON.stringify(payload),
         signal: ESTADO.abortCalcular.signal,
       });
       if (resp.status === 409) { mostrarToast("Localiza primero la parcela", true); return; }
@@ -2016,8 +2021,10 @@
   }
   form.addEventListener("input", calcularConDebounce);
   form.addEventListener("change", calcularConDebounce);
-  // El botón «Calcular capacidad» queda reservado para pintar el render (próxima
-  // iteración): el cálculo ya es automático con cada cambio, sin binding aquí.
+  // «Pintar render» (§2.4): recalcula con el motor CP-SAT (algoritmo="cpsat"),
+  // que dispone geométricamente las unidades. El cálculo numérico ya es automático
+  // con cada cambio; este botón solo añade la disposición, bajo demanda (puede tardar).
+  if (btnDistribuir) btnDistribuir.addEventListener("click", () => pedirCalculo({ algoritmo: "cpsat" }));
   if (btnGuardar) btnGuardar.addEventListener("click", guardar);
   if (btnCsv) btnCsv.addEventListener("click", exportCsv);
 

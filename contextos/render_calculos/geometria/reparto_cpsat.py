@@ -221,7 +221,8 @@ def repartir_zona_cpsat(
     - `fachada`: geometría de contacto obligatorio (ventilación). None → `zona.boundary`.
     - `patios`: polígonos de patio cuyo borde también vale como contacto.
     - `nucleo`: núcleo ya colocado; sus celdas se reservan y las unidades exigen acceso.
-    - `tam_celda`, `tol_area`: resolución de rejilla y tolerancia de área (±).
+    - `tam_celda`, `tol_area`: resolución de rejilla y tolerancia de área (±). Celda
+      menor → área más precisa pero N (y el coste del solver) crece; config en `config.py`.
     - `max_celdas`: si N excede, se engrosa `tam_celda` hasta N ≤ max (guarda anti-explosión).
     - `det_time` / `timeout_s`: límite determinista (primario) y backstop de reloj.
     - `exigir_acceso`, `seed`, `num_workers`: acceso a circulación/núcleo y determinismo.

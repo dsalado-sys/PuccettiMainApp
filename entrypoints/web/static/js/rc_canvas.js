@@ -515,6 +515,17 @@
         this._dibujarNucleo(planta.nucleo);
         // Unidades
         (planta.unidades || []).forEach(u => {
+          // Unidad que no cupo (motor CP-SAT): se dibuja en rojo con borde discontinuo
+          // sobre su placeholder, donde se intentó colocarla.
+          if (u.ubicada === false) {
+            const ctxR = this.ctx;
+            ctxR.save();
+            ctxR.setLineDash([4, 3]);
+            this._trazarPoligono(u.poligono_construido, "rgba(140,42,31,0.22)", COLOR.error, 1.4);
+            ctxR.restore();
+            this._etiquetaUnidad(u);
+            return;
+          }
           const fill = u.es_adaptada ? "rgba(184,150,12,0.40)" : "rgba(201,168,76,0.22)";
           const stroke = u.es_adaptada ? COLOR.dorado : COLOR.doradoClaro;
           this._trazarPoligono(u.poligono_construido, fill, stroke, 1);

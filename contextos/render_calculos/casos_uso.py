@@ -424,11 +424,18 @@ class CalcularLayout:
         parcela: ParcelaMetrica,
         params: ParametrosRender,
         combo_override: str | None = None,
+        algoritmo: str | None = None,
     ) -> dict[str, Any]:
         """`combo_override` (§2.5): slug de combinación de dormitorios elegida por
         el técnico. Si se indica y el uso es apartamentos turísticos, sustituye la
         tipología por la combinación (toda la unidad, PB y plantas tipo). Selección
-        temporal: el caso de uso no la persiste."""
+        temporal: el caso de uso no la persiste.
+
+        `algoritmo` (§2.4): motor de disposición geométrica. `None`/`"numerico"` →
+        solo cálculo numérico (`edificio: null`, comportamiento por defecto);
+        `"cpsat"` → dispone las unidades por zona con el motor CP-SAT y rellena
+        `edificio` con el contrato del canvas. Ante cualquier fallo geométrico o
+        ausencia de ortools cae a `edificio: null` (la vía numérica no se resiente)."""
         # §3.8 — construye la config inmutable del motor (mínimos editados de BBDD +
         # % circulación del panel) para el uso activo y la pasa por la cadena de
         # cálculo. Sustituye al volcado a globals de módulo (concurrencia/aislamiento).
@@ -529,8 +536,34 @@ class CalcularLayout:
         )
         n_zonas = max((len(p["zonas"]) for p in plantas_dict), default=0)
 
+        # 5.bis) Disposición geométrica opcional (§2.4): motor CP-SAT detrás del flag
+        # `algoritmo`. Import perezoso → la vía numérica por defecto nunca importa
+        # ortools. Guardado: cualquier fallo geométrico (o ausencia de ortools) cae a
+        # `edificio: None`, sin resentir el contrato numérico (motor actual = fallback).
+        edificio_dict = None
+        if (algoritmo or "").lower() == "cpsat":
+            try:
+                from .geometria.disposicion_cpsat import disponer_edificio_cpsat
+                from .geometria.serializacion import edificio_cpsat_a_dict
+                plantas_disp = disponer_edificio_cpsat(
+                    envolvente, cap,
+                    ancho_cuello_min=params_motor.diseno.ancho_cuello_zona_min,
+                    tam_celda=params_motor.diseno.tam_celda_cpsat,
+                    tol_area=params_motor.diseno.tol_area_cpsat,
+                    timeout_s=params_motor.diseno.timeout_cpsat_s,
+                )
+                edificio_dict = edificio_cpsat_a_dict(plantas_disp, envolvente)
+                alertas += _alertas_disposicion(plantas_disp)
+            except Exception:
+                edificio_dict = None
+                alertas.append(Alerta(
+                    "aviso", "Geometría",
+                    "No se pudo dibujar la disposición geométrica. Los cálculos de "
+                    "superficies y capacidad no se ven afectados.",
+                ))
+
         return {
-            "edificio": None,                          # render geométrico en backlog
+            "edificio": edificio_dict,                  # None salvo algoritmo="cpsat" (§2.4)
             "capacidad": capacidad_a_dict(cap),         # fuente de verdad
             "tabla_planta": tabla_planta,
             "tabla_unidad": tabla_unidad,
@@ -1608,6 +1641,23 @@ def _alertas_envolvente(envolvente, parcela: ParcelaMetrica, params: ParametrosR
             "Sin fachada no se pueden abrir huecos.",
         ))
     return alertas
+
+
+def _alertas_disposicion(plantas_disp) -> list[Alerta]:
+    """Aviso si la disposición geométrica CP-SAT no colocó todas las unidades.
+
+    Degradación visible sin tumbar los números: cuenta las unidades `ubicada=False`
+    (no cupieron / solver sin solución a tiempo) y avisa. Sin referencias normativas.
+    """
+    total = sum(len(pl.unidades) for pl in plantas_disp)
+    sin_ubicar = sum(1 for pl in plantas_disp for u in pl.unidades if not u.ubicada)
+    if sin_ubicar <= 0:
+        return []
+    return [Alerta(
+        "aviso", "Geometría",
+        f"La disposición geométrica no pudo colocar {sin_ubicar} de {total} "
+        f"unidad(es). Prueba a reducir el número de unidades o la ocupación de la planta.",
+    )]
 
 
 def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Alerta]:

@@ -160,3 +160,38 @@ def test_contacto_ventilacion():
         if u.ubicada:
             # Toca la fachada (borde de la zona) para ventilar.
             assert u.poligono.distance(zona.boundary) < r.tam_celda
+
+
+# ─── Límite: zona con menos celdas que unidades ─────────────────────────────
+def test_zona_menos_celdas_que_unidades():
+    """Zona con menos celdas que unidades: cardinalidad exacta, casi ninguna cabe, no crashea."""
+    zona = box(0.0, 0.0, 2.0, 2.0)                       # 1 celda a 2 m
+    entrada = [_uni("A", 4), _uni("B", 4), _uni("C", 4)]
+    r = repartir_zona_cpsat(zona, entrada, tam_celda=2.0, num_workers=1, timeout_s=10)
+    assert isinstance(r, ResultadoReparto)               # retorna, no revienta
+    assert len(r.unidades) == 3                          # cardinalidad exacta
+    assert [u.id for u in r.unidades] == ["A", "B", "C"]  # mismo orden/ids
+    assert sum(u.ubicada for u in r.unidades) <= 1       # 1 celda → a lo sumo 1 ubicada
+
+
+# ─── Límite: unidad con área objetivo mayor que toda la zona ────────────────
+def test_unidad_mayor_que_toda_la_zona():
+    """Área objetivo mayor que la zona entera: no ubicada, sin polígono, no crashea."""
+    zona = box(0.0, 0.0, 4.0, 4.0)                       # 16 m²
+    r = repartir_zona_cpsat(zona, [_uni("G", 500)], tam_celda=2.0, num_workers=1, timeout_s=10)
+    assert isinstance(r, ResultadoReparto)
+    assert len(r.unidades) == 1
+    u = r.unidades[0]
+    assert u.ubicada is False
+    assert u.poligono is None
+    assert isinstance(r.estado, str) and r.estado        # nombre de status válido
+
+
+# ─── `tam_celda` es parámetro configurable y se refleja en el resultado ─────
+def test_tam_celda_configurable():
+    zona = box(0.0, 0.0, 10.0, 10.0)
+    r = repartir_zona_cpsat(zona, [_uni("A", 25), _uni("B", 25)],
+                            tam_celda=2.5, num_workers=1, timeout_s=10)
+    # 4×4 = 16 celdas a 2.5 m: por debajo de `max_celdas` → no se engrosa la celda.
+    assert r.tam_celda == pytest.approx(2.5)
+    assert r.n_celdas == 16
