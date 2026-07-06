@@ -87,6 +87,7 @@ def _registrar_modelos() -> None:
     from . import carpetas_normativa_sqlalchemy  # noqa: F401
     from . import carpetas_proyecto_sqlalchemy  # noqa: F401
     from . import usuarios_sqlalchemy  # noqa: F401
+    from . import umbrales_pr_sqlalchemy  # noqa: F401
 
 
 def init_db(
@@ -110,7 +111,9 @@ def init_db(
     from .callejero_seed import sembrar_callejero
     from .seed_normativa import sembrar_todo
     from .seed_usuarios import sembrar_usuarios
+    from .umbrales_pr_sqlalchemy import sembrar_umbrales_pr
     with sf() as session:
         sembrar_callejero(session)
         sembrar_todo(session)
         sembrar_usuarios(session)
+        sembrar_umbrales_pr(session)

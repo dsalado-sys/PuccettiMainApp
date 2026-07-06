@@ -19,7 +19,7 @@ app/
 │   └── rol.py                # Rol, PermisoModulo, MODULOS, MATRIZ_PERMISOS, AccesoModulo, puede_acceder/acceso
 ├── contextos/                # un bounded context por §x.y (dominio puro)
 │   ├── localizacion/         # §2.1  dominio/puertos/casos_uso + geometria.py (fichero plano)
-│   ├── viabilidad/           # §2.9  dominio/casos_uso (sin puertos.py) — único __init__ con __all__
+│   ├── viabilidad/           # §2.9  dominio/casos_uso/puertos + finanzas.py + modelo_dcf.py (costura DCF) — único __init__ con __all__
 │   ├── render_calculos/      # §2.4–2.7 dominio/puertos/casos_uso/parametros + geometria/ (subpaquete 14+ módulos) + README.md
 │   ├── proyectos/            # §2.11 puertos/casos_uso (SIN dominio: el aggregate vive en nucleo/)
 │   └── usuarios/             # login real: dominio/puertos/casos_uso + seguridad.py (PBKDF2)
@@ -94,9 +94,17 @@ ModuloPuccetti, Rol, PermisoModulo, MATRIZ_PERMISOS, puede_acceder`. `acceso`,
   `CargarTodosLosDetalles` para no quemar la cuota Catastro).
 - **viabilidad §2.9** — `dominio.py` (`Operacion` VENTA/RENTA, `Intervencion`
   OBRA_NUEVA/REHABILITACION, `FuenteSuperficie`, `ParametrosEconomicos`,
-  `EstudioViabilidad`; defaults: venta 3200 €/m², obra nueva 1400, rehab 900);
-  `casos_uso.py` (`CalcularViabilidad`, puro, sin repo). **Único `__init__.py` con
-  `__all__`** → se importa desde el paquete.
+  `EstudioViabilidad`; defaults: venta 3200 €/m², obra nueva 1400, rehab 900). En
+  evolución (plan DCF): `dominio.py` añade el motor DCF (`SupuestosDCF`, `Financiacion`,
+  `FlujoCaja`, `Escenario`/`DefinicionEscenario`, `ResultadoEscenario`,
+  `EstudioViabilidadDCF`) y umbrales PR (`UmbralesPR`, `Estado`, `TipologiaPR`);
+  `finanzas.py` (VAN/TIR/MOIC/payback puros); `modelo_dcf.py` = **única costura
+  spec-dependiente** (`construir_flujos`, hoy STUB pendiente de la spec del financiero);
+  `puertos.py` (`UmbralesPRPort`). `casos_uso.py` (`CalcularViabilidad`,
+  `CalcularViabilidadDCF`, `evaluar_umbrales`/`semaforo_global`, helpers de superficie/
+  saneo reutilizables; puro, sin repo salvo umbrales). Umbrales PR viven en BBDD
+  (`umbrales_pr`, adapter `UmbralesPRSQLAlchemy`). **Único `__init__.py` con `__all__`**
+  → se importa desde el paquete. Detalle/estado del plan: `viabilidad/REGISTRO.md`.
 - **render_calculos §2.4–2.7** — `dominio.py` (`UsoEdificio`
   vivienda/hotelero/apartamentos_turisticos + enums de categoría/tipología; `Alerta`,
   `NivelAlerta` ∈ error/incumplimiento/aviso/info); `parametros.py` (parser MUY
@@ -126,14 +134,16 @@ usuarios). Hay que registrar cada ORM en `_registrar_modelos()` o `create_all` n
   revisiones, fuera de git — borrado deliberado). NO hay migraciones: cambiar el esquema
   sobre una BBDD existente = borrar/migrar a mano. El comentario de `sqlalchemy_base.py`
   que aún cita Alembic está stale.
-- **Tablas (~14)**: `proyectos, usuarios, normativa_municipal, anexo_i_vivienda,
+- **Tablas (~15)**: `proyectos, usuarios, normativa_municipal, anexo_i_vivienda,
   parametros_motor_vivienda, anexo_i_apartamentos, anexo_i_apartamentos_conjuntos,
   anexo_i_hotelero, provincias_ine, municipios_ine, carpeta_proyecto, proyecto_en_carpeta,
-  carpeta_normativa, normativa_archivada`.
+  carpeta_normativa, normativa_archivada, umbrales_pr` (esta última = singleton `id=1`,
+  umbrales internos PR de viabilidad §2.9).
 - **Adapters**: `ProyectosSQLAlchemy` (default), `ProyectosEnMemoria` (solo tests),
   `UsuariosSQLAlchemy`, `NormativaMunicipalSQLAlchemy`,
   `CatalogoSuperficies/Apartamentos/HoteleroSQLAlchemy`, `CallejeroSQLAlchemy`,
-  `CarpetasProyecto/NormativaSQLAlchemy`; + `CatastroMEH`, `ParcelasEnMemoria`.
+  `CarpetasProyecto/NormativaSQLAlchemy`, `UmbralesPRSQLAlchemy` (singleton umbrales
+  PR §2.9); + `CatastroMEH`, `ParcelasEnMemoria`.
   Cambiar a Postgres = cambiar `PUCCETTI_DB_URL` y nada más (dominio/casos de uso no saben qué BBDD hay).
 - **Seeds** idempotentes (por "tabla vacía") y `reset()` atómico por catálogo. Las filas
   Anexo I **se derivan** de `geometria.programa*` (no son literales): editar mínimos en

@@ -74,3 +74,149 @@ class EstudioViabilidad:
     margen_eur: float
     margen_pct: float
     avisos: list[str] = field(default_factory=list)
+
+
+# ── Modelo DCF multi-periodo (Fases 1-2) ────────────────────────────────────
+# NOTA: los defaults son NEUTROS a propósito (horizonte/tasa/LTV a 0, factores de
+# escenario a 1.0 = sin perturbación). No representan una recomendación de negocio:
+# los valores reales los fija la especificación DCF del financiero. Mientras no
+# llegue, el motor es ejecutable pero devuelve una serie de flujos vacía (ver
+# `modelo_dcf.construir_flujos`).
+
+class Escenario(str, Enum):
+    BASE = "base"
+    OPTIMISTA = "optimista"
+    ESTRES = "estres"
+
+
+@dataclass
+class DefinicionEscenario:
+    """Perturbación de las variables clave para un escenario. Factor 1.0 = igual
+    que base (sin cambio). Las magnitudes reales (p. ej. precio −15 % en estrés)
+    las fija la spec del financiero — aquí solo vive la estructura."""
+    escenario: Escenario = Escenario.BASE
+    factor_precio: float = 1.0
+    factor_capex: float = 1.0
+    factor_ingreso: float = 1.0  # RevPAR / renta
+
+
+def _escenarios_por_defecto() -> list[DefinicionEscenario]:
+    return [DefinicionEscenario(escenario=e) for e in Escenario]
+
+
+@dataclass
+class SupuestosDCF:
+    """Entradas del modelo DCF. `horizonte_anios`/`tasa_descuento_anual` son
+    universales a cualquier DCF; los campos de *timing* (periodo de obra, exit cap
+    rate, absorción de ventas, etc.) los añade la spec del financiero."""
+    horizonte_anios: int = 0          # 0 = sin definir (pendiente de spec)
+    tasa_descuento_anual: float = 0.0  # 0 = sin descuento (VAN == suma simple)
+    tir_objetivo: float = 0.0          # para el precio máximo de compra (Fase 4)
+    escenarios: list[DefinicionEscenario] = field(default_factory=_escenarios_por_defecto)
+
+
+@dataclass
+class Financiacion:
+    """Estructura de financiación. Default all-equity (sin deuda): LTV 0. Los
+    términos reales (tipo, plazo, comisiones) los fija la spec."""
+    ltv: float = 0.0                 # loan-to-value 0..1
+    tipo_interes_anual: float = 0.0
+    plazo_anios: int = 0
+    comision_apertura_pct: float = 0.0
+
+
+@dataclass
+class FlujoCaja:
+    """Serie de flujos de caja netos por periodo. `neto[0]` = momento 0 (t0).
+    Data holder puro: las métricas (VAN/TIR/payback) se calculan en el caso de uso
+    con `finanzas.py`. `detalle` guarda opcionalmente el desglose por concepto para
+    el one-pager (Fase 5)."""
+    neto: list[float] = field(default_factory=list)
+    detalle: dict[str, list[float]] = field(default_factory=dict)
+
+    @property
+    def capital_aportado(self) -> float:
+        """Suma (en magnitud) de los flujos negativos (desembolsos)."""
+        return -sum(f for f in self.neto if f < 0)
+
+    @property
+    def capital_distribuido(self) -> float:
+        """Suma de los flujos positivos (retornos)."""
+        return sum(f for f in self.neto if f > 0)
+
+
+@dataclass
+class ResultadoEscenario:
+    """Métricas de un escenario, calculadas sobre su `FlujoCaja`."""
+    escenario: Escenario
+    van_eur: float
+    tir: float | None
+    moic: float
+    payback_anios: float | None
+    capital_necesario_eur: float
+    flujo: FlujoCaja
+    avisos: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EstudioViabilidadDCF:
+    """Salida agregada del estudio DCF: los tres escenarios + precio máximo de
+    compra. `disponible` es False mientras `construir_flujos` sea un stub (sin spec):
+    permite a la UI distinguir 'aún no calculable' de 'calculado a cero'."""
+    supuestos: SupuestosDCF
+    financiacion: Financiacion
+    superficie_aplicada_m2: float
+    fuente_superficie: FuenteSuperficie
+    escenarios: list[ResultadoEscenario] = field(default_factory=list)
+    precio_maximo_compra_eur: float | None = None
+    disponible: bool = False
+    avisos: list[str] = field(default_factory=list)
+
+
+# ── Umbrales internos PR + semáforo (Fase 3) ────────────────────────────────
+# Los defaults reproducen la tabla del CLAUDE.md de este contexto (umbrales internos
+# PR), que el financiero confirmó sembrar como configuración editable. NO son cifras
+# inventadas: provienen de esa especificación. Se guardan en BBDD y son editables por
+# el financiero — cambiarlas es decisión suya, no del código.
+TIR_MIN_BTR_RESIDENCIAL_DEFAULT = 0.12
+TIR_MIN_HOTELERO_DEFAULT = 0.15
+TIR_MIN_REHAB_INTENSIVA_DEFAULT = 0.18
+YIELD_NETO_MINIMO_DEFAULT = 0.055
+YIELD_OBJETIVO_DEFAULT = 0.07
+PAYBACK_MAXIMO_ANIOS_DEFAULT = 18.0
+CAPEX_MAXIMO_HAB_EUR_DEFAULT = 350_000.0
+
+
+class TipologiaPR(str, Enum):
+    """Tipología para elegir la TIR mínima aplicable (según la tabla PR)."""
+    BTR_RESIDENCIAL = "btr_residencial"
+    HOTELERO = "hotelero"
+    REHAB_INTENSIVA = "rehab_intensiva"
+
+
+class Estado(str, Enum):
+    """Color del semáforo por métrica."""
+    VERDE = "verde"
+    AMBAR = "ambar"
+    ROJO = "rojo"
+    SIN_DATO = "sin_dato"
+
+
+@dataclass
+class UmbralesPR:
+    """Umbrales internos PR (config editable, persistida). TIR mínima por tipología +
+    yield mín./objetivo, payback máximo y CAPEX máximo por habitación (globales)."""
+    tir_min_btr_residencial: float = TIR_MIN_BTR_RESIDENCIAL_DEFAULT
+    tir_min_hotelero: float = TIR_MIN_HOTELERO_DEFAULT
+    tir_min_rehab_intensiva: float = TIR_MIN_REHAB_INTENSIVA_DEFAULT
+    yield_neto_minimo: float = YIELD_NETO_MINIMO_DEFAULT
+    yield_objetivo: float = YIELD_OBJETIVO_DEFAULT
+    payback_maximo_anios: float = PAYBACK_MAXIMO_ANIOS_DEFAULT
+    capex_maximo_hab_eur: float = CAPEX_MAXIMO_HAB_EUR_DEFAULT
+
+    def tir_minima(self, tipologia: TipologiaPR) -> float:
+        return {
+            TipologiaPR.BTR_RESIDENCIAL: self.tir_min_btr_residencial,
+            TipologiaPR.HOTELERO: self.tir_min_hotelero,
+            TipologiaPR.REHAB_INTENSIVA: self.tir_min_rehab_intensiva,
+        }[tipologia]
