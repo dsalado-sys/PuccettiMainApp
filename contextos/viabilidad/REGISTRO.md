@@ -14,7 +14,7 @@
 **Caso de uso** (`casos_uso.py`, `CalcularViabilidad`, puro, sin I/O):
 - Fórmula: `ingresos = sup × precio` (venta) o `sup × precio × 12 × ocupación` (renta); `costes = sup × coste_constr × (1+%indirectos) + coste_suelo`; `margen = ingresos − costes`.
 - Resolución de superficie con prioridad: **1)** override manual si > 0 (y aviso + fallback si es negativo) → **2)** rehabilitación: superficie construida existente vía Catastro (`agregados.suma_superficie_construida_m2`), con fallback a parcela×edificabilidad si Catastro no la reporta → **3)** obra nueva (o rehab sin dato): parcela × edificabilidad.
-- **Saneo trazable** (`_sanear`): cualquier valor negativo o por encima de un máximo se corrige a 0/máximo y genera un aviso explícito — decisión deliberada para no ocultar un dato inválido dentro del margen calculado (ver `feedback` en el CLAUDE.md de este contexto).
+- **Saneo trazable** (`sanear_trazable`, helper de módulo desde Fase 0; antes `_sanear` interno): cualquier valor negativo o por encima de un máximo se corrige a 0/máximo y genera un aviso explícito — decisión deliberada para no ocultar un dato inválido dentro del margen calculado (ver `feedback` en el CLAUDE.md de este contexto).
 - Serialización: `parametros_a_dict` / `parametros_desde_dict` (tolerante: campos que faltan o son inválidos caen a default sin excepción) / `parametros_desde_proyecto` / `estudio_a_dict`.
 - Persistencia: `asociar_a_proyecto` escribe **solo los parámetros** en `proyecto.datos_por_modulo[ModuloPuccetti.VIABILIDAD]` — el estudio se recalcula siempre, no caduca si cambia la parcela. Sin repositorio propio.
 
@@ -32,9 +32,9 @@
 
 El CLAUDE.md de `viabilidad/` describe un motor mucho más ambicioso que el cálculo de margen actual. Ninguno de estos puntos está construido:
 
-- Flujo de caja descontado (DCF) multi-periodo — hoy es un cálculo estático de un solo periodo.
+- Flujo de caja descontado (DCF) multi-periodo — hoy es un cálculo estático de un solo periodo. (Base Fase 0: `finanzas.py` ya provee VAN/TIR/MOIC/payback como primitivas; falta el constructor de flujos, pendiente de la spec del financiero.)
 - Tres escenarios (base / optimista / estrés).
-- TIR por escenario, MOIC, período de recuperación (payback).
+- TIR por escenario, MOIC, período de recuperación (payback) — primitivas listas en `finanzas.py`, sin el motor que las alimente.
 - Precio máximo de compra para mantener una TIR objetivo (cálculo inverso).
 - Estructura de financiación sugerida.
 - Conexión con la librería de benchmarks propia **PR**, ni con STR data / Idealista Analytics para RevPAR/ADR.
@@ -47,3 +47,4 @@ El CLAUDE.md de `viabilidad/` describe un motor mucho más ambicioso que el cál
 ## Bitácora de cambios
 
 - **2026-07-06** — Fusionado `CLAUDE.md` + `CLAUDE2.md` del contexto en un único `CLAUDE.md`. Creado este registro tras leer dominio/casos de uso/rutas/tests. Sin cambios de código.
+- **2026-07-06** — **Fase 0 del plan de evolución (base compartida, sin cambio de comportamiento del MVP)**: extraídos `sanear_trazable(...)` y `resolver_superficie(...)` de dentro de `CalcularViabilidad` a helpers de módulo en `casos_uso.py` (reutilizables por el futuro motor DCF); `ejecutar` los llama, salida idéntica. Nuevo `finanzas.py` con primitivas puras sin dependencias: `van`, `tir` (bisección), `moic`, `payback`. Nuevo `test_finanzas.py` (15 casos de respuesta conocida). Suite: 205 verde (12 viabilidad intactos). Fases 1-2 (constructor de flujos + escenarios) **bloqueadas** hasta recibir la especificación DCF del financiero (timing, tasa de descuento, definición de escenarios, financiación).

@@ -41,7 +41,7 @@ Datos de la parcela (superficie, edificabilidad, superficie construida existente
 ## REGLAS Y RESTRICCIONES
 - **Siempre**: dar opciones (cuantas más pienses, mejor) y cuestionar tus propios métodos; preguntar antes de programar si falta contexto; ser objetivo; trazar cada cambio a su §x.y.
 - **Nunca**: decir que todo está perfecto o cuál es "la mejor opción" para ti; tomar decisiones de alcance por tu cuenta; ser optimista sin más; inventar datos, cifras ni fechas.
-- **Datos sensibles**: números y porcentajes — máxima precisión en los cálculos. Un dato inválido se sanea con aviso trazable, nunca en silencio (patrón ya establecido en `casos_uso.py::_sanear`; no lo rompas).
+- **Datos sensibles**: números y porcentajes — máxima precisión en los cálculos. Un dato inválido se sanea con aviso trazable, nunca en silencio (patrón ya establecido en `casos_uso.py::sanear_trazable`; no lo rompas).
 - **Decisiones que no tomas solo**: cambios en los umbrales internos PR, en la fuente de benchmarks, o en qué constituye un "escenario" válido — son decisiones del arquitecto/financiero, no tuyas.
 
 ## CRITERIOS DE CALIDAD

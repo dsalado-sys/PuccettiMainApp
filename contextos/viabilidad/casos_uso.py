@@ -19,6 +19,75 @@ from .dominio import (
 )
 
 
+# ── Helpers compartidos (reutilizables por el motor DCF de Fases 1-2) ──────
+def sanear_trazable(
+    valor: float,
+    etiqueta: str,
+    avisos: list[str],
+    maximo: float | None = None,
+) -> float:
+    """Saneo TRAZABLE de un parámetro económico: un valor negativo (o por encima
+    de `maximo`) se corrige y se anota un aviso en `avisos`, en vez de absorberlo
+    en silencio con `max(...)`. Un coste negativo silenciado inflaba el margen sin
+    avisar — peligroso en una herramienta de decisión de inversión. Mantiene el
+    contrato de no-excepción de los casos de uso (los KPI siguen siendo números
+    válidos)."""
+    v = float(valor)
+    if v < 0:
+        avisos.append(f"{etiqueta} no puede ser negativo; se ha usado 0.")
+        v = 0.0
+    if maximo is not None and v > maximo:
+        avisos.append(f"{etiqueta} excede el máximo; se ha limitado.")
+        v = maximo
+    return v
+
+
+def resolver_superficie(
+    p: ParametrosEconomicos,
+    datos_parcela: dict[str, Any] | None,
+    avisos: list[str],
+) -> tuple[float, FuenteSuperficie]:
+    """Superficie construida a aplicar, con su procedencia. Prioridad:
+    manual (>0) → [vacío si no hay parcela] → catastro existente (solo rehab con
+    dato) → parcela × edificabilidad. Anota en `avisos` cada fallback o corrección."""
+    # 1) Override manual: si el usuario fijó una superficie > 0, manda él.
+    if p.superficie_construida_m2 and p.superficie_construida_m2 > 0:
+        return float(p.superficie_construida_m2), FuenteSuperficie.MANUAL
+    if p.superficie_construida_m2 and p.superficie_construida_m2 < 0:
+        # Superficie manual negativa: no se usa como override (se descartaba en
+        # silencio); se avisa y se cae al autocálculo por parcela × edificabilidad.
+        avisos.append("La superficie introducida es negativa; se ha autocalculado.")
+
+    if not datos_parcela:
+        avisos.append(
+            "No hay parcela asociada al proyecto. Asocia una desde "
+            "Buscar parcela o introduce una superficie manualmente."
+        )
+        return 0.0, FuenteSuperficie.VACIO
+
+    sup_parcela = float(datos_parcela.get("superficie_m2") or 0.0)
+
+    # 2) Rehabilitación: superficie construida ya existente según catastro.
+    if p.intervencion == Intervencion.REHABILITACION:
+        agregados = datos_parcela.get("agregados") or {}
+        existente = float(agregados.get("suma_superficie_construida_m2") or 0.0)
+        if existente > 0:
+            return existente, FuenteSuperficie.CATASTRO_EXISTENTE
+        avisos.append(
+            "Catastro no reporta superficie construida existente. "
+            "Usando parcela × edificabilidad como aproximación."
+        )
+
+    # 3) Obra nueva (o rehab. sin dato): parcela × edificabilidad.
+    edif = float(p.edificabilidad_m2t_m2s)
+    if edif < 0:
+        avisos.append("La edificabilidad no puede ser negativa; se ha usado 0.")
+        edif = 0.0
+    if sup_parcela <= 0:
+        avisos.append("La parcela del proyecto no tiene superficie registrada.")
+    return sup_parcela * edif, FuenteSuperficie.PARCELA_X_EDIFICABILIDAD
+
+
 # ── Cálculo ────────────────────────────────────────────────────────────────
 @dataclass
 class CalcularViabilidad:
@@ -31,34 +100,24 @@ class CalcularViabilidad:
     ) -> EstudioViabilidad:
         avisos: list[str] = []
 
-        def _sanear(valor: float, etiqueta: str, maximo: float | None = None) -> float:
-            """Saneo TRAZABLE de un parámetro económico: un valor negativo (o por
-            encima de `maximo`) se corrige y se anota un aviso, en vez de absorberlo
-            en silencio con `max(...)`. Un coste negativo silenciado inflaba el margen
-            sin avisar — peligroso en una herramienta de decisión de inversión.
-            Mantiene el contrato de no-excepción del caso de uso (los KPI siguen
-            siendo números válidos)."""
-            v = float(valor)
-            if v < 0:
-                avisos.append(f"{etiqueta} no puede ser negativo; se ha usado 0.")
-                v = 0.0
-            if maximo is not None and v > maximo:
-                avisos.append(f"{etiqueta} excede el máximo; se ha limitado.")
-                v = maximo
-            return v
+        sup, fuente = resolver_superficie(parametros, datos_parcela, avisos)
 
-        sup, fuente = self._resolver_superficie(parametros, datos_parcela, avisos)
-
-        coste_constr = sup * _sanear(parametros.coste_construccion_eur_m2, "El coste de construcción (€/m²)")
-        coste_indir = coste_constr * _sanear(parametros.pct_costes_indirectos, "El % de costes indirectos")
-        coste_suelo = _sanear(parametros.coste_suelo_eur, "El coste del suelo (€)")
+        coste_constr = sup * sanear_trazable(
+            parametros.coste_construccion_eur_m2, "El coste de construcción (€/m²)", avisos
+        )
+        coste_indir = coste_constr * sanear_trazable(
+            parametros.pct_costes_indirectos, "El % de costes indirectos", avisos
+        )
+        coste_suelo = sanear_trazable(parametros.coste_suelo_eur, "El coste del suelo (€)", avisos)
         coste_total = coste_constr + coste_indir + coste_suelo
 
         if parametros.operacion == Operacion.VENTA:
-            ingresos = sup * _sanear(parametros.precio_eur_m2, "El precio (€/m²)")
+            ingresos = sup * sanear_trazable(parametros.precio_eur_m2, "El precio (€/m²)", avisos)
         else:
-            ocup = _sanear(parametros.ocupacion_anual_pct, "La ocupación anual", maximo=1.0)
-            ingresos = sup * _sanear(parametros.precio_eur_m2, "El precio (€/m²)") * 12.0 * ocup
+            ocup = sanear_trazable(parametros.ocupacion_anual_pct, "La ocupación anual", avisos, maximo=1.0)
+            ingresos = (
+                sup * sanear_trazable(parametros.precio_eur_m2, "El precio (€/m²)", avisos) * 12.0 * ocup
+            )
 
         margen = ingresos - coste_total
         margen_pct = (margen / coste_total * 100.0) if coste_total > 0 else 0.0
@@ -76,49 +135,6 @@ class CalcularViabilidad:
             margen_pct=round(margen_pct, 1),
             avisos=avisos,
         )
-
-    @staticmethod
-    def _resolver_superficie(
-        p: ParametrosEconomicos,
-        datos_parcela: dict[str, Any] | None,
-        avisos: list[str],
-    ) -> tuple[float, FuenteSuperficie]:
-        # 1) Override manual: si el usuario fijó una superficie > 0, manda él.
-        if p.superficie_construida_m2 and p.superficie_construida_m2 > 0:
-            return float(p.superficie_construida_m2), FuenteSuperficie.MANUAL
-        if p.superficie_construida_m2 and p.superficie_construida_m2 < 0:
-            # Superficie manual negativa: no se usa como override (se descartaba en
-            # silencio); se avisa y se cae al autocálculo por parcela × edificabilidad.
-            avisos.append("La superficie introducida es negativa; se ha autocalculado.")
-
-        if not datos_parcela:
-            avisos.append(
-                "No hay parcela asociada al proyecto. Asocia una desde "
-                "Buscar parcela o introduce una superficie manualmente."
-            )
-            return 0.0, FuenteSuperficie.VACIO
-
-        sup_parcela = float(datos_parcela.get("superficie_m2") or 0.0)
-
-        # 2) Rehabilitación: superficie construida ya existente según catastro.
-        if p.intervencion == Intervencion.REHABILITACION:
-            agregados = datos_parcela.get("agregados") or {}
-            existente = float(agregados.get("suma_superficie_construida_m2") or 0.0)
-            if existente > 0:
-                return existente, FuenteSuperficie.CATASTRO_EXISTENTE
-            avisos.append(
-                "Catastro no reporta superficie construida existente. "
-                "Usando parcela × edificabilidad como aproximación."
-            )
-
-        # 3) Obra nueva (o rehab. sin dato): parcela × edificabilidad.
-        edif = float(p.edificabilidad_m2t_m2s)
-        if edif < 0:
-            avisos.append("La edificabilidad no puede ser negativa; se ha usado 0.")
-            edif = 0.0
-        if sup_parcela <= 0:
-            avisos.append("La parcela del proyecto no tiene superficie registrada.")
-        return sup_parcela * edif, FuenteSuperficie.PARCELA_X_EDIFICABILIDAD
 
 
 # ── Serialización ──────────────────────────────────────────────────────────
