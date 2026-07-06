@@ -21,32 +21,11 @@ class TarjetaModulo:
 
 CATALOGO: tuple[TarjetaModulo, ...] = (
     TarjetaModulo(
-        id=ModuloPuccetti.LOCALIZACION.value,
-        titulo="Buscar parcela",
+        id=ModuloPuccetti.PROYECTOS.value,
+        titulo="Proyectos",
         descripcion=" ",
-        ruta="/modulos/localizacion",
-        icono="icono-mapa",
-    ),
-    TarjetaModulo(
-        id=ModuloPuccetti.VIABILIDAD.value,
-        titulo="Estudio de viabilidad",
-        descripcion=" ",
-        ruta="/modulos/viabilidad",
-        icono="icono-balanza",
-    ),
-    TarjetaModulo(
-        id=ModuloPuccetti.RENDER_CALCULOS.value,
-        titulo="Render y cálculos",
-        descripcion=" ",
-        ruta="/modulos/render-calculos",
-        icono="icono-volumen",
-    ),
-    TarjetaModulo(
-        id=ModuloPuccetti.INFORME.value,
-        titulo="Informe del activo",
-        descripcion=" ",
-        ruta="/modulos/informe",
-        icono="icono-documento",
+        ruta="/proyectos",
+        icono="icono-carpeta",
     ),
     TarjetaModulo(
         id=ModuloPuccetti.NORMATIVA_MUNICIPAL.value,
@@ -56,11 +35,32 @@ CATALOGO: tuple[TarjetaModulo, ...] = (
         icono="icono-documento",
     ),
     TarjetaModulo(
-        id=ModuloPuccetti.PROYECTOS.value,
-        titulo="Proyectos",
+        id=ModuloPuccetti.LOCALIZACION.value,
+        titulo="Buscar parcela",
         descripcion=" ",
-        ruta="/proyectos",
-        icono="icono-carpeta",
+        ruta="/modulos/localizacion",
+        icono="icono-mapa",
+    ),
+    TarjetaModulo(
+        id=ModuloPuccetti.RENDER_CALCULOS.value,
+        titulo="Render y cálculos",
+        descripcion=" ",
+        ruta="/modulos/render-calculos",
+        icono="icono-volumen",
+    ),
+    TarjetaModulo(
+        id=ModuloPuccetti.VIABILIDAD.value,
+        titulo="Estudio de viabilidad",
+        descripcion=" ",
+        ruta="/modulos/viabilidad",
+        icono="icono-balanza",
+    ),
+    TarjetaModulo(
+        id=ModuloPuccetti.INFORME.value,
+        titulo="Informe del activo",
+        descripcion=" ",
+        ruta="/modulos/informe",
+        icono="icono-documento",
     ),
 )
 
