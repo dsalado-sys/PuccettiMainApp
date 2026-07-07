@@ -183,6 +183,22 @@ def asociar_a_proyecto(parametros: ParametrosEconomicos, proyecto: Proyecto) -> 
     proyecto.fijar_datos(ModuloPuccetti.VIABILIDAD, datos)
 
 
+def aprobar_viabilidad(proyecto: Proyecto) -> bool:
+    """Marca el estudio de viabilidad como aprobado (`aprobado=True`).
+
+    Aprobar es distinto de guardar: guardar deja el estudio "sin aprobar"
+    (amarillo en el flujo de estados); aprobarlo lo pasa a verde. Preserva todo
+    lo ya guardado (parámetros + `dcf`). Devuelve `False` si no hay estudio que
+    aprobar (rincón vacío) — no crea un estudio fantasma solo con la marca.
+    """
+    datos = _rincon_viabilidad(proyecto)
+    if not datos:
+        return False
+    datos["aprobado"] = True
+    proyecto.fijar_datos(ModuloPuccetti.VIABILIDAD, datos)
+    return True
+
+
 # ── DCF: cómputo de métricas y caso de uso (Fases 1-2) ──────────────────────
 def _metricas_escenario(
     escenario: Escenario,

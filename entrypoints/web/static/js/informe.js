@@ -96,6 +96,25 @@
   function esVerde(estado) { return !!estado && estado.color === "verde"; }
   function noEsRojo(estado) { return !!estado && estado.color !== "rojo"; }
 
+  // Estado del botón «Aprobar» (aprueba la Viabilidad → verde). Habilitado solo
+  // si el tronco está en verde, ninguna pestaña está en rojo y hay un estudio de
+  // viabilidad guardado sin aprobar (amarillo). Si ya está aprobada, se muestra
+  // deshabilitado con etiqueta distinta.
+  function estadoAprobar(flujo) {
+    const viab = flujo.viabilidad || null;
+    const escenarios = Array.isArray(flujo.escenarios) ? flujo.escenarios : [];
+    if (viab && viab.clave === "estudio_aprobado") {
+      return { modo: "aprobado", label: "Viabilidad aprobada" };
+    }
+    const troncoOk = esVerde(flujo.parcela) && esVerde(flujo.normativa);
+    const sinPestanaRoja = escenarios.every(e => !e.errores_avisos || e.errores_avisos.color !== "rojo");
+    const viabPresente = viab && viab.clave === "estudio_sin_aprobar";
+    if (troncoOk && sinPestanaRoja && viabPresente) {
+      return { modo: "habilitado", label: "Aprobar" };
+    }
+    return { modo: "bloqueado", label: "Aprobar" };
+  }
+
   // Un nodo: `estado` = {clave, etiqueta, color}; `dim` = clave de dimensión;
   // `iluminado` = si muestra su color real (o gris/atenuado si bloqueado).
   function nodoHtml(dim, estado, iluminado) {
@@ -160,10 +179,13 @@
     }
 
     const subtitulo = p.referencia_catastral || p.direccion || "Sin parcela aún";
+    const apr = estadoAprobar(flujo);
+    const aprDeshabilitado = apr.modo !== "habilitado";
     const botones = puedeEditar
       ? '<footer class="inf-card-acciones">' +
         '<button type="button" class="boton-secundario inf-btn-revisar">Revisar proyecto</button>' +
-        '<button type="button" class="boton-primario inf-btn-aprobar">Aprobar</button>' +
+        `<button type="button" class="boton-primario inf-btn-aprobar"${aprDeshabilitado ? " disabled" : ""}>` +
+        `${escapeHtml(apr.label)}</button>` +
         '</footer>'
       : "";
 
@@ -184,12 +206,28 @@
       '</div>' +
       botones;
 
-    // Botones placeholder: se cablearán más adelante.
+    // «Revisar proyecto» sigue como placeholder (se cableará más adelante).
     const rev = card.querySelector(".inf-btn-revisar");
-    const apr = card.querySelector(".inf-btn-aprobar");
     if (rev) rev.addEventListener("click", () => mostrarToast("Revisión: función pendiente"));
-    if (apr) apr.addEventListener("click", () => mostrarToast("Aprobación: función pendiente"));
+    // «Aprobar» aprueba la viabilidad del proyecto (→ verde).
+    const btnApr = card.querySelector(".inf-btn-aprobar");
+    if (btnApr && !btnApr.disabled) btnApr.addEventListener("click", () => aprobarProyecto(p.id));
     return card;
+  }
+
+  // ─── Aprobar ───────────────────────────────────────────────────────────
+  async function aprobarProyecto(proyectoId) {
+    const resp = await fetchSeguro(`/modulos/informe/${encodeURIComponent(proyectoId)}/aprobar`, {
+      method: "POST",
+    });
+    if (!resp.ok) {
+      if (resp.status === 409) { mostrarToast("No hay estudio de viabilidad que aprobar", true); return; }
+      if (resp.status === 403) { mostrarToast("No tienes permiso para aprobar", true); return; }
+      mostrarToast("No se pudo aprobar", true);
+      return;
+    }
+    mostrarToast("Viabilidad aprobada");
+    await cargarDatos();   // recarga y repinta con el nuevo flujo
   }
 
   // ─── Bindings ──────────────────────────────────────────────────────────

@@ -83,3 +83,48 @@ def test_datos_escenario_con_avisos(cliente_autenticado, engine_memoria):
     assert len(escenarios) == 1
     assert escenarios[0]["errores_avisos"]["clave"] == "con_avisos"
     assert escenarios[0]["errores_avisos"]["color"] == "amarillo"
+
+
+# ─── Aprobar viabilidad ──────────────────────────────────────────────────────
+
+def test_aprobar_pone_viabilidad_en_verde(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto(
+        session_factory,
+        LOCALIZACION={"referencia_catastral": "1234"},
+        VIABILIDAD={"operacion": "venta", "precio_eur_m2": 3200},
+    )
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    # Antes de aprobar: viabilidad presente pero sin aprobar → amarillo.
+    antes = c.get("/modulos/informe/datos").json()["proyectos"][0]["flujo"]["viabilidad"]
+    assert antes["color"] == "amarillo"
+
+    resp = c.post(f"/modulos/informe/{pid}/aprobar")
+    assert resp.status_code == 200
+    assert resp.json()["flujo"]["viabilidad"]["color"] == "verde"
+
+    # Persistido: una nueva lectura sigue en verde.
+    despues = c.get("/modulos/informe/datos").json()["proyectos"][0]["flujo"]["viabilidad"]
+    assert despues["color"] == "verde"
+
+
+def test_aprobar_sin_estudio_da_409(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto(session_factory, LOCALIZACION={"referencia_catastral": "1234"})
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    assert c.post(f"/modulos/informe/{pid}/aprobar").status_code == 409
+
+
+def test_aprobar_proyecto_inexistente_da_404(cliente_autenticado):
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    assert c.post("/modulos/informe/no-existe/aprobar").status_code == 404
+
+
+def test_aprobar_inversor_da_403(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto(
+        session_factory,
+        VIABILIDAD={"operacion": "venta", "precio_eur_m2": 3200},
+    )
+    c = cliente_autenticado(Rol.INVERSOR)
+    assert c.post(f"/modulos/informe/{pid}/aprobar").status_code == 403

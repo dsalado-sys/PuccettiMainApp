@@ -214,12 +214,3 @@
 .vb-dcf[data-puede-editar="false"] input,
 .vb-dcf[data-puede-editar="false"] select,
 .vb-dcf[data-puede-editar="false"] button { pointer-events: none; opacity: 0.55; }
-
-/* One-pager: al imprimir, deja solo cabecera + resultados del DCF. */
-@media print {
-  body * { visibility: hidden; }
-  .vb-dcf, .vb-dcf * { visibility: visible; }
-  .vb-dcf { position: absolute; inset: 0; margin: 0; border: none; }
-  #form-dcf, .vb-acciones, .vb-umbrales, .vb-avanzado { display: none !important; }
-  .vb-dcf-grid { grid-template-columns: 1fr; }
-}

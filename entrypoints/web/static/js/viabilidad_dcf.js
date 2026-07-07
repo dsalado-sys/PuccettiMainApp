@@ -174,6 +174,18 @@
     } catch (e) { mostrarToast("Error de red al guardar", true); }
   }
 
+  async function aprobar() {
+    if (!puedeEditar) return;
+    try {
+      const resp = await postJson("/modulos/viabilidad/aprobar", payload());
+      if (resp.status === 409) return mostrarToast("Necesitas un proyecto activo para aprobar", true);
+      if (!resp.ok) return mostrarToast("Error al aprobar", true);
+      const data = await resp.json();
+      pintar(data.estudio_dcf, data.semaforo);
+      mostrarToast("Viabilidad aprobada.");
+    } catch (e) { mostrarToast("Error de red al aprobar", true); }
+  }
+
   async function precioMax() {
     if (!puedeEditar) return;
     const resp = await postJson("/modulos/viabilidad/precio-maximo", payload());
@@ -219,14 +231,26 @@
     mostrarToast("Umbrales guardados. Recalcula para aplicar el semáforo.");
   }
 
-  // ── Bindings ────────────────────────────────────────────────────────────────
+  // ── Auto-cálculo ─────────────────────────────────────────────────────────────
+  // Todo se recalcula solo al cambiar cualquier parámetro (margen o DCF): escenarios
+  // + semáforo (/calcular-dcf), precio máximo (/precio-maximo) y sensibilidad
+  // (/sensibilidad). Sin botones «Calcular». Debounce para no saturar al teclear.
+  let recalcId = null;
+  function recalcularTodo() {
+    if (!puedeEditar) return;
+    if (recalcId) clearTimeout(recalcId);
+    recalcId = setTimeout(() => { calcular(); precioMax(); sensibilidad(); }, 300);
+  }
+  [formMargen, formDcf].forEach((f) => {
+    f.addEventListener("input", recalcularTodo);
+    f.addEventListener("change", recalcularTodo);
+  });
+
+  // ── Bindings (solo guardado) ────────────────────────────────────────────────
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
-  on("btn-calcular-dcf", calcular);
   on("btn-guardar-dcf", guardar);
-  on("btn-precio-max", precioMax);
-  on("btn-sensibilidad", sensibilidad);
+  on("btn-aprobar", aprobar);
   on("btn-guardar-umbrales", guardarUmbrales);
-  on("btn-onepager", () => window.print());
 
   // ── Arranque: hidrata desde las islas JSON ──────────────────────────────────
   try {
@@ -237,4 +261,6 @@
   } catch (e) {
     /* islas ausentes: sección sin datos iniciales */
   }
+  // Pobla precio máximo y sensibilidad de entrada (no vienen en las islas).
+  if (puedeEditar) { precioMax(); sensibilidad(); }
 })();

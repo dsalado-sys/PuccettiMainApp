@@ -73,3 +73,31 @@ def test_guardar_dcf_sin_proyecto_da_409(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
     resp = c.post("/modulos/viabilidad/guardar-dcf", json=_PAYLOAD_VENTA)
     assert resp.status_code == 409
+
+
+def test_aprobar_sin_proyecto_da_409(cliente_autenticado):
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    assert c.post("/modulos/viabilidad/aprobar", json=_PAYLOAD_VENTA).status_code == 409
+
+
+def test_aprobar_persiste_y_pone_viabilidad_verde(cliente_autenticado, engine_memoria):
+    from app.nucleo.modelo import Proyecto
+    from app.plataforma.persistencia.proyectos_sqlalchemy import ProyectosSQLAlchemy
+
+    _engine, session_factory = engine_memoria
+    with session_factory() as s:
+        p = Proyecto(nombre="V aprobable")
+        ProyectosSQLAlchemy(s).guardar(p)
+        pid = p.id
+
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set("puccetti_proyecto", pid)
+    resp = c.post("/modulos/viabilidad/aprobar", json=_PAYLOAD_VENTA)
+    assert resp.status_code == 200
+    assert resp.json()["aprobado"] is True
+
+    # El flujo del proyecto refleja la viabilidad aprobada (verde) y persiste.
+    flujo = next(
+        pp for pp in c.get("/modulos/informe/datos").json()["proyectos"] if pp["id"] == pid
+    )["flujo"]
+    assert flujo["viabilidad"]["color"] == "verde"

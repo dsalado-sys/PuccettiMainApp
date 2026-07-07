@@ -22,6 +22,7 @@ from app.contextos.viabilidad import (
     TipologiaPR,
     UmbralesPR,
     analizar_sensibilidad,
+    aprobar_viabilidad,
     asociar_a_proyecto,
     asociar_dcf_a_proyecto,
     benchmarks_a_dict,
@@ -286,6 +287,38 @@ def guardar_dcf(
     return JSONResponse(
         {
             "ok": True,
+            "estudio_dcf": estudio_dcf_a_dict(estudio),
+            "semaforo": _semaforo_base(estudio, umbrales, tipologia),
+        }
+    )
+
+
+@router.post("/aprobar")
+def aprobar(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto = Depends(exige_proyecto),
+    uc_dcf: CalcularViabilidadDCF = Depends(calcular_viabilidad_dcf_uc),
+    umbrales_repo: UmbralesPRPort = Depends(umbrales_pr_adapter),
+    repo: ProyectoRepositorio = Depends(repositorio_proyectos),
+):
+    """Guarda las entradas del estudio y lo marca como **aprobado** (verde en el
+    flujo de estados). A diferencia de «Guardar» (que lo deja «sin aprobar»,
+    amarillo), «Aprobar» persiste y fija `aprobado=True` en un solo paso."""
+    _exige_permiso(rol, PermisoModulo.EDITAR)
+    parametros = parametros_desde_dict(payload)
+    supuestos, financiacion = _supuestos_financiacion(payload)
+    benchmarks = benchmarks_desde_dict((payload.get("dcf") or {}).get("benchmarks"))
+    estudio = uc_dcf.ejecutar(supuestos, financiacion, parametros, _datos_parcela(proyecto))
+    asociar_dcf_a_proyecto(supuestos, financiacion, parametros, proyecto, benchmarks=benchmarks)
+    aprobar_viabilidad(proyecto)  # el rincón ya existe → marca aprobado=True
+    repo.guardar(proyecto)
+    tipologia = _tipologia_pr(parametros, payload)
+    umbrales = umbrales_repo.obtener()
+    return JSONResponse(
+        {
+            "ok": True,
+            "aprobado": True,
             "estudio_dcf": estudio_dcf_a_dict(estudio),
             "semaforo": _semaforo_base(estudio, umbrales, tipologia),
         }
