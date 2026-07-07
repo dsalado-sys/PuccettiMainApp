@@ -90,6 +90,14 @@
   --state-warning-strong-border: #E8730C;
   --state-warning-strong-text: #7A3B00;
 
+  /* ── Semáforo (verde/ámbar/rojo): señales funcionales, no marca. Ámbar =
+     dorado corporativo; rojo = --error; verde = tono contenido. Compartido por
+     el DCF de viabilidad y el flujo de estados del Informe. ───────────────── */
+  --sem-verde: #2f7d54;
+  --sem-ambar: var(--dorado);
+  --sem-rojo: var(--error);
+  --sem-gris: var(--gris-medio);
+
   /* ── Radios ───────────────────────────────────────────────────────────── */
   --radio: 6px;                   /* tarjetas (alias histórico) */
   --radio-card: 6px;
@@ -200,6 +208,10 @@
      que los fondos de fila/aviso de error se perciban en oscuro. */
   --error: #F1705C;
   --error-rgb: 241, 112, 92;
+
+  /* Verde de semáforo: el #2f7d54 se percibe apagado sobre fondo oscuro; se
+     aclara a un tono legible (ámbar/rojo ya adaptan vía --dorado/--error). */
+  --sem-verde: #4FAE7B;
 }
 
 /* ════════════════════════ Base ════════════════════════ */

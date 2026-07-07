@@ -13,6 +13,7 @@ from app.plataforma.persistencia.sqlalchemy_base import init_db
 from .dependencias import COOKIES_SEGURAS, SECRET_KEY, SESION_MAX_AGE_S
 from .rutas import (
     autenticacion,
+    informe,
     localizacion,
     menu,
     modulos,
@@ -106,6 +107,7 @@ def crear_app(engine=None, session_factory=None) -> FastAPI:
     app.include_router(viabilidad.router)
     app.include_router(render_calculos.router)
     app.include_router(normativa_municipal.router)
+    app.include_router(informe.router)
     app.include_router(modulos.router)
 
     # En modo test, las rutas deben usar el sessionmaker en memoria, no el de
