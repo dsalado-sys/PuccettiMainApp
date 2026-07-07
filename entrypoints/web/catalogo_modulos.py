@@ -64,6 +64,22 @@ CATALOGO: tuple[TarjetaModulo, ...] = (
     ),
 )
 
+
+# Módulos usables SIN proyecto activo. Los demás (render, viabilidad, informe)
+# exigen proyecto; el nexo/hub ya se gatea aparte (landing → /proyectos). Única
+# fuente de verdad de esta política: la consumen el rail (`plantillas`) y el gate
+# central del middleware (`aplicacion`).
+MODULOS_SIN_PROYECTO: frozenset[str] = frozenset({
+    ModuloPuccetti.PROYECTOS.value,
+    ModuloPuccetti.NORMATIVA_MUNICIPAL.value,
+    ModuloPuccetti.LOCALIZACION.value,
+})
+
+
+def rutas_requieren_proyecto() -> tuple[str, ...]:
+    """Prefijos de ruta de los módulos que exigen proyecto activo (gate central)."""
+    return tuple(t.ruta for t in CATALOGO if t.id not in MODULOS_SIN_PROYECTO)
+
 '''
     TarjetaModulo(
         id=ModuloPuccetti.MODELOS_PLANOS.value,

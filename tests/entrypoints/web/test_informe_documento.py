@@ -10,6 +10,10 @@ from app.contextos.render_calculos.parametros import ParametrosRender, parametro
 from app.nucleo.modelo import ModuloPuccetti, Proyecto, Rol
 from app.plataforma.persistencia.proyectos_sqlalchemy import ProyectosSQLAlchemy
 
+# El documento vive bajo /modulos/informe, que exige proyecto activo (gate central);
+# basta la presencia de la cookie (el documento actúa sobre el proyecto por id de la URL).
+_COOKIE = ("puccetti_proyecto", "activo")
+
 # Parcela WGS84 cuadrada de ~40 m cerca de Sevilla: suficiente para la envolvente.
 _CONTORNO = [
     [-5.99000, 37.38000],
@@ -55,6 +59,7 @@ def test_documento_sin_escenario_muestra_placeholders(cliente_autenticado, engin
     pid = _sembrar(sf, rc="1234567AB1234C0001DE", direccion="Calle de Prueba 1",
                    LOCALIZACION=_LOC, RENDER_CALCULOS={"normativa_aplicada": _NORMATIVA})
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     resp = c.get(f"/modulos/informe/{pid}/documento")
     assert resp.status_code == 200
     t = resp.text
@@ -122,6 +127,7 @@ def test_documento_de_un_escenario_concreto(cliente_autenticado, engine_memoria)
 
 def test_documento_proyecto_inexistente_da_404(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     assert c.get("/modulos/informe/no-existe/documento").status_code == 404
 
 
@@ -129,4 +135,5 @@ def test_documento_inversor_puede_ver(cliente_autenticado, engine_memoria):
     _engine, sf = engine_memoria
     pid = _sembrar(sf, rc="RC-INV", LOCALIZACION=_LOC)
     c = cliente_autenticado(Rol.INVERSOR)  # INVERSOR tiene VER en informe
+    c.cookies.set(*_COOKIE)
     assert c.get(f"/modulos/informe/{pid}/documento").status_code == 200

@@ -10,7 +10,13 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.plataforma.persistencia.sqlalchemy_base import init_db
 
-from .dependencias import COOKIES_SEGURAS, SECRET_KEY, SESION_MAX_AGE_S
+from .catalogo_modulos import rutas_requieren_proyecto
+from .dependencias import (
+    COOKIE_PROYECTO,
+    COOKIES_SEGURAS,
+    SECRET_KEY,
+    SESION_MAX_AGE_S,
+)
 from .rutas import (
     autenticacion,
     informe,
@@ -25,6 +31,10 @@ from .rutas import (
 
 # Prefijos públicos que no requieren sesión iniciada.
 RUTAS_PUBLICAS = ("/login", "/logout", "/static")
+
+# Prefijos de módulos que exigen proyecto activo (render, viabilidad, informe).
+# Sin proyecto solo se usan Proyectos, Normativa y Buscar parcela.
+RUTAS_REQUIEREN_PROYECTO = rutas_requieren_proyecto()
 
 # Métodos que mutan estado y, por tanto, deben pasar el control CSRF.
 METODOS_MUTANTES = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -88,6 +98,11 @@ def crear_app(engine=None, session_factory=None) -> FastAPI:
         es_publica = any(ruta == p or ruta.startswith(p + "/") for p in RUTAS_PUBLICAS)
         if not es_publica and not request.session.get("usuario_id"):
             return RedirectResponse(url="/login", status_code=303)
+        # Sin proyecto activo, los módulos que lo exigen redirigen a Proyectos.
+        if not request.cookies.get(COOKIE_PROYECTO) and any(
+            ruta == p or ruta.startswith(p + "/") for p in RUTAS_REQUIEREN_PROYECTO
+        ):
+            return RedirectResponse(url="/proyectos", status_code=303)
         return await call_next(request)
 
     # SessionMiddleware se añade el último para quedar como capa más externa y

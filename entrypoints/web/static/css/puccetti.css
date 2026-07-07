@@ -400,6 +400,9 @@ summary:focus-visible,
 
 .rail-item:hover, .rail-accion:hover { background: var(--tint-primary-12); color: var(--on-inverse); }
 .rail-item--activo { color: var(--dorado); background: var(--tint-primary-16); box-shadow: inset 3px 0 0 var(--dorado); }
+/* Módulo inhabilitado (sin proyecto activo): visible pero atenuado y no clicable.
+   proyectos.js alterna esta clase en vivo al activar/desactivar un proyecto. */
+.rail-item--bloqueado { opacity: 0.4; pointer-events: none; cursor: not-allowed; }
 
 .rail-usuario { font-size: var(--text-sm); color: var(--on-inverse-accent); padding: 2px 24px 6px; white-space: nowrap; }
 

@@ -293,6 +293,23 @@
     sel.value = carpetaActual == null ? "" : String(carpetaActual);
   }
 
+  // Habilita/inhabilita EN VIVO los módulos del rail que exigen proyecto activo,
+  // sin recargar. El rail se pinta en servidor, pero refleja el cambio al vuelo
+  // al activar/desactivar/eliminar (así no hay que cambiar de módulo).
+  function actualizarRail(hayProyecto) {
+    document.querySelectorAll(".rail-item[data-requiere-proyecto]").forEach((a) => {
+      const bloqueado = !hayProyecto;
+      a.classList.toggle("rail-item--bloqueado", bloqueado);
+      if (bloqueado) {
+        a.setAttribute("aria-disabled", "true");
+        a.setAttribute("tabindex", "-1");
+      } else {
+        a.removeAttribute("aria-disabled");
+        a.removeAttribute("tabindex");
+      }
+    });
+  }
+
   // ─── Acciones: activar / desactivar ──────────────────────────────────
   async function activar() {
     if (!STATE.seleccionadoId) return;
@@ -302,6 +319,7 @@
     const act = STATE.proyectos.find(p => p.id === STATE.activoId);
     if (act) STATE.abiertas.add(act.carpeta_id == null ? SIN_CARPETA : act.carpeta_id);
     mostrarToast("Proyecto abierto");
+    actualizarRail(true);
     repintar();
     pintarDetalle(STATE.seleccionadoId);
   }
@@ -311,6 +329,7 @@
     if (!resp.ok) { mostrarToast("No se pudo deseleccionar", true); return; }
     STATE.activoId = null;
     mostrarToast("Proyecto deseleccionado");
+    actualizarRail(false);
     repintar();
     if (STATE.seleccionadoId) pintarDetalle(STATE.seleccionadoId);
   }
@@ -336,7 +355,7 @@
       const resp = await fetchSeguro(`${API}/${proyectoId}`, { method: "DELETE" });
       if (!resp.ok) { mostrarToast("No se pudo eliminar", true); return; }
       STATE.proyectos = STATE.proyectos.filter(p => p.id !== proyectoId);
-      if (STATE.activoId === proyectoId) STATE.activoId = null;
+      if (STATE.activoId === proyectoId) { STATE.activoId = null; actualizarRail(false); }
       mostrarToast("Proyecto eliminado");
       if (STATE.seleccionadoId === proyectoId) limpiarDetalle();
       repintar();

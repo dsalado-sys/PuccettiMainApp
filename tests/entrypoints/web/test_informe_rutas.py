@@ -10,6 +10,10 @@ from app.contextos.render_calculos.parametros import ParametrosRender, parametro
 from app.nucleo.modelo import ModuloPuccetti, Proyecto, Rol
 from app.plataforma.persistencia.proyectos_sqlalchemy import ProyectosSQLAlchemy
 
+# El módulo Informe exige proyecto activo (gate central); basta la presencia de la
+# cookie para pasarlo (las rutas actúan sobre el proyecto por id de la URL).
+_COOKIE = ("puccetti_proyecto", "activo")
+
 
 def _params_vivienda() -> dict:
     d = parametros_a_dict(ParametrosRender())
@@ -30,6 +34,7 @@ def _sembrar_proyecto(session_factory, **bloques) -> str:
 
 def test_pantalla_informe_ok(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     resp = c.get("/modulos/informe")
     assert resp.status_code == 200
     assert 'id="inf-lista"' in resp.text
@@ -47,6 +52,7 @@ def test_datos_incluye_flujo(cliente_autenticado, engine_memoria):
         RENDER_CALCULOS={"normativa_aplicada": {"nombre": "PGOU", "urbanisticos": {"ocupacion_maxima_pct": 80}}},
     )
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     resp = c.get("/modulos/informe/datos")
     assert resp.status_code == 200
     proyectos = resp.json()["proyectos"]
@@ -98,6 +104,7 @@ def test_aprobar_pone_informe_del_escenario_en_verde(cliente_autenticado, engine
     _engine, session_factory = engine_memoria
     pid = _sembrar_proyecto(session_factory, RENDER_CALCULOS=_rc_con_escenario("e1"))
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     # Antes: el informe del escenario está en rojo (sin aprobar).
     antes = c.get("/modulos/informe/datos").json()["proyectos"][0]["flujo"]["escenarios"][0]["informe"]
     assert antes["color"] == "rojo"
@@ -115,11 +122,13 @@ def test_aprobar_escenario_inexistente_da_409(cliente_autenticado, engine_memori
     _engine, session_factory = engine_memoria
     pid = _sembrar_proyecto(session_factory, RENDER_CALCULOS=_rc_con_escenario("e1"))
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     assert c.post(f"/modulos/informe/{pid}/aprobar?modo=obra-nueva&escenario=NOPE").status_code == 409
 
 
 def test_aprobar_proyecto_inexistente_da_404(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     assert c.post("/modulos/informe/no-existe/aprobar?modo=obra-nueva&escenario=e1").status_code == 404
 
 
@@ -127,4 +136,5 @@ def test_aprobar_inversor_da_403(cliente_autenticado, engine_memoria):
     _engine, session_factory = engine_memoria
     pid = _sembrar_proyecto(session_factory, RENDER_CALCULOS=_rc_con_escenario("e1"))
     c = cliente_autenticado(Rol.INVERSOR)
+    c.cookies.set(*_COOKIE)
     assert c.post(f"/modulos/informe/{pid}/aprobar?modo=obra-nueva&escenario=e1").status_code == 403

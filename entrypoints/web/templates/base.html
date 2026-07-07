@@ -93,10 +93,12 @@
     <nav class="rail-nav">
       {% for item in shell.nav_items %}
         {% if item.acceso.puede_ver %}
-          <a class="rail-item {% if item.activo %}rail-item--activo{% endif %}"
+          <a class="rail-item {% if item.activo %}rail-item--activo{% endif %}{% if not item.disponible %} rail-item--bloqueado{% endif %}"
              href="{{ item.modulo.ruta }}"
              title="{{ item.modulo.titulo }}"
-             {% if item.activo %}aria-current="page"{% endif %}>
+             {% if item.requiere_proyecto %}data-requiere-proyecto="1"{% endif %}
+             {% if item.activo %}aria-current="page"{% endif %}
+             {% if not item.disponible %}aria-disabled="true" tabindex="-1"{% endif %}>
             <svg class="rail-icono" aria-hidden="true"><use href="#{{ item.modulo.icono }}"></use></svg>
             <span class="rail-label">{{ item.modulo.titulo }}</span>
           </a>
@@ -124,9 +126,5 @@
   <main class="contenido">
     {% block contenido %}{% endblock %}
   </main>
-
-  <footer class="pie">
-    <span>Puccetti · {{ rol_activo.value | capitalize }}</span>
-  </footer>
 </body>
 </html>

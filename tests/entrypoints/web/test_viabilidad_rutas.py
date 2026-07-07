@@ -1,7 +1,16 @@
-"""Tests de las rutas del módulo Viabilidad (§2.9): DCF, precio máximo, sensibilidad, umbrales."""
+"""Tests de las rutas del módulo Viabilidad (§2.9): DCF, precio máximo, sensibilidad, umbrales.
+
+Viabilidad exige proyecto activo (gate central): sin la cookie `puccetti_proyecto` el
+módulo redirige a /proyectos. Estos tests fijan una cookie para representar el estado
+"con proyecto"; su valor solo importa donde la ruta resuelve el proyecto (guardar/aprobar).
+"""
 from __future__ import annotations
 
 from app.nucleo.modelo import Rol
+
+# Cookie de proyecto activo (basta su presencia para pasar el gate; un id inexistente
+# hace que las rutas que EXIGEN proyecto real respondan 409, como antes).
+_COOKIE = ("puccetti_proyecto", "activo")
 
 _PAYLOAD_VENTA = {
     "operacion": "venta",
@@ -20,12 +29,14 @@ _PAYLOAD_VENTA = {
 
 def test_pantalla_viabilidad_ok(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     resp = c.get("/modulos/viabilidad")
     assert resp.status_code == 200
 
 
 def test_calcular_dcf_devuelve_estudio_y_semaforo(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     resp = c.post("/modulos/viabilidad/calcular-dcf", json=_PAYLOAD_VENTA)
     assert resp.status_code == 200
     data = resp.json()
@@ -37,6 +48,7 @@ def test_calcular_dcf_devuelve_estudio_y_semaforo(cliente_autenticado):
 
 def test_precio_maximo_devuelve_valor(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     payload = {**_PAYLOAD_VENTA, "coste_suelo_eur": 0}
     resp = c.post("/modulos/viabilidad/precio-maximo", json=payload)
     assert resp.status_code == 200
@@ -45,6 +57,7 @@ def test_precio_maximo_devuelve_valor(cliente_autenticado):
 
 def test_sensibilidad_devuelve_drivers(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     resp = c.post("/modulos/viabilidad/sensibilidad", json=_PAYLOAD_VENTA)
     assert resp.status_code == 200
     data = resp.json()
@@ -54,6 +67,7 @@ def test_sensibilidad_devuelve_drivers(cliente_autenticado):
 
 def test_umbrales_get_y_edicion(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     # Valores sembrados de la tabla PR.
     assert c.get("/modulos/viabilidad/umbrales").json()["tir_min_hotelero"] == 0.15
     # Editar y releer.
@@ -63,6 +77,7 @@ def test_umbrales_get_y_edicion(cliente_autenticado):
 
 def test_inversor_no_puede_calcular_dcf_ni_editar_umbrales(cliente_autenticado):
     c = cliente_autenticado(Rol.INVERSOR)
+    c.cookies.set(*_COOKIE)
     assert c.post("/modulos/viabilidad/calcular-dcf", json=_PAYLOAD_VENTA).status_code == 403
     assert c.post("/modulos/viabilidad/umbrales", json={"tir_min_hotelero": 0.9}).status_code == 403
     # Pero sí puede consultarlos (VER).
@@ -70,13 +85,17 @@ def test_inversor_no_puede_calcular_dcf_ni_editar_umbrales(cliente_autenticado):
 
 
 def test_guardar_dcf_sin_proyecto_da_409(cliente_autenticado):
+    # Cookie presente pero proyecto inexistente: pasa el gate y la ruta exige un
+    # proyecto real → 409 (el gate central solo cubre la ausencia total de cookie).
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     resp = c.post("/modulos/viabilidad/guardar-dcf", json=_PAYLOAD_VENTA)
     assert resp.status_code == 409
 
 
 def test_aprobar_sin_proyecto_da_409(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set(*_COOKIE)
     assert c.post("/modulos/viabilidad/aprobar", json=_PAYLOAD_VENTA).status_code == 409
 
 
