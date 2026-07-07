@@ -7,8 +7,9 @@ Iteración 4 (2026-06-04):
   direccionales: `retranqueo_fachada_m` (resta solo desde lados tipo "fachada")
   y `retranqueo_linderos_m` (resta solo desde lados tipo "medianera").
 - `usos_permitidos` pasa de `list[UsoEdificio]` a `list[str]` con valores
-  fijos del PGOU: "residencial" | "hotelero" | "terciario" | "mixto".
-  Hoy es decorativo (sin mapeo al uso del programa).
+  fijos del PGOU: "residencial" | "hotelero" | "apartamento". Cada valor mapea
+  a un `UsoEdificio` (`PGOU_A_USO_DESTINO`) y condiciona qué usos destino quedan
+  habilitados en el módulo Render.
 - Porcentajes explícitos: `pct_muros` y `pct_circulacion` (0-100). El núcleo
   (escalera/ascensor) se define como área fija en m² en el programa (`nucleo_m2`).
 """
@@ -36,7 +37,14 @@ from .geometria.config import (
 )
 
 
-USOS_PGOU_VALIDOS: tuple[str, ...] = ("residencial", "hotelero", "terciario", "mixto")
+USOS_PGOU_VALIDOS: tuple[str, ...] = ("residencial", "hotelero", "apartamento")
+
+# Mapeo de cada uso permitido por el PGOU al `UsoEdificio` (uso destino) que habilita.
+PGOU_A_USO_DESTINO: dict[str, str] = {
+    "residencial": "vivienda",
+    "hotelero": "hotelero",
+    "apartamento": "apartamentos_turisticos",
+}
 
 
 @dataclass
@@ -157,7 +165,7 @@ class ParametrosUrbanisticos:
 
     # ── informativos / no comparados ──
     usos_permitidos: list[str] = field(default_factory=lambda: [
-        "residencial", "hotelero", "mixto",
+        "residencial", "hotelero", "apartamento",
     ])
     tiene_atico: bool = False
     atico_computa_edificabilidad: bool = False

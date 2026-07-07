@@ -40,7 +40,7 @@ SEED_SEVILLA = {
     "n_plantas_max": 3,
     "retranqueo_fachada_m": 0.0,
     "retranqueo_linderos_m": 0.0,
-    "usos_permitidos": ["residencial", "hotelero", "mixto"],
+    "usos_permitidos": ["residencial", "hotelero", "apartamento"],
     "luz_recta_patio_min_m": 3.0,
     "area_patio_min_m2": 12.0,
     "tiene_atico_default": 0,

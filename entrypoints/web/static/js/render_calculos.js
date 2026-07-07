@@ -1300,6 +1300,7 @@
     // Guardar la normativa aplicada para que el backend la use como referencia
     // al calcular avisos (incumplimientos / valores inferiores a la normativa).
     ESTADO_NORM.aplicada = { id: data.id, nombre: data.nombre, urbanisticos: urb };
+    gatearUsoDestinoPorPgou();   // ajusta el uso destino a los usos de la normativa aplicada
     modal.close();
     mostrarToast(`Normativa "${data.nombre}" aplicada`);
     recalcularAuto();
@@ -1800,6 +1801,30 @@
     );
   }
 
+  // El "uso destino" solo ofrece lo que el PGOU permite (checkboxes usos_permitidos).
+  // Cada uso PGOU mapea a un UsoEdificio; el resto se deshabilita. Si el uso activo
+  // deja de estar permitido, salta al primero permitido. Sin ninguno marcado → todo
+  // deshabilitado (bloquea el uso destino). Coincide con el `habilitado` del servidor.
+  const PGOU_A_USO = {
+    residencial: "vivienda",
+    hotelero: "hotelero",
+    apartamento: "apartamentos_turisticos",
+  };
+  function gatearUsoDestinoPorPgou() {
+    const sel = form.querySelector('select[name="uso"]');
+    if (!sel) return;
+    const marcados = [...form.querySelectorAll('[name="usos_permitidos"]:checked')].map(c => c.value);
+    const permitidos = new Set(marcados.map(v => PGOU_A_USO[v]).filter(Boolean));
+    const primero = [...sel.options].map(o => o.value).find(v => permitidos.has(v)) || sel.value;
+    ["vivienda", "apartamentos_turisticos", "hotelero"].forEach(v => {
+      const opt = [...sel.options].find(o => o.value === v);
+      if (!opt) return;                        // pudo haberlo filtrado el modo
+      opt.disabled = !permitidos.has(v);       // visible pero deshabilitado (igual que el server)
+      if (opt.disabled && sel.value === v) sel.value = primero;   // salto al primero permitido
+    });
+    sel.disabled = permitidos.size === 0;      // PGOU vacío → bloquea el uso destino
+  }
+
   function actualizarOpcionesCondicionales() {
     _filtrarCategoriaApartamentos();
     _filtrarTipologiaHotelero();
@@ -2148,6 +2173,7 @@
   // ─── Bindings ─────────────────────────────────────────────────────────
   function calcularConDebounce() {
     ESTADO.interaccionUsuario = true;   // cualquier edición habilita el modal de exceso
+    gatearUsoDestinoPorPgou();          // puede saltar de uso; antes de aplicar visibilidad
     aplicarVisibilidad();
     actualizarOpcionesCondicionales();
     actualizarNombreActivo();           // nombre reactivo de la pestaña activa
@@ -2172,6 +2198,7 @@
     });
   }
 
+  gatearUsoDestinoPorPgou();
   aplicarVisibilidad();
   actualizarOpcionesCondicionales();
 

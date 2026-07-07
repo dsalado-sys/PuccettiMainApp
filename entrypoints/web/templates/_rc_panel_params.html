@@ -129,8 +129,7 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
 
       <fieldset class="rc-usos" data-visible-en-planta="pb">
         <legend class="eyebrow">Usos permitidos por el PGOU</legend>
-        {% for u, label in [("residencial", "Residencial"), ("hotelero", "Hotelero"), ("terciario", "Terciario"),
-        ("mixto", "Mixto")] %}
+        {% for u, label in [("residencial", "Residencial"), ("hotelero", "Hotelero"), ("apartamento", "Apartamento")] %}
         <label class="rc-checkbox">
           <input type="checkbox" name="usos_permitidos" value="{{ u }}" {% if u in urb.usos_permitidos %}checked{% endif
             %} data-bloque="urbanisticos">
@@ -231,7 +230,7 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
           {% for u in usos_edificio %}
           <option value="{{ u.value }}" {% if prog.uso==u.value %}selected{% endif %} {% if not u.habilitado
             %}disabled{% endif %}>
-            {{ u.label }}{% if not u.habilitado %} (próximamente){% endif %}
+            {{ u.label }}{% if not u.habilitado %} ({{ u.motivo }}){% endif %}
           </option>
           {% endfor %}
         </select>

@@ -46,6 +46,7 @@ from app.contextos.render_calculos.dominio import UsoEdificio
 from app.contextos.render_calculos.geometria.envolvente import fusionar_anillos
 from app.contextos.render_calculos.geometria.serializacion import ring
 from app.contextos.render_calculos.parametros import (
+    PGOU_A_USO_DESTINO,
     ParametrosUrbanisticos,
     parametros_a_dict,
     parametros_desde_dict,
@@ -335,11 +336,17 @@ def pantalla(
             adaptar_params_a_edificio_existente(params, proyecto)
             aviso_atico = aviso_atico_catastral(proyecto)
 
+    # El uso destino se habilita según lo que permita el PGOU vigente de los params.
+    permitidos_pgou = set(params.urbanisticos.usos_permitidos or [])
+    uso_destino_ok = {PGOU_A_USO_DESTINO[u] for u in permitidos_pgou if u in PGOU_A_USO_DESTINO}
     usos_catalogo = [
-        {"value": "vivienda", "label": "Vivienda", "habilitado": True},
-        {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": True},
-        {"value": "hotelero", "label": "Hotelero", "habilitado": True},
+        {"value": "vivienda", "label": "Vivienda"},
+        {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos"},
+        {"value": "hotelero", "label": "Hotelero"},
     ]
+    for u in usos_catalogo:
+        u["habilitado"] = u["value"] in uso_destino_ok
+        u["motivo"] = "" if u["habilitado"] else "no permitido por el PGOU"
     # Hook de configuración por modo: si el modo restringe usos, se filtran.
     if modo_cfg.usos_permitidos:
         usos_catalogo = [u for u in usos_catalogo if u["value"] in modo_cfg.usos_permitidos]
