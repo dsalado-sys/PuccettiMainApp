@@ -48,6 +48,23 @@ def _contexto_shell(request) -> dict:
 plantillas.env.globals["contexto_shell"] = _contexto_shell
 
 
+def _formato_es(valor, decimales: int = 2) -> str:
+    """Formatea un número al estilo es-ES (punto de millar, coma decimal) para el
+    informe. `None`/no-numérico → «—»/texto tal cual. Filtro Jinja `es_num`."""
+    if valor is None:
+        return "—"
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError):
+        return str(valor)
+    txt = f"{numero:,.{decimales}f}"           # formato en-US: 1,234.56
+    # Intercambia separadores → es-ES: millar '.', decimal ','.
+    return txt.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
+plantillas.env.filters["es_num"] = _formato_es
+
+
 def _calcular_version_estaticos() -> str:
     """Cache-busting automático: token derivado del mtime más reciente de TODOS
     los estáticos (CSS/JS/...). Cambia solo cuando editas un estático, sin

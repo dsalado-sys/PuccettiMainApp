@@ -39,8 +39,10 @@ app/
 ├── data/puccetti.sqlite      # BBDD (SE TRACKEA en git, ver §Persistencia)
 └── run.py  requirements.txt
 ```
-Pendientes de integrar como contexto: **solo** `modelos_planos` (desactivado en el
-catálogo) e `informe` (stub de ruta `/modulos/informe`). El resto ya existe.
+Pendiente de integrar como contexto: **solo** `modelos_planos` (desactivado en el
+catálogo). El contexto **`informe`** ya existe: ensamblador puro del documento de
+prefactibilidad (§2.8) + planimetría a SVG server-side; documento imprimible a PDF
+(print-CSS) en `GET /modulos/informe/{id}/documento`. DXF de planimetría diferido.
 
 ## Núcleo: aggregate Proyecto y comunicación inter-módulos
 `nucleo/modelo/proyecto.py` — `Proyecto` es una **dataclass de dominio puro** (sin

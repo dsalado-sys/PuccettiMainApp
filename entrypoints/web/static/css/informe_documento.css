@@ -1,0 +1,231 @@
+/* Informe de prefactibilidad (§2.8) — documento imprimible a PDF (print-CSS).
+   El documento es "papel": fondo blanco y tinta casi negra en cualquier tema.
+   Paleta corporativa: Negro #0A0A0A · Dorado #B8960C/#C9A84C · Blanco #FFFFFF. */
+
+.doc {
+  --doc-negro: #0A0A0A;
+  --doc-oro: #B8960C;
+  --doc-oro-claro: #C9A84C;
+  --doc-linea: rgba(10, 10, 10, 0.14);
+  --doc-suave: rgba(10, 10, 10, 0.55);
+  --doc-fondo-suave: rgba(10, 10, 10, 0.03);
+
+  max-width: 210mm;
+  margin: 0 auto 3rem;
+  padding: 22mm 18mm;
+  background: #ffffff;
+  color: var(--doc-negro);
+  box-shadow: 0 2px 18px rgba(10, 10, 10, 0.16);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* ── Barra de acciones (solo pantalla) ─────────────────────────────────── */
+.doc-toolbar {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  align-items: center;
+  max-width: 210mm;
+  margin: 0 auto 1rem;
+  padding-top: 0.5rem;
+}
+
+/* ── Cabecera del documento ────────────────────────────────────────────── */
+.doc-cabecera {
+  border-bottom: 2px solid var(--doc-oro);
+  padding-bottom: 0.9rem;
+  margin-bottom: 1.6rem;
+}
+.doc-titulo {
+  font-size: 1.7rem;
+  margin: 0.35rem 0 0.5rem;
+  color: var(--doc-negro);
+}
+.doc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  color: var(--doc-suave);
+  font-size: 0.85rem;
+}
+.doc-meta--sec { margin-top: 0.25rem; font-size: 0.78rem; }
+.doc-meta span::before { content: "· "; color: var(--doc-oro); }
+.doc-meta span:first-child::before { content: ""; }
+
+/* ── Secciones ─────────────────────────────────────────────────────────── */
+.doc-seccion {
+  margin: 1.6rem 0;
+  padding-top: 0.4rem;
+}
+.doc-seccion-cab {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--doc-linea);
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+.doc-seccion-cab h2 {
+  font-size: 1.05rem;
+  margin: 0;
+  color: var(--doc-negro);
+}
+.doc-estado {
+  flex: none;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--doc-linea);
+  color: var(--doc-suave);
+  white-space: nowrap;
+}
+.doc-estado--disponible { color: var(--doc-oro); border-color: var(--doc-oro); }
+.doc-estado--parcial { color: var(--doc-negro); border-color: var(--doc-oro-claro); }
+.doc-estado--pendiente,
+.doc-estado--reservada { color: var(--doc-suave); border-style: dashed; }
+
+/* ── Placeholders explícitos (anti-alucinación) ────────────────────────── */
+.doc-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 4.5rem;
+  padding: 1rem;
+  margin: 0;
+  border: 1px dashed var(--doc-linea);
+  border-radius: 8px;
+  background: var(--doc-fondo-suave);
+  color: var(--doc-suave);
+  font-size: 0.85rem;
+}
+.doc-aerea { aspect-ratio: 16 / 9; min-height: 0; }
+.doc-reservado { min-height: 3.5rem; margin-top: 0.5rem; }
+.doc-estudio-estado { margin: 0 0 0.4rem; }
+.doc-nota,
+.doc-fuente { font-size: 0.8rem; color: var(--doc-suave); }
+.doc-nota { margin: 0.7rem 0 0; font-style: italic; }
+.doc-sub { font-size: 0.95rem; margin: 1.1rem 0 0.5rem; color: var(--doc-negro); }
+
+/* ── Ficha del activo ──────────────────────────────────────────────────── */
+.doc-ficha {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 1.2rem;
+  align-items: start;
+}
+.doc-datos { margin: 0; }
+.doc-datos > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--doc-linea);
+}
+.doc-datos dt { color: var(--doc-suave); }
+.doc-datos dd { margin: 0; font-weight: 600; text-align: right; }
+
+/* ── Tablas ────────────────────────────────────────────────────────────── */
+.doc-tabla-scroll { overflow-x: auto; }
+.doc-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.doc-tabla th,
+.doc-tabla td {
+  padding: 0.32rem 0.5rem;
+  border-bottom: 1px solid var(--doc-linea);
+  text-align: left;
+}
+.doc-tabla thead th {
+  border-bottom: 1.5px solid var(--doc-oro);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--doc-suave);
+}
+.doc-tabla .num { text-align: right; font-variant-numeric: tabular-nums; }
+.doc-tabla tfoot th,
+.doc-tabla tfoot td {
+  border-top: 1.5px solid var(--doc-oro);
+  border-bottom: none;
+  font-weight: 700;
+}
+.doc-tabla--params th[scope="row"] { color: var(--doc-suave); font-weight: 500; }
+.doc-tabla--params td { font-weight: 600; text-align: right; }
+
+/* ── Planimetría ───────────────────────────────────────────────────────── */
+.doc-planos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+}
+.doc-plano {
+  margin: 0;
+  border: 1px solid var(--doc-linea);
+  border-radius: 8px;
+  padding: 0.6rem;
+  background: #fff;
+}
+.doc-plano-svg { width: 100%; }
+.doc-plano-svg .plano-svg { width: 100%; height: auto; display: block; }
+.doc-plano figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+}
+.doc-plano figcaption span { color: var(--doc-suave); }
+
+/* ── Alertas ───────────────────────────────────────────────────────────── */
+.doc-alertas { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.doc-alerta {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0.6rem;
+  border-left: 3px solid var(--doc-linea);
+  background: var(--doc-fondo-suave);
+  font-size: 0.82rem;
+}
+.doc-alerta--error,
+.doc-alerta--incumplimiento { border-left-color: var(--doc-oro); }
+.doc-alerta-nivel {
+  flex: none;
+  min-width: 6.5rem;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--doc-suave);
+}
+.doc-ok { color: var(--doc-suave); font-size: 0.85rem; }
+
+@media (max-width: 640px) {
+  .doc { padding: 1.2rem; }
+  .doc-ficha { grid-template-columns: 1fr; }
+}
+
+/* ── Impresión → PDF ───────────────────────────────────────────────────── */
+@media print {
+  @page { size: A4; margin: 14mm 12mm; }
+  .rail, .pie, .cabecera, .doc-toolbar, .no-print { display: none !important; }
+  body { background: #ffffff !important; }
+  .contenido { margin: 0 !important; padding: 0 !important; }
+  .doc {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    font-size: 10pt;
+  }
+  .doc-seccion { break-inside: avoid; page-break-inside: avoid; }
+  .doc-plano { break-inside: avoid; page-break-inside: avoid; }
+  .doc-tabla { font-size: 8.5pt; }
+}

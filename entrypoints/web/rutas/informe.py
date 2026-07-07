@@ -7,23 +7,36 @@ lista de cards grandes, una por proyecto, con el diagrama de flujo y dos botones
 («Revisar proyecto» / «Aprobar») que se cablearán más adelante.
 
 Endpoints:
-- GET  /modulos/informe               → pantalla (lista de cards)
-- GET  /modulos/informe/datos         → proyectos + su flujo serializado (JSON)
-- POST /modulos/informe/{id}/aprobar  → aprueba la viabilidad del proyecto (→ verde)
+- GET  /modulos/informe                  → pantalla (lista de cards)
+- GET  /modulos/informe/datos            → proyectos + su flujo serializado (JSON)
+- GET  /modulos/informe/{id}/documento   → documento del informe (§2.8), imprimible a PDF
+- POST /modulos/informe/{id}/aprobar     → aprueba la viabilidad del proyecto (→ verde)
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.contextos.informe.casos_uso import EnsamblarInforme, informe_a_dict
 from app.contextos.proyectos.casos_uso import ListarProyectos
 from app.contextos.proyectos.flujo import calcular_flujo, flujo_a_dict
 from app.contextos.proyectos.puertos import ProyectoRepositorio
+from app.contextos.render_calculos.casos_uso import (
+    CalcularLayout,
+    construir_parcela_metrica,
+    contenedor_escenarios_proyecto,
+    parametros_desde_proyecto,
+)
 from app.contextos.viabilidad import aprobar_viabilidad
-from app.nucleo.modelo import Proyecto, Rol
+from app.nucleo.modelo import ModuloPuccetti, Proyecto, Rol
 from app.nucleo.modelo.rol import PermisoModulo, puede_acceder
 
 from ..dependencias import (
+    catalogo_apartamentos_adapter,
+    catalogo_hotelero_adapter,
+    catalogo_superficies_adapter,
     listar_proyectos_uc,
     proyecto_activo,
     repositorio_proyectos,
@@ -113,3 +126,104 @@ def aprobar(
         )
     repo.guardar(proyecto)
     return JSONResponse({"ok": True, "flujo": flujo_a_dict(calcular_flujo(proyecto))})
+
+
+# ─── Documento del informe (§2.8) ───────────────────────────────────────────
+# Modos de render que producen envolvente (planimetría + tablas). `inmueble` no
+# genera envolvente (reparte estancias de una unidad) → queda fuera de esta pasada.
+_MODOS_RENDER = ("obra-nueva", "rehabilitacion")
+
+
+def _recalcular_escenario_activo(proyecto, modo_pedido, catalogos):
+    """Recalcula la propuesta del ESCENARIO ACTIVO (réplica del patrón de `export_csv`).
+
+    Devuelve ``(resultado_layout, escenario_meta)`` o ``(None, None)`` si no hay
+    parcela o ningún escenario guardado. Coherente con que los escenarios no
+    guardan geometría: se recalcula desde `parametros` en cada apertura. Degrada a
+    ``(None, None)`` ante cualquier fallo del recálculo (el informe muestra el
+    bloque como PENDIENTE en vez de romper).
+    """
+    try:
+        parcela = construir_parcela_metrica(proyecto)
+    except Exception:
+        parcela = None
+    if parcela is None:
+        return None, None
+
+    catalogo_viv, catalogo_apt, catalogo_hot = catalogos
+    modos = [modo_pedido] if modo_pedido in _MODOS_RENDER else list(_MODOS_RENDER)
+    for modo in modos:
+        heredar = modo == "obra-nueva"
+        cont = contenedor_escenarios_proyecto(proyecto, modo, heredar_legado=heredar)
+        if not cont:
+            continue
+        params = parametros_desde_proyecto(proyecto, modo, heredar_legado=heredar)
+        try:
+            resultado = CalcularLayout(
+                catalogo_vivienda=catalogo_viv,
+                catalogo_apartamentos=catalogo_apt,
+                catalogo_hotelero=catalogo_hot,
+            ).ejecutar(parcela, params)
+        except Exception:
+            continue
+        activo = next(
+            (e for e in cont["escenarios"] if e.get("id") == cont.get("activo")),
+            cont["escenarios"][0],
+        )
+        return resultado, {"modo": modo, "nombre": activo.get("nombre") or "Escenario"}
+    return None, None
+
+
+@router.get("/{proyecto_id}/documento", response_class=HTMLResponse)
+def documento(
+    proyecto_id: str,
+    request: Request,
+    modo: str | None = Query(None),
+    rol: Rol = Depends(rol_activo),
+    repo: ProyectoRepositorio = Depends(repositorio_proyectos),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Documento del informe de un proyecto (§2.8), imprimible a PDF (print-CSS).
+
+    Ensambla las secciones desde los datos ya trazados del aggregate: ficha y
+    normativa se leen directas; planimetría/superficies/alertas se recalculan del
+    escenario activo (como `export_csv`); la sección financiera queda reservada.
+    """
+    _exige_ver(rol)
+    proyecto = repo.obtener(proyecto_id)
+    if proyecto is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proyecto no encontrado.")
+
+    datos = proyecto.datos_por_modulo or {}
+    localizacion = datos.get(ModuloPuccetti.LOCALIZACION.value) or {}
+    rc_corner = datos.get(ModuloPuccetti.RENDER_CALCULOS.value)
+    normativa = rc_corner.get("normativa_aplicada") if isinstance(rc_corner, dict) else None
+    viabilidad = datos.get(ModuloPuccetti.VIABILIDAD.value) or {}
+
+    resultado_layout, escenario_meta = _recalcular_escenario_activo(
+        proyecto, modo, (catalogo_viv, catalogo_apt, catalogo_hot),
+    )
+
+    proyecto_meta = {
+        "id": proyecto.id,
+        "nombre": proyecto.nombre,
+        "referencia_catastral": proyecto.referencia_catastral,
+        "direccion": proyecto.direccion,
+        "generado_por": request.session.get("usuario"),
+        "generado_el": datetime.now().strftime("%d/%m/%Y"),
+    }
+    informe = EnsamblarInforme().ejecutar(
+        proyecto_meta=proyecto_meta,
+        localizacion=localizacion,
+        normativa=normativa,
+        resultado_layout=resultado_layout,
+        escenario_meta=escenario_meta,
+        viabilidad=viabilidad,
+    )
+    return plantillas.TemplateResponse(
+        request,
+        "informe_documento.html",
+        {"rol_activo": rol, "informe": informe_a_dict(informe)},
+    )

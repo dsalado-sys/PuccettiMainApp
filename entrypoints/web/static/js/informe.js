@@ -181,13 +181,17 @@
     const subtitulo = p.referencia_catastral || p.direccion || "Sin parcela aún";
     const apr = estadoAprobar(flujo);
     const aprDeshabilitado = apr.modo !== "habilitado";
-    const botones = puedeEditar
-      ? '<footer class="inf-card-acciones">' +
-        '<button type="button" class="boton-secundario inf-btn-revisar">Revisar proyecto</button>' +
+    // «Ver informe» abre el documento imprimible (§2.8); disponible para cualquier
+    // rol que pueda VER el módulo (es un enlace de navegación, no requiere editar).
+    const verInforme =
+      `<a class="boton-secundario inf-btn-ver" href="/modulos/informe/${encodeURIComponent(p.id)}/documento">Ver informe</a>`;
+    const botonesEdit = puedeEditar
+      ? '<button type="button" class="boton-secundario inf-btn-revisar">Revisar proyecto</button>' +
         `<button type="button" class="boton-primario inf-btn-aprobar"${aprDeshabilitado ? " disabled" : ""}>` +
-        `${escapeHtml(apr.label)}</button>` +
-        '</footer>'
+        `${escapeHtml(apr.label)}</button>`
       : "";
+    const botones =
+      '<footer class="inf-card-acciones">' + verInforme + botonesEdit + '</footer>';
 
     const card = document.createElement("article");
     card.className = "aviso inf-card";
