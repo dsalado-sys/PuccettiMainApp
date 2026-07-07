@@ -101,6 +101,25 @@ def test_documento_con_escenario_muestra_tablas_y_plano(cliente_autenticado, eng
     assert "Vivienda base" in t
 
 
+def test_documento_de_un_escenario_concreto(cliente_autenticado, engine_memoria):
+    _engine, sf = engine_memoria
+    pid = _sembrar(sf, rc="1234567AB1234C0001DE", direccion="Calle de Prueba 1",
+                   LOCALIZACION=_LOC, RENDER_CALCULOS={"normativa_aplicada": _NORMATIVA})
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set("puccetti_proyecto", pid)
+    params = _params_vivienda()
+    body = {"modo": "obra-nueva", "activo": "e1", "escenarios": [
+        {"id": "e1", "nombre": "Escenario Uno", "parametros": params, "resumen": {"alertas_resumen": {}}},
+        {"id": "e2", "nombre": "Escenario Dos", "parametros": params, "resumen": {"alertas_resumen": {}}},
+    ]}
+    assert c.post("/modulos/render-calculos/escenarios", json=body).status_code == 200
+
+    # Se pide explícitamente el escenario e2 → su nombre sale en la cabecera.
+    resp = c.get(f"/modulos/informe/{pid}/documento?modo=obra-nueva&escenario=e2")
+    assert resp.status_code == 200
+    assert "Escenario Dos" in resp.text
+
+
 def test_documento_proyecto_inexistente_da_404(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
     assert c.get("/modulos/informe/no-existe/documento").status_code == 404

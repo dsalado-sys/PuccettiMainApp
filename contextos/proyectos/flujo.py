@@ -44,12 +44,17 @@ class EstadoFlujo:
 
 @dataclass(frozen=True)
 class FlujoEscenario:
-    """Estado de errores/avisos de un escenario (pestaña) de render."""
+    """Estado de un escenario (pestaña) de render: errores/avisos + informe propio.
+
+    El informe se aprueba **por escenario** (no por proyecto): cada pestaña tiene su
+    propio nodo Informe en el semáforo.
+    """
 
     modo: str
     escenario_id: str
     nombre: str
     errores_avisos: EstadoFlujo
+    informe: EstadoFlujo
 
 
 @dataclass(frozen=True)
@@ -119,11 +124,13 @@ def _escenarios(datos: dict[str, Any]) -> list[FlujoEscenario]:
         for e in escenarios:
             if not isinstance(e, dict):
                 continue
+            esc_id = str(e.get("id") or "")
             salida.append(FlujoEscenario(
                 modo=modo,
-                escenario_id=str(e.get("id") or ""),
+                escenario_id=esc_id,
                 nombre=str(e.get("nombre") or "") or "Escenario",
                 errores_avisos=_clasificar_errores_avisos(e.get("resumen_ultimo_calculo")),
+                informe=_informe_escenario(datos, modo, esc_id),
             ))
     return salida
 
@@ -137,14 +144,39 @@ def _viabilidad(datos: dict[str, Any]) -> EstadoFlujo:
     return EstadoFlujo("estudio_sin_aprobar", "Estudio sin aprobar", ColorFlujo.AMARILLO)
 
 
-def _informe(datos: dict[str, Any]) -> EstadoFlujo:
-    inf = datos.get(ModuloPuccetti.INFORME.value) or {}
-    estado = inf.get("estado") if isinstance(inf, dict) else None
+def _estado_informe(estado: Any) -> EstadoFlujo:
+    """Traduce un valor de estado del informe (`aprobado`/`revisado`/otro) a color."""
     if estado == "aprobado":
         return EstadoFlujo("informe_aprobado", "Informe aprobado", ColorFlujo.VERDE)
     if estado == "revisado":
         return EstadoFlujo("informe_revisado", "Informe revisado", ColorFlujo.AMARILLO)
     return EstadoFlujo("informe_sin_aprobar", "Informe sin aprobar", ColorFlujo.ROJO)
+
+
+def _informe(datos: dict[str, Any]) -> EstadoFlujo:
+    """Estado del informe a nivel PROYECTO (legado; la aprobación real es por escenario)."""
+    inf = datos.get(ModuloPuccetti.INFORME.value) or {}
+    estado = inf.get("estado") if isinstance(inf, dict) else None
+    return _estado_informe(estado)
+
+
+def clave_informe_escenario(modo: str, escenario_id: str) -> str:
+    """Clave del informe de un escenario en ``datos["informe"]["escenarios"]``."""
+    return f"{modo}:{escenario_id}"
+
+
+def _informe_escenario(datos: dict[str, Any], modo: str, escenario_id: str) -> EstadoFlujo:
+    """Estado del informe de UN escenario (pestaña), leído por su clave ``modo:id``."""
+    inf = datos.get(ModuloPuccetti.INFORME.value) or {}
+    por_esc = inf.get("escenarios") if isinstance(inf, dict) else None
+    estado = None
+    if isinstance(por_esc, dict):
+        entrada = por_esc.get(clave_informe_escenario(modo, escenario_id))
+        if isinstance(entrada, dict):
+            estado = entrada.get("estado")
+        elif isinstance(entrada, str):
+            estado = entrada
+    return _estado_informe(estado)
 
 
 def calcular_flujo(proyecto: Proyecto) -> FlujoProyecto:
@@ -175,6 +207,7 @@ def flujo_a_dict(flujo: FlujoProyecto) -> dict[str, Any]:
                 "escenario_id": fe.escenario_id,
                 "nombre": fe.nombre,
                 "errores_avisos": _estado_a_dict(fe.errores_avisos),
+                "informe": _estado_a_dict(fe.informe),
             }
             for fe in flujo.escenarios
         ],

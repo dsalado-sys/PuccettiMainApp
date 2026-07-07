@@ -93,6 +93,26 @@
   font-style: italic;
 }
 
+/* Fila de escenario seleccionable: la activa se resalta con acento dorado sutil.
+   Sin margin negativo para no descuadrar el conector `.inf-rama::before`. */
+.inf-rama[role="button"] {
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radio-inner);
+  transition: background-color 120ms ease;
+}
+.inf-rama[role="button"]:hover {
+  background: var(--tint-primary-8);
+}
+.inf-rama[role="button"]:focus-visible {
+  outline: 2px solid var(--dorado);
+  outline-offset: 2px;
+}
+.inf-rama--activa {
+  background: var(--tint-primary-8);
+  box-shadow: inset 3px 0 0 var(--dorado);
+}
+
 .inf-rama-chip {
   font-size: var(--text-eyebrow);
   padding: 3px 10px;
@@ -174,7 +194,7 @@
   font-weight: 500;
 }
 
-/* ─── Acciones (placeholder; se cablean más adelante) ────────────────────── */
+/* ─── Acciones (Ver informe / Aprobar, sobre el escenario seleccionado) ──── */
 .inf-card-acciones {
   display: flex;
   gap: 12px;

@@ -153,6 +153,32 @@ def test_informe_aprobado_es_verde():
     assert f.informe.color is ColorFlujo.VERDE and f.informe.clave == "informe_aprobado"
 
 
+# ─── Informe POR ESCENARIO ───────────────────────────────────────────────────
+
+def test_informe_escenario_por_defecto_es_rojo():
+    f = calcular_flujo(_proyecto(RENDER_CALCULOS=_rc_con_escenario({"aviso": 1})))
+    assert f.escenarios[0].informe.color is ColorFlujo.ROJO
+    assert f.escenarios[0].informe.clave == "informe_sin_aprobar"
+
+
+def test_informe_escenario_aprobado_es_verde():
+    f = calcular_flujo(_proyecto(
+        RENDER_CALCULOS=_rc_con_escenario({"error": 0, "aviso": 0}),
+        INFORME={"escenarios": {"obra-nueva:e1": {"estado": "aprobado"}}},
+    ))
+    assert f.escenarios[0].informe.color is ColorFlujo.VERDE
+    assert f.escenarios[0].informe.clave == "informe_aprobado"
+
+
+def test_informe_escenario_de_otra_pestana_no_afecta():
+    # La aprobación es por escenario: aprobar "otro" no pone verde a "e1".
+    f = calcular_flujo(_proyecto(
+        RENDER_CALCULOS=_rc_con_escenario({}),
+        INFORME={"escenarios": {"obra-nueva:otro": {"estado": "aprobado"}}},
+    ))
+    assert f.escenarios[0].informe.color is ColorFlujo.ROJO
+
+
 # ─── Serialización ───────────────────────────────────────────────────────────
 
 def test_flujo_a_dict_forma():
@@ -164,4 +190,5 @@ def test_flujo_a_dict_forma():
     assert set(d) == {"parcela", "normativa", "escenarios", "viabilidad", "informe"}
     assert d["parcela"] == {"clave": "parcela_guardada", "etiqueta": "Parcela guardada", "color": "verde"}
     assert d["escenarios"][0]["errores_avisos"]["color"] == "amarillo"
-    assert set(d["escenarios"][0]) == {"modo", "escenario_id", "nombre", "errores_avisos"}
+    assert set(d["escenarios"][0]) == {"modo", "escenario_id", "nombre", "errores_avisos", "informe"}
+    assert d["escenarios"][0]["informe"]["color"] == "rojo"   # sin aprobar por defecto

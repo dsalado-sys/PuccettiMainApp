@@ -19,7 +19,11 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from app.contextos.informe.casos_uso import EnsamblarInforme, informe_a_dict
+from app.contextos.informe.casos_uso import (
+    EnsamblarInforme,
+    aprobar_informe,
+    informe_a_dict,
+)
 from app.contextos.proyectos.casos_uso import ListarProyectos
 from app.contextos.proyectos.flujo import calcular_flujo, flujo_a_dict
 from app.contextos.proyectos.puertos import ProyectoRepositorio
@@ -29,7 +33,6 @@ from app.contextos.render_calculos.casos_uso import (
     contenedor_escenarios_proyecto,
     parametros_desde_proyecto,
 )
-from app.contextos.viabilidad import aprobar_viabilidad
 from app.nucleo.modelo import ModuloPuccetti, Proyecto, Rol
 from app.nucleo.modelo.rol import PermisoModulo, puede_acceder
 
@@ -104,25 +107,28 @@ def datos(
     return JSONResponse({"proyectos": proyectos})
 
 
-# ─── Aprobar viabilidad (desde la card del Informe) ─────────────────────────
+# ─── Aprobar el informe de un ESCENARIO (desde la card del Informe) ──────────
 @router.post("/{proyecto_id}/aprobar")
 def aprobar(
     proyecto_id: str,
+    modo: str = Query(...),
+    escenario: str = Query(...),
     rol: Rol = Depends(rol_activo),
     repo: ProyectoRepositorio = Depends(repositorio_proyectos),
 ):
-    """Aprueba el estudio de viabilidad del proyecto (→ nodo Viabilidad en verde).
+    """Aprueba el informe del escenario elegido (→ su nodo Informe en verde).
 
-    Actúa sobre el proyecto elegido en la card (por id), no sobre el activo.
+    Actúa sobre el proyecto (por id) y el escenario (modo + id) seleccionado en la
+    card. La aprobación de la viabilidad vive en su propio módulo (no aquí).
     """
     _exige_editar(rol)
     proyecto = repo.obtener(proyecto_id)
     if proyecto is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proyecto no encontrado.")
-    if not aprobar_viabilidad(proyecto):
+    if not aprobar_informe(proyecto, modo, escenario):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="El proyecto no tiene un estudio de viabilidad que aprobar.",
+            detail="El escenario indicado no existe en el proyecto.",
         )
     repo.guardar(proyecto)
     return JSONResponse({"ok": True, "flujo": flujo_a_dict(calcular_flujo(proyecto))})
@@ -134,14 +140,14 @@ def aprobar(
 _MODOS_RENDER = ("obra-nueva", "rehabilitacion")
 
 
-def _recalcular_escenario_activo(proyecto, modo_pedido, catalogos):
-    """Recalcula la propuesta del ESCENARIO ACTIVO (réplica del patrón de `export_csv`).
+def _recalcular_escenario_activo(proyecto, modo_pedido, escenario_pedido, catalogos):
+    """Recalcula la propuesta de un escenario (réplica del patrón de `export_csv`).
 
-    Devuelve ``(resultado_layout, escenario_meta)`` o ``(None, None)`` si no hay
-    parcela o ningún escenario guardado. Coherente con que los escenarios no
-    guardan geometría: se recalcula desde `parametros` en cada apertura. Degrada a
-    ``(None, None)`` ante cualquier fallo del recálculo (el informe muestra el
-    bloque como PENDIENTE en vez de romper).
+    Si viene ``escenario_pedido`` se recalcula ESA pestaña (en el modo que la
+    contiene); si no, el escenario activo del modo. Devuelve ``(resultado_layout,
+    escenario_meta)`` o ``(None, None)`` si no hay parcela o ningún escenario.
+    Degrada a ``(None, None)`` ante cualquier fallo del recálculo (el informe
+    muestra el bloque como PENDIENTE en vez de romper).
     """
     try:
         parcela = construir_parcela_metrica(proyecto)
@@ -157,7 +163,15 @@ def _recalcular_escenario_activo(proyecto, modo_pedido, catalogos):
         cont = contenedor_escenarios_proyecto(proyecto, modo, heredar_legado=heredar)
         if not cont:
             continue
-        params = parametros_desde_proyecto(proyecto, modo, heredar_legado=heredar)
+        # Si se pidió un escenario concreto, solo sirve el modo que lo contiene.
+        esc_id = None
+        if escenario_pedido:
+            if not any(e.get("id") == escenario_pedido for e in cont["escenarios"]):
+                continue
+            esc_id = escenario_pedido
+        params = parametros_desde_proyecto(
+            proyecto, modo, heredar_legado=heredar, escenario_id=esc_id,
+        )
         try:
             resultado = CalcularLayout(
                 catalogo_vivienda=catalogo_viv,
@@ -166,8 +180,9 @@ def _recalcular_escenario_activo(proyecto, modo_pedido, catalogos):
             ).ejecutar(parcela, params)
         except Exception:
             continue
+        objetivo_id = esc_id or cont.get("activo")
         activo = next(
-            (e for e in cont["escenarios"] if e.get("id") == cont.get("activo")),
+            (e for e in cont["escenarios"] if e.get("id") == objetivo_id),
             cont["escenarios"][0],
         )
         return resultado, {"modo": modo, "nombre": activo.get("nombre") or "Escenario"}
@@ -179,6 +194,7 @@ def documento(
     proyecto_id: str,
     request: Request,
     modo: str | None = Query(None),
+    escenario: str | None = Query(None),
     rol: Rol = Depends(rol_activo),
     repo: ProyectoRepositorio = Depends(repositorio_proyectos),
     catalogo_viv=Depends(catalogo_superficies_adapter),
@@ -189,7 +205,8 @@ def documento(
 
     Ensambla las secciones desde los datos ya trazados del aggregate: ficha y
     normativa se leen directas; planimetría/superficies/alertas se recalculan del
-    escenario activo (como `export_csv`); la sección financiera queda reservada.
+    escenario elegido (`modo`+`escenario`) o del activo (como `export_csv`); la
+    sección financiera queda reservada.
     """
     _exige_ver(rol)
     proyecto = repo.obtener(proyecto_id)
@@ -203,7 +220,7 @@ def documento(
     viabilidad = datos.get(ModuloPuccetti.VIABILIDAD.value) or {}
 
     resultado_layout, escenario_meta = _recalcular_escenario_activo(
-        proyecto, modo, (catalogo_viv, catalogo_apt, catalogo_hot),
+        proyecto, modo, escenario, (catalogo_viv, catalogo_apt, catalogo_hot),
     )
 
     proyecto_meta = {

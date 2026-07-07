@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.nucleo.modelo import ModuloPuccetti, Proyecto
+
 from .dominio import EstadoSeccion, Informe, SeccionInforme
 from .planimetria_svg import bbox_de, planta_a_svg
 
@@ -254,3 +256,38 @@ def informe_a_dict(informe: Informe) -> dict[str, Any]:
         "escenario_modo": informe.escenario_modo,
         "secciones": [_seccion_a_dict(s) for s in informe.secciones],
     }
+
+
+# ─── Aprobación del informe POR ESCENARIO (camino de escritura del semáforo) ──
+def _escenario_existe(proyecto: Proyecto, modo: str, escenario_id: str) -> bool:
+    """¿Existe un escenario (modo+id) en el rincón render del proyecto?
+
+    Lee el aggregate por su clave string (no importa el contexto render; patrón de
+    `proyectos/flujo.py`).
+    """
+    rc = proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}
+    bloque = rc.get(modo) if isinstance(rc, dict) else None
+    escenarios = bloque.get("escenarios") if isinstance(bloque, dict) else None
+    if not isinstance(escenarios, list):
+        return False
+    return any(
+        isinstance(e, dict) and str(e.get("id") or "") == escenario_id
+        for e in escenarios
+    )
+
+
+def aprobar_informe(proyecto: Proyecto, modo: str, escenario_id: str) -> bool:
+    """Marca como aprobado el informe de un escenario (→ nodo Informe en verde).
+
+    Escribe `datos_por_modulo["informe"]["escenarios"]["{modo}:{id}"] =
+    {"estado": "aprobado"}` preservando el resto del rincón. Devuelve `False` si el
+    escenario no existe (no crea aprobaciones fantasma).
+    """
+    if not modo or not escenario_id or not _escenario_existe(proyecto, modo, escenario_id):
+        return False
+    inf = dict(proyecto.datos_por_modulo.get(ModuloPuccetti.INFORME.value) or {})
+    escenarios = dict(inf.get("escenarios") or {})
+    escenarios[f"{modo}:{escenario_id}"] = {"estado": "aprobado"}
+    inf["escenarios"] = escenarios
+    proyecto.fijar_datos(ModuloPuccetti.INFORME, inf)
+    return True

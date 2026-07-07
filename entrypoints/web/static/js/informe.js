@@ -96,20 +96,20 @@
   function esVerde(estado) { return !!estado && estado.color === "verde"; }
   function noEsRojo(estado) { return !!estado && estado.color !== "rojo"; }
 
-  // Estado del botón «Aprobar» (aprueba la Viabilidad → verde). Habilitado solo
-  // si el tronco está en verde, ninguna pestaña está en rojo y hay un estudio de
-  // viabilidad guardado sin aprobar (amarillo). Si ya está aprobada, se muestra
-  // deshabilitado con etiqueta distinta.
-  function estadoAprobar(flujo) {
-    const viab = flujo.viabilidad || null;
-    const escenarios = Array.isArray(flujo.escenarios) ? flujo.escenarios : [];
-    if (viab && viab.clave === "estudio_aprobado") {
-      return { modo: "aprobado", label: "Viabilidad aprobada" };
+  // Estado del botón «Aprobar» para el ESCENARIO seleccionado (aprueba SU informe
+  // → nodo Informe en verde). Habilitado solo si el tronco está en verde, el
+  // escenario no está en rojo, la viabilidad está aprobada (verde) y su informe
+  // aún no está aprobado. Si ya lo está, se muestra deshabilitado.
+  function estadoAprobar(escenario, flujo) {
+    const inf = escenario ? escenario.informe : null;
+    if (inf && inf.clave === "informe_aprobado") {
+      return { modo: "aprobado", label: "Informe aprobado" };
     }
     const troncoOk = esVerde(flujo.parcela) && esVerde(flujo.normativa);
-    const sinPestanaRoja = escenarios.every(e => !e.errores_avisos || e.errores_avisos.color !== "rojo");
-    const viabPresente = viab && viab.clave === "estudio_sin_aprobar";
-    if (troncoOk && sinPestanaRoja && viabPresente) {
+    const escenarioOk = !!escenario && !!escenario.errores_avisos
+      && escenario.errores_avisos.color !== "rojo";
+    const viabOk = esVerde(flujo.viabilidad);
+    if (troncoOk && escenarioOk && viabOk) {
       return { modo: "habilitado", label: "Aprobar" };
     }
     return { modo: "bloqueado", label: "Aprobar" };
@@ -143,13 +143,13 @@
     const parcela = flujo.parcela || null;
     const normativa = flujo.normativa || null;
     const viab = flujo.viabilidad || null;
-    const informe = flujo.informe || null;
     const escenarios = Array.isArray(flujo.escenarios) ? flujo.escenarios : [];
 
     // Gating del tronco.
     const normativaIluminada = esVerde(parcela);
 
-    // Filas por pestaña.
+    // Filas por escenario (seleccionables por clic). El nodo Informe es PROPIO de
+    // cada escenario (aprobación por escenario).
     let filasHtml;
     if (!escenarios.length) {
       filasHtml =
@@ -157,41 +157,35 @@
         '<span class="inf-rama-nota">Sin escenarios de render todavía.</span>' +
         '</div>';
     } else {
-      filasHtml = escenarios.map(e => {
+      filasHtml = escenarios.map((e, i) => {
         const ea = e.errores_avisos || null;
         const eaIluminado = normativaIluminada;              // depende de Normativa verde
         const viabIluminado = eaIluminado && noEsRojo(ea);    // excepción: amarillo no bloquea
-        const infIluminado = viabIluminado && esVerde(viab);  // Viab no es pestaña → su amarillo bloquea
+        const infIluminado = viabIluminado && esVerde(viab);  // Informe tras Viabilidad verde
         const modo = MODO_NOMBRE[e.modo] || e.modo || "";
         const chip = (modo ? modo + " · " : "") + (e.nombre || "Escenario");
         return (
-          '<div class="inf-rama">' +
+          `<div class="inf-rama" data-idx="${i}" role="button" tabindex="0" aria-pressed="false">` +
           `<span class="inf-rama-chip" title="${escapeHtml(chip)}">${escapeHtml(chip)}</span>` +
           '<div class="inf-rama-nodos">' +
           nodoHtml("errores_avisos", ea, eaIluminado) +
           conectorHtml() +
           nodoHtml("viabilidad", viab, viabIluminado) +
           conectorHtml() +
-          nodoHtml("informe", informe, infIluminado) +
+          nodoHtml("informe", e.informe || null, infIluminado) +
           '</div></div>'
         );
       }).join("");
     }
 
     const subtitulo = p.referencia_catastral || p.direccion || "Sin parcela aún";
-    const apr = estadoAprobar(flujo);
-    const aprDeshabilitado = apr.modo !== "habilitado";
-    // «Ver informe» abre el documento imprimible (§2.8); disponible para cualquier
-    // rol que pueda VER el módulo (es un enlace de navegación, no requiere editar).
-    const verInforme =
-      `<a class="boton-secundario inf-btn-ver" href="/modulos/informe/${encodeURIComponent(p.id)}/documento">Ver informe</a>`;
-    const botonesEdit = puedeEditar
-      ? '<button type="button" class="boton-secundario inf-btn-revisar">Revisar proyecto</button>' +
-        `<button type="button" class="boton-primario inf-btn-aprobar"${aprDeshabilitado ? " disabled" : ""}>` +
-        `${escapeHtml(apr.label)}</button>`
+    // «Ver informe» (enlace de navegación, cualquier rol con VER). «Aprobar» solo
+    // si puede editar. Ambos actúan sobre el escenario SELECCIONADO (fila activa).
+    const verInforme = `<a class="boton-secundario inf-btn-ver" href="#">Ver informe</a>`;
+    const aprobarBtn = puedeEditar
+      ? '<button type="button" class="boton-primario inf-btn-aprobar">Aprobar</button>'
       : "";
-    const botones =
-      '<footer class="inf-card-acciones">' + verInforme + botonesEdit + '</footer>';
+    const acciones = '<footer class="inf-card-acciones">' + verInforme + aprobarBtn + '</footer>';
 
     const card = document.createElement("article");
     card.className = "aviso inf-card";
@@ -208,29 +202,62 @@
       '</div>' +
       `<div class="inf-ramas">${filasHtml}</div>` +
       '</div>' +
-      botones;
+      acciones;
 
-    // «Revisar proyecto» sigue como placeholder (se cableará más adelante).
-    const rev = card.querySelector(".inf-btn-revisar");
-    if (rev) rev.addEventListener("click", () => mostrarToast("Revisión: función pendiente"));
-    // «Aprobar» aprueba la viabilidad del proyecto (→ verde).
+    // ── Selección de escenario + acciones dependientes de la fila activa ──
+    const ramas = Array.from(card.querySelectorAll(".inf-rama[data-idx]"));
+    const btnVer = card.querySelector(".inf-btn-ver");
     const btnApr = card.querySelector(".inf-btn-aprobar");
-    if (btnApr && !btnApr.disabled) btnApr.addEventListener("click", () => aprobarProyecto(p.id));
+    let sel = ramas.length ? 0 : -1;
+
+    function aplicarSeleccion(idx) {
+      sel = idx;
+      ramas.forEach((r, i) => {
+        const activa = i === idx;
+        r.classList.toggle("inf-rama--activa", activa);
+        r.setAttribute("aria-pressed", activa ? "true" : "false");
+      });
+      const e = idx >= 0 ? escenarios[idx] : null;
+      if (btnVer) {
+        const base = `/modulos/informe/${encodeURIComponent(p.id)}/documento`;
+        btnVer.href = e
+          ? `${base}?modo=${encodeURIComponent(e.modo)}&escenario=${encodeURIComponent(e.escenario_id)}`
+          : base;
+      }
+      if (btnApr) {
+        const apr = estadoAprobar(e, flujo);
+        btnApr.textContent = apr.label;
+        btnApr.disabled = apr.modo !== "habilitado";
+      }
+    }
+
+    ramas.forEach((r, i) => {
+      r.addEventListener("click", () => aplicarSeleccion(i));
+      r.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); aplicarSeleccion(i); }
+      });
+    });
+    if (btnApr) btnApr.addEventListener("click", () => {
+      const e = sel >= 0 ? escenarios[sel] : null;
+      if (e && !btnApr.disabled) aprobarInforme(p.id, e.modo, e.escenario_id);
+    });
+
+    aplicarSeleccion(sel);   // estado inicial (primera fila o ninguna)
     return card;
   }
 
-  // ─── Aprobar ───────────────────────────────────────────────────────────
-  async function aprobarProyecto(proyectoId) {
-    const resp = await fetchSeguro(`/modulos/informe/${encodeURIComponent(proyectoId)}/aprobar`, {
-      method: "POST",
-    });
+  // ─── Aprobar el informe del escenario seleccionado ──────────────────────
+  async function aprobarInforme(proyectoId, modo, escenarioId) {
+    const url = `/modulos/informe/${encodeURIComponent(proyectoId)}/aprobar`
+      + `?modo=${encodeURIComponent(modo)}&escenario=${encodeURIComponent(escenarioId)}`;
+    const resp = await fetchSeguro(url, { method: "POST" });
     if (!resp.ok) {
-      if (resp.status === 409) { mostrarToast("No hay estudio de viabilidad que aprobar", true); return; }
+      if (resp.status === 409) { mostrarToast("Ese escenario ya no existe", true); return; }
       if (resp.status === 403) { mostrarToast("No tienes permiso para aprobar", true); return; }
       mostrarToast("No se pudo aprobar", true);
       return;
     }
-    mostrarToast("Viabilidad aprobada");
+    mostrarToast("Informe aprobado");
     await cargarDatos();   // recarga y repinta con el nuevo flujo
   }
 

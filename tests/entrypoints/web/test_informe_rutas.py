@@ -85,46 +85,46 @@ def test_datos_escenario_con_avisos(cliente_autenticado, engine_memoria):
     assert escenarios[0]["errores_avisos"]["color"] == "amarillo"
 
 
-# ─── Aprobar viabilidad ──────────────────────────────────────────────────────
+# ─── Aprobar el informe de un escenario ──────────────────────────────────────
 
-def test_aprobar_pone_viabilidad_en_verde(cliente_autenticado, engine_memoria):
+def _rc_con_escenario(esc_id: str = "e1") -> dict:
+    return {"obra-nueva": {"activo": esc_id, "escenarios": [
+        {"id": esc_id, "nombre": "V", "parametros": _params_vivienda(),
+         "resumen_ultimo_calculo": {}},
+    ]}}
+
+
+def test_aprobar_pone_informe_del_escenario_en_verde(cliente_autenticado, engine_memoria):
     _engine, session_factory = engine_memoria
-    pid = _sembrar_proyecto(
-        session_factory,
-        LOCALIZACION={"referencia_catastral": "1234"},
-        VIABILIDAD={"operacion": "venta", "precio_eur_m2": 3200},
-    )
+    pid = _sembrar_proyecto(session_factory, RENDER_CALCULOS=_rc_con_escenario("e1"))
     c = cliente_autenticado(Rol.ARQUITECTO)
-    # Antes de aprobar: viabilidad presente pero sin aprobar → amarillo.
-    antes = c.get("/modulos/informe/datos").json()["proyectos"][0]["flujo"]["viabilidad"]
-    assert antes["color"] == "amarillo"
+    # Antes: el informe del escenario está en rojo (sin aprobar).
+    antes = c.get("/modulos/informe/datos").json()["proyectos"][0]["flujo"]["escenarios"][0]["informe"]
+    assert antes["color"] == "rojo"
 
-    resp = c.post(f"/modulos/informe/{pid}/aprobar")
+    resp = c.post(f"/modulos/informe/{pid}/aprobar?modo=obra-nueva&escenario=e1")
     assert resp.status_code == 200
-    assert resp.json()["flujo"]["viabilidad"]["color"] == "verde"
+    assert resp.json()["flujo"]["escenarios"][0]["informe"]["color"] == "verde"
 
-    # Persistido: una nueva lectura sigue en verde.
-    despues = c.get("/modulos/informe/datos").json()["proyectos"][0]["flujo"]["viabilidad"]
+    # Persistido.
+    despues = c.get("/modulos/informe/datos").json()["proyectos"][0]["flujo"]["escenarios"][0]["informe"]
     assert despues["color"] == "verde"
 
 
-def test_aprobar_sin_estudio_da_409(cliente_autenticado, engine_memoria):
+def test_aprobar_escenario_inexistente_da_409(cliente_autenticado, engine_memoria):
     _engine, session_factory = engine_memoria
-    pid = _sembrar_proyecto(session_factory, LOCALIZACION={"referencia_catastral": "1234"})
+    pid = _sembrar_proyecto(session_factory, RENDER_CALCULOS=_rc_con_escenario("e1"))
     c = cliente_autenticado(Rol.ARQUITECTO)
-    assert c.post(f"/modulos/informe/{pid}/aprobar").status_code == 409
+    assert c.post(f"/modulos/informe/{pid}/aprobar?modo=obra-nueva&escenario=NOPE").status_code == 409
 
 
 def test_aprobar_proyecto_inexistente_da_404(cliente_autenticado):
     c = cliente_autenticado(Rol.ARQUITECTO)
-    assert c.post("/modulos/informe/no-existe/aprobar").status_code == 404
+    assert c.post("/modulos/informe/no-existe/aprobar?modo=obra-nueva&escenario=e1").status_code == 404
 
 
 def test_aprobar_inversor_da_403(cliente_autenticado, engine_memoria):
     _engine, session_factory = engine_memoria
-    pid = _sembrar_proyecto(
-        session_factory,
-        VIABILIDAD={"operacion": "venta", "precio_eur_m2": 3200},
-    )
+    pid = _sembrar_proyecto(session_factory, RENDER_CALCULOS=_rc_con_escenario("e1"))
     c = cliente_autenticado(Rol.INVERSOR)
-    assert c.post(f"/modulos/informe/{pid}/aprobar").status_code == 403
+    assert c.post(f"/modulos/informe/{pid}/aprobar?modo=obra-nueva&escenario=e1").status_code == 403
