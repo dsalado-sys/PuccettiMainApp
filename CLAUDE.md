@@ -206,10 +206,12 @@ subreferencia; usa ESCatastroLib + REST.
   JSON), `POST /guardar`; DCF — `POST /calcular-dcf` (preview + semáforo), `/precio-maximo`,
   `/sensibilidad`, `/guardar-dcf`, `GET/POST /umbrales` (config PR editable). UI DCF en
   `viabilidad.html` + `viabilidad_dcf.js` (one-pager vía `@media print`).
-- **render_calculos** `/modulos/render-calculos`: `GET ''` (`?modo=` → landing o render),
-  `POST /preview|/calcular|/estancias|/tipologias-dormitorios|/guardar|/aplicar-normativa`;
+- **render_calculos** `/modulos/render-calculos`: `GET ''` (`?modo=` [→ landing o render] +
+  `?escenario=` [pestaña a previsualizar]),
+  `POST /preview|/calcular|/estancias|/tipologias-dormitorios|/escenarios|/aplicar-normativa`;
   `GET/POST /normativa[...]` (LEGADO, solo consulta), `/superficies-vivienda[/reset]`,
-  `/minimos/{uso}[/reset]`, `POST /export.csv`.
+  `/minimos/{uso}[/reset]`, `POST /export.csv`. `POST /escenarios` (antes `/guardar`) persiste
+  la LISTA de escenarios/pestañas del modo activo (ver §Persistencia render).
 - **normativa_municipal** `/modulos/normativa-municipal`: CRUD carpetas + normativas archivadas.
 - **modulos** `/modulos`: solo `GET /modulos/informe` (stub). `modelos_planos` no tiene ruta.
 

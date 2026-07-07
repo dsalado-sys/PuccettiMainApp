@@ -25,6 +25,8 @@
   `Proyecto.datos_por_modulo[ModuloPuccetti.RENDER_CALCULOS]` (se recalcula siempre,
   igual patrón que `viabilidad`). Los catálogos normativos (Anexo I.1/I.3/I.4/I.5 +
   normativa municipal) sí tienen tablas propias en BBDD.
+- **Escenarios (pestañas)** — desde 2026-07-06 cada modo guarda una LISTA de
+  escenarios, no un único bloque (ver §1.8).
 - **3 usos**: vivienda (Anexo I.5), apartamentos turísticos (Anexo I.3/I.4, Decreto
   194/2010), hotelero (Anexo I.1). **3 modos** de entrada: `obra-nueva` (por defecto) /
   `rehabilitacion` / `inmueble` (auto-derivado solo si en §2.1 se eligió un inmueble
@@ -188,6 +190,43 @@ techo lo vigila `_alertas_envolvente` por ocupación×plantas (evita duplicar el
   linderos, retranqueo ático, luz recta de patio, área patio mínima, ancho total de
   fachada, espesor de tabique, ancho de pasillo común, ancho de puerta (paso libre).
 
+### 1.8 Escenarios (pestañas) — hipótesis de programa por parcela
+
+Desde 2026-07-06, encima de la barra catastral hay una barra de **pestañas**: cada
+una es un **escenario** (hipótesis de programa completa — uso + parámetros +
+resumen) sobre la MISMA parcela, con **nombre reactivo** al programa elegido
+("Vivienda · 2 habitaciones", "Apartamento 2L · Edificio · 3 dorm.", "Hotel 3★ ·
+Doble"). Preparado para una futura funcionalidad de **«informes del activo»** (aún
+NO desarrollada).
+
+- **Las pestañas son POR MODO**: cada modo (obra-nueva/rehabilitación/inmueble)
+  tiene su propio juego de escenarios; no se comparan entre sí en la misma barra.
+- **Persistencia**: cada `modo_key` de `datos_por_modulo[RENDER_CALCULOS]` pasa de
+  un bloque plano (`{parametros, resumen_ultimo_calculo, timestamp}`) a un
+  contenedor `{escenarios:[{id, nombre, parametros, resumen_ultimo_calculo,
+  timestamp}], activo}`. **Migración perezosa**: el formato antiguo se envuelve
+  como un único escenario `e1` al leer (`_normalizar_escenarios`,
+  `casos_uso.py`); no se reescribe hasta el siguiente guardado.
+- **Fuente de verdad = el cliente**: el frontend manda la lista completa de
+  escenarios en cada `POST /escenarios`; el backend valida/sanea (round-trip por
+  `parametros_desde_dict`/`parametros_a_dict`) y reemplaza el contenedor del modo,
+  conservando los demás modos y `normativa_aplicada`.
+  `GuardarEscenariosRender` (sustituye a `GuardarRender`, que ya no existe).
+- **Conmutar/crear/borrar = persistir + recargar** con `?escenario=<id>` (el `GET`
+  de `pantalla` renderiza ESE escenario vía `parametros_desde_proyecto(...,
+  escenario_id=...)`): se evita reconstruir el formulario completo en cliente (los
+  patios dinámicos lo harían frágil) y garantiza que nada se pierde al cambiar de
+  pestaña. No se permite borrar el último escenario de un modo.
+- **Nombre reactivo**: se recompone en JS (`nombreEscenario()`,
+  `render_calculos.js`) a partir del TEXTO de los `<option>` ya existentes en el
+  panel (categoría por llaves 1L–4L, grupo edificio/conjunto, categoría hotelera
+  con ★, tipología de habitación) — sin duplicar mapas de etiquetas.
+- **Endpoint**: `POST /modulos/render-calculos/escenarios` (antes `/guardar`, que
+  ya no existe); `GET ''` acepta `?escenario=<id>` para previsualizar una pestaña
+  sin persistir. Tope anti-DoS: `_ESCENARIOS_MAX = 24` por modo.
+- Detalle de decisiones (incl. por qué "XL" del brief inicial = categoría de
+  llaves) en memoria persistente `project_pestanas_escenarios_render`.
+
 ---
 
 ## 2. Reglas vigentes (transversales — no romper sin decisión del arquitecto)
@@ -231,6 +270,10 @@ techo lo vigila `_alertas_envolvente` por ocupación×plantas (evita duplicar el
   clic derecho sobre vértice lo borra si quedan ≥3) **nunca** reordena ni recalcula —
   solo el arrastre deliberado (≥`COMMIT_PX`) mueve el patio a última prioridad y
   dispara el recálculo del backend.
+- **Escenarios (pestañas, §1.8)**: el contenedor `{escenarios, activo}` es POR MODO,
+  nunca cruza modos; `GuardarRender`/`/guardar` **ya no existen** (sustituidos por
+  `GuardarEscenariosRender`/`POST /escenarios`) — cualquier referencia a ellos en
+  código o docs antiguos está obsoleta.
 
 ---
 
@@ -245,6 +288,7 @@ techo lo vigila `_alertas_envolvente` por ocupación×plantas (evita duplicar el
 | Validación de cumplimiento normativo | **COMPLETO** |
 | Tablas por planta / por unidad | **COMPLETO** |
 | Patios: N editables, base/efectiva, prioridad, bloqueo, fusión, zoom, edición en sitio | **COMPLETO** (trabajo de `render-dev`, ya integrado en `dev`→`pre`→esta rama) |
+| Escenarios (pestañas): alta/baja/conmutación, nombre reactivo, persistencia por modo (§1.8) | **COMPLETO** (2026-07-06) |
 | **Disposición geométrica de UNIDADES en planta** (rebanadas, núcleo, pasillos) | **NO EXISTE** — `"edificio": None` explícito en `CalcularLayout`/`CalcularEnvolvente` (`casos_uso.py`, comentario "render geométrico en backlog") |
 | **Geometría de estancias dentro de la unidad** (polígonos por estancia) | **NO EXISTE** |
 | Canvas: dibujo de unidades/núcleo/pasillos | Código YA escrito en `rc_canvas.js` (`_dibujarNucleo`, `_etiquetaUnidad`), **inerte** a la espera del contrato `edificio` |
@@ -261,11 +305,13 @@ techo lo vigila `_alertas_envolvente` por ocupación×plantas (evita duplicar el
 > trabajando realmente — hoy, en `pestañas-proyectos` (hija de `pre`, base común
 > `9d37100`), el estado real es el de la tabla de arriba: solo patios, no unidades.
 
-**Tests**: **147** específicos de este contexto (`app/tests/contextos/
-render_calculos/`, 14 ficheros — dominio/geometría, sin HTTP) · **248** en total la
-suite del repo (`python -m pytest app/tests --collect-only -q`). No hay tests de ruta
-HTTP para `render_calculos` (sí los hay para `viabilidad`, `test_viabilidad_rutas.py`)
-— hueco de cobertura a valorar si se toca el router.
+**Tests**: **154** específicos de este contexto (`app/tests/contextos/
+render_calculos/`, 15 ficheros — dominio/geometría, incl. `test_escenarios.py`) ·
+**259** en total la suite del repo (`python -m pytest app/tests --collect-only -q`).
+Desde 2026-07-06 SÍ hay tests de ruta HTTP para `render_calculos`
+(`app/tests/entrypoints/web/test_render_calculos_rutas.py`, escenarios: página +
+roundtrip `POST /escenarios` + permisos) — cierra el hueco que este registro
+señalaba antes (ya alineado con `viabilidad`, `test_viabilidad_rutas.py`).
 
 ---
 
@@ -294,7 +340,21 @@ HTTP para `render_calculos` (sí los hay para `viabilidad`, `test_viabilidad_rut
 
 ## 5. Bitácora
 
-- **2026-07-06** — Creado este registro (lectura de README.md, RENDER_GEOMETRICO.md,
+- **2026-07-06 (2)** — Implementadas las **pestañas de escenario** (§1.8): barra de
+  escenarios encima de la catastral, nombre reactivo, persistencia por-modo
+  `{escenarios, activo}` con migración perezosa del formato antiguo. Cambios:
+  `casos_uso.py` (`GuardarEscenariosRender`, `contenedor_escenarios_proyecto`,
+  `_normalizar_escenarios`, `parametros_desde_proyecto(escenario_id=...)`, sustituye
+  a `GuardarRender`); `rutas/render_calculos.py` (`POST /escenarios` sustituye a
+  `/guardar`, `GET ?escenario=`); `templates/render_calculos.html`
+  (`#rc-escenarios` junto con `window.__RC_ESCENARIOS__`/`__RC_ESCENARIO_ACTIVO__`);
+  `render_calculos.js` (`nombreEscenario`, `dibujarTabsEscenarios`,
+  `cambiarEscenario`/`crearEscenario`/`borrarEscenario`); `render_calculos.css`
+  (`.rc-esc-*`). Tests nuevos:
+  `test_escenarios.py` (dominio/migración) y `test_render_calculos_rutas.py`
+  (primeros tests de ruta HTTP del contexto). Detalle de decisiones en memoria
+  persistente `project_pestanas_escenarios_render`.
+- **2026-07-06 (1)** — Creado este registro (lectura de README.md, RENDER_GEOMETRICO.md,
   `dominio.py`, `casos_uso.py`, `accesibilidad.py`, `parametros.py` + verificación de
   rama activa y recuento de tests). Sin cambios de código. Rama activa:
   `pestañas-proyectos` (hija de `pre`, commit base `9d37100`). Para la evolución

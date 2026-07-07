@@ -781,25 +781,214 @@
     }
   }
 
-  // ─── Guardar parámetros ───────────────────────────────────────────────
-  let guardando = false;   // anti-doble-click: evita POST /guardar concurrentes
+  // ─── Escenarios (pestañas del activo) ─────────────────────────────────
+  // Cada pestaña es una hipótesis de programa sobre la misma parcela. El estado
+  // vive embebido (window.__RC_ESCENARIOS__): la pestaña ACTIVA se edita en el
+  // formulario; las demás conservan sus parámetros/resumen. Conmutar/crear/borrar
+  // persiste la lista y recarga (el servidor renderiza el escenario destino).
+  const tabsEscenariosEl = document.getElementById("rc-escenarios");
+  const ESCENARIOS = Array.isArray(window.__RC_ESCENARIOS__) ? window.__RC_ESCENARIOS__ : [];
+  let escenarioActivo = window.__RC_ESCENARIO_ACTIVO__
+    || (ESCENARIOS[0] && ESCENARIOS[0].id) || "e1";
+  if (!ESCENARIOS.length && estado === "ok") {
+    ESCENARIOS.push({ id: escenarioActivo, nombre: "", parametros: {}, resumen: {} });
+  }
+  let ocupadoEsc = false;   // anti-doble-click en alta/baja/conmutación
+
+  function resumenActual() {
+    // Iter. 3: el resumen viene de data.capacidad (no de edificio.totales).
+    return ESTADO.fullPayload?.capacidad
+      || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
+      || ESTADO.fullPayload?.edificio?.totales
+      || ESTADO.previewPayload?.envolvente
+      || {};
+  }
+
+  function _textoOpcion(sel) {
+    if (!sel || sel.selectedIndex < 0) return "";
+    const o = sel.options[sel.selectedIndex];
+    return o ? (o.textContent || "").trim() : "";
+  }
+  function _nDorms() {
+    const inp = document.getElementById("rc-apt-ndorms");
+    const n = inp ? parseInt(inp.value, 10) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+  // Nombre reactivo de la pestaña, derivado del programa elegido en el formulario.
+  function nombreEscenario() {
+    const uso = usoActivoForm();
+    if (uso === "vivienda") {
+      const n = _nDorms();
+      if (n <= 0) return "Vivienda · Estudio";
+      return "Vivienda · " + n + (n === 1 ? " habitación" : " habitaciones");
+    }
+    if (uso === "apartamentos_turisticos") {
+      const llaves = (form.querySelector('select[name="categoria_apartamentos"]')?.value || "").trim();
+      const grupoVal = form.querySelector('select[name="grupo_apartamentos"]')?.value || "";
+      const grupo = grupoVal === "conjuntos" ? "Conjunto" : "Edificio";
+      const n = _nDorms();
+      const cola = n <= 0 ? "Estudio" : (n + " dorm.");
+      return "Apartamento " + (llaves ? llaves + " · " : "") + grupo + " · " + cola;
+    }
+    if (uso === "hotelero") {
+      const cat = _textoOpcion(form.querySelector('select[name="categoria_hotelero"]'));
+      const tip = _textoOpcion(form.querySelector('select[name="tipologia_habitacion"][data-bloque="programa"]'));
+      return tip ? (cat + " · " + tip) : (cat || "Hotelero");
+    }
+    return "Escenario";
+  }
+
+  function _etiquetaEscenario(e) {
+    const nom = (e.id === escenarioActivo) ? nombreEscenario() : (e.nombre || "");
+    return nom || "Escenario";
+  }
+
+  function dibujarTabsEscenarios() {
+    if (!tabsEscenariosEl) return;
+    tabsEscenariosEl.innerHTML = "";
+    ESCENARIOS.forEach(e => {
+      const tab = document.createElement("div");
+      tab.className = "rc-esc-tab" + (e.id === escenarioActivo ? " rc-esc-tab-activo" : "");
+      tab.dataset.id = e.id;
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "rc-esc-tab-btn";
+      btn.setAttribute("role", "tab");
+      btn.setAttribute("aria-selected", e.id === escenarioActivo ? "true" : "false");
+      btn.textContent = _etiquetaEscenario(e);
+      if (e.id !== escenarioActivo) btn.addEventListener("click", () => cambiarEscenario(e.id));
+      tab.appendChild(btn);
+
+      if (puedeEditar && ESCENARIOS.length > 1) {
+        const cerrar = document.createElement("button");
+        cerrar.type = "button";
+        cerrar.className = "rc-esc-cerrar";
+        cerrar.setAttribute("aria-label", "Eliminar escenario");
+        cerrar.textContent = "×";
+        cerrar.addEventListener("click", ev => { ev.stopPropagation(); borrarEscenario(e.id); });
+        tab.appendChild(cerrar);
+      }
+      tabsEscenariosEl.appendChild(tab);
+    });
+    if (puedeEditar) {
+      const mas = document.createElement("button");
+      mas.type = "button";
+      mas.className = "rc-esc-add";
+      mas.title = "Añadir escenario";
+      mas.setAttribute("aria-label", "Añadir escenario");
+      mas.textContent = "+";
+      mas.addEventListener("click", crearEscenario);
+      tabsEscenariosEl.appendChild(mas);
+    }
+  }
+
+  // Actualiza en vivo el nombre de la pestaña activa al cambiar el programa.
+  function actualizarNombreActivo() {
+    if (!tabsEscenariosEl) return;
+    const e = ESCENARIOS.find(x => x.id === escenarioActivo);
+    const nom = nombreEscenario();
+    if (e) e.nombre = nom;
+    const btn = tabsEscenariosEl.querySelector(".rc-esc-tab-activo .rc-esc-tab-btn");
+    if (btn) btn.textContent = nom || "Escenario";
+  }
+
+  function _snapshotActivo() {
+    const e = ESCENARIOS.find(x => x.id === escenarioActivo);
+    if (!e) return;
+    e.parametros = leerFormulario();
+    e.resumen = resumenActual();
+    e.nombre = nombreEscenario();
+  }
+
+  function _persistirEscenarios(nuevoActivo) {
+    const body = {
+      escenarios: ESCENARIOS.map(e => ({
+        id: e.id, nombre: e.nombre || "",
+        parametros: e.parametros || {}, resumen: e.resumen || {},
+      })),
+      activo: nuevoActivo || escenarioActivo,
+      modo: modoActivo,
+    };
+    return fetch("/modulos/render-calculos/escenarios", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  function _nuevoIdEscenario() {
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID().slice(0, 8); } catch (e) { /* sin crypto */ }
+    return "e" + Math.abs(Date.now()).toString(36);
+  }
+
+  function _irAEscenario(id) {
+    const u = new URL(window.location.href);
+    u.searchParams.set("escenario", id);
+    window.location.assign(u.toString());
+  }
+
+  async function cambiarEscenario(id) {
+    if (id === escenarioActivo || ocupadoEsc) return;
+    ocupadoEsc = true;
+    try {
+      if (puedeEditar) {
+        _snapshotActivo();
+        const r = await _persistirEscenarios(id);
+        if (!r.ok && r.status !== 409) {
+          ocupadoEsc = false;
+          mostrarToast("No se pudo guardar antes de cambiar", true);
+          return;
+        }
+      }
+      _irAEscenario(id);   // el servidor renderiza el escenario destino
+    } catch (e) { ocupadoEsc = false; mostrarToast("Error de red", true); }
+  }
+
+  async function crearEscenario() {
+    if (!puedeEditar || ocupadoEsc) return;
+    ocupadoEsc = true;
+    try {
+      _snapshotActivo();
+      const nuevo = {
+        id: _nuevoIdEscenario(),
+        nombre: nombreEscenario(),
+        parametros: leerFormulario(),   // copia del escenario actual
+        resumen: resumenActual(),
+      };
+      ESCENARIOS.push(nuevo);
+      const r = await _persistirEscenarios(nuevo.id);
+      if (!r.ok) { ocupadoEsc = false; mostrarToast("No se pudo crear el escenario", true); return; }
+      _irAEscenario(nuevo.id);
+    } catch (e) { ocupadoEsc = false; mostrarToast("Error de red", true); }
+  }
+
+  async function borrarEscenario(id) {
+    if (!puedeEditar || ocupadoEsc || ESCENARIOS.length <= 1) return;
+    ocupadoEsc = true;
+    try {
+      const idx = ESCENARIOS.findIndex(x => x.id === id);
+      if (idx < 0) { ocupadoEsc = false; return; }
+      if (id !== escenarioActivo) _snapshotActivo();   // no snapshotear el que se elimina
+      ESCENARIOS.splice(idx, 1);
+      const destino = (id === escenarioActivo)
+        ? (ESCENARIOS[Math.max(0, idx - 1)] || ESCENARIOS[0]).id
+        : escenarioActivo;
+      const r = await _persistirEscenarios(destino);
+      if (!r.ok) { ocupadoEsc = false; mostrarToast("No se pudo eliminar", true); return; }
+      _irAEscenario(destino);
+    } catch (e) { ocupadoEsc = false; mostrarToast("Error de red", true); }
+  }
+
+  // ─── Guardar (persiste el escenario activo en su pestaña) ─────────────
+  let guardando = false;   // anti-doble-click: evita POST concurrentes
   async function guardar() {
-    if (!puedeEditar || guardando) return;
+    if (!puedeEditar || guardando || !ESCENARIOS.length) return;
     guardando = true;
     if (btnGuardar) btnGuardar.disabled = true;
     try {
-      const bloques = leerFormulario();
-      // Iter. 3: el resumen ahora viene de data.capacidad (no de edificio.totales).
-      const resumen = ESTADO.fullPayload?.capacidad
-        || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
-        || ESTADO.fullPayload?.edificio?.totales
-        || ESTADO.previewPayload?.envolvente
-        || {};
-      const resp = await fetch("/modulos/render-calculos/guardar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parametros: bloques, resumen, modo: modoActivo }),
-      });
+      _snapshotActivo();
+      const resp = await _persistirEscenarios(escenarioActivo);
       if (resp.status === 409) { mostrarToast("Crea o abre un proyecto primero", true); return; }
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ detail: resp.statusText }));
@@ -1941,6 +2130,7 @@
     ESTADO.interaccionUsuario = true;   // cualquier edición habilita el modal de exceso
     aplicarVisibilidad();
     actualizarOpcionesCondicionales();
+    actualizarNombreActivo();           // nombre reactivo de la pestaña activa
     if (ESTADO.debounceId) clearTimeout(ESTADO.debounceId);
     ESTADO.debounceId = setTimeout(recalcularAuto, 300);
   }
@@ -1950,6 +2140,7 @@
   // iteración): el cálculo ya es automático con cada cambio, sin binding aquí.
   if (btnGuardar) btnGuardar.addEventListener("click", guardar);
   if (btnCsv) btnCsv.addEventListener("click", exportCsv);
+  if (tabsEscenariosEl) dibujarTabsEscenarios();   // barra de escenarios (pestañas)
 
   // Brújula inicial vacía + handler de rotación → render (no existe en inmueble).
   if (window.RcBrujula && brujulaEl) {

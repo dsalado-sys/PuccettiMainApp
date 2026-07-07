@@ -668,6 +668,42 @@
 /* La nota "computable a efectos turísticos" solo aplica a usos turísticos. */
 .rc-mu-no-turismo .rc-mu-nota-turismo { display: none; }
 
+/* ── Escenarios (pestañas del activo, sobre la barra catastral) ─────────
+   Cada pestaña es una hipótesis de programa sobre la misma parcela; su nombre
+   es reactivo al uso elegido. Dorado corporativo sobre neutro. */
+.rc-escenarios {
+  display: flex; flex-wrap: wrap; align-items: stretch; gap: var(--space-xs);
+  margin: 0 0 var(--space-sm);
+}
+.rc-esc-tab {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: var(--surface); border: 1px solid var(--outline-subtle);
+  border-radius: var(--radio); padding: 0 4px 0 2px; max-width: 320px;
+}
+.rc-esc-tab-btn {
+  border: none; background: transparent; cursor: pointer;
+  padding: 8px 10px; font-size: var(--text-sm); font-weight: 500;
+  color: var(--on-surface-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;
+}
+.rc-esc-tab-btn:hover { color: var(--on-surface); }
+.rc-esc-tab-activo {
+  border-color: var(--dorado); background: var(--tint-primary-10); box-shadow: var(--sombra);
+}
+.rc-esc-tab-activo .rc-esc-tab-btn { color: var(--on-surface); font-weight: 600; cursor: default; }
+.rc-esc-cerrar {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--on-surface-muted); font-size: 15px; line-height: 1;
+  padding: 2px 6px; border-radius: var(--radio);
+}
+.rc-esc-cerrar:hover { color: var(--error); background: var(--tint-error-6); }
+.rc-esc-add {
+  border: 1px dashed var(--outline-subtle); background: transparent; cursor: pointer;
+  color: var(--on-surface-secondary); font-size: 18px; line-height: 1; font-weight: 600;
+  min-width: 34px; border-radius: var(--radio);
+}
+.rc-esc-add:hover { color: var(--dorado); border-color: var(--dorado); }
+
 /* ── Barra de datos catastrales (siempre visible en el módulo) ──────── */
 .rc-catastro-bar {
   display: flex; flex-wrap: wrap; gap: var(--space-sm) 28px; align-items: center;

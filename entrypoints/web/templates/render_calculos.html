@@ -35,6 +35,12 @@
   </div>
 </section>
 
+{% if estado == "ok" %}
+<nav class="rc-escenarios" id="rc-escenarios" role="tablist" aria-label="Escenarios del activo">
+  <!-- Las pestañas (+ botón «+») se pintan desde JS a partir de window.__RC_ESCENARIOS__. -->
+</nav>
+{% endif %}
+
 {% if catastro %}
 <section class="rc-catastro-bar" aria-label="Datos catastrales de la parcela">
   <span class="rc-cat-item">
@@ -256,6 +262,11 @@
 {% include "_rc_modal_minimos.html" %}
 
 <script>window.__RC_NORMATIVA_APLICADA__ = {{ normativa_aplicada | tojson if normativa_aplicada else 'null' }};</script>
+<script>
+  // Escenarios (pestañas) del modo activo: lista con parámetros+resumen y cuál está activo.
+  window.__RC_ESCENARIOS__ = {{ escenarios | tojson if escenarios else '[]' }};
+  window.__RC_ESCENARIO_ACTIVO__ = {{ escenario_activo | tojson if escenario_activo else 'null' }};
+</script>
 <script src="/static/js/rc_brujula.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_canvas.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_patios.js?v={{ estaticos_version }}" defer></script>

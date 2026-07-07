@@ -1220,6 +1220,38 @@ class GuardarRender:
         return self.repo_proyectos.guardar(proyecto)
 
 
+# ─── Caso de uso 4-bis: GuardarEscenariosRender ─────────────────────────────
+@dataclass
+class GuardarEscenariosRender:
+    """Persiste la LISTA de escenarios (pestañas) de un modo en el aggregate.
+
+    Un «escenario» es una hipótesis de programa sobre la misma parcela (uso +
+    parámetros + resumen) con nombre reactivo. El frontend es la fuente de verdad de
+    la lista (alta/baja/renombrado ocurren en cliente); aquí solo se guarda el
+    contenedor ``{escenarios, activo}`` bajo la clave del modo, conservando los
+    bloques de OTROS modos y la clave ``normativa_aplicada``, y descartando el
+    formato plano legado (migración). Sustituye a :class:`GuardarRender` cuando el
+    módulo trabaja con pestañas de escenario.
+    """
+
+    repo_proyectos: ProyectoRepositorio
+
+    def ejecutar(
+        self,
+        proyecto: Proyecto,
+        escenarios: list[dict[str, Any]],
+        activo: str,
+        modo_key: str = "obra-nueva",
+    ) -> Proyecto:
+        bloque = {"escenarios": escenarios, "activo": activo}
+        datos_actual = dict(proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {})
+        # Conserva los bloques de OTROS modos (y normativa_aplicada); descarta el plano legado.
+        nuevos = {k: v for k, v in datos_actual.items() if k not in _CLAVES_LEGADO}
+        nuevos[modo_key] = bloque
+        proyecto.fijar_datos(ModuloPuccetti.RENDER_CALCULOS, nuevos)
+        return self.repo_proyectos.guardar(proyecto)
+
+
 _RE_PLANTA = re.compile(r"Pl[:\s]+([^\s·]+)", re.IGNORECASE)
 
 
@@ -1433,32 +1465,98 @@ def adaptar_params_a_edificio_existente(params: ParametrosRender, proyecto: Proy
         params.urbanisticos.patios = []
 
 
+# ─── Escenarios (pestañas) de un modo ───────────────────────────────────────
+def _normalizar_escenarios(bloque: Any) -> dict[str, Any] | None:
+    """Normaliza el bloque de un modo al contenedor ``{escenarios, activo}``.
+
+    Acepta el formato NUEVO (``{escenarios:[...], activo}``) y el ANTIGUO por-modo
+    (``{parametros, resumen_ultimo_calculo, timestamp}``), que se envuelve como un
+    único escenario ``e1`` (migración perezosa: no se persiste hasta el siguiente
+    guardado). Devuelve ``None`` si no hay parámetros aprovechables.
+    """
+    if not isinstance(bloque, dict):
+        return None
+    escenarios = bloque.get("escenarios")
+    if isinstance(escenarios, list):
+        validos = [e for e in escenarios if isinstance(e, dict) and e.get("id")]
+        if not validos:
+            return None
+        ids = [e["id"] for e in validos]
+        activo = bloque.get("activo")
+        if activo not in ids:
+            activo = ids[0]
+        return {"escenarios": validos, "activo": activo}
+    # Formato antiguo: un solo bloque con `parametros` → un escenario `e1`.
+    if bloque.get("parametros"):
+        uno = {
+            "id": "e1",
+            "nombre": bloque.get("nombre") or "",
+            "parametros": bloque["parametros"],
+            "resumen_ultimo_calculo": bloque.get("resumen_ultimo_calculo") or {},
+            "timestamp": bloque.get("timestamp") or "",
+        }
+        return {"escenarios": [uno], "activo": "e1"}
+    return None
+
+
+def _bloque_modo(proyecto: Proyecto | None, modo_key: str | None, heredar_legado: bool) -> Any:
+    """Devuelve el bloque bruto del modo (o el plano legado si procede)."""
+    if proyecto is None:
+        return None
+    datos_render = proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}
+    if modo_key and isinstance(datos_render.get(modo_key), dict):
+        return datos_render[modo_key]
+    if heredar_legado and datos_render.get("parametros"):
+        return datos_render  # formato plano legado = modo por defecto
+    return None
+
+
+def contenedor_escenarios_proyecto(
+    proyecto: Proyecto | None,
+    modo_key: str | None = None,
+    *,
+    heredar_legado: bool = False,
+) -> dict[str, Any] | None:
+    """Contenedor ``{escenarios, activo}`` normalizado del modo, o ``None`` si no hay nada guardado."""
+    return _normalizar_escenarios(_bloque_modo(proyecto, modo_key, heredar_legado))
+
+
+def _escenario_activo(cont: dict[str, Any], override: str | None = None) -> dict[str, Any]:
+    """Escenario activo del contenedor. `override` (id de una pestaña) tiene prioridad
+    si existe; si no, se usa el `activo` guardado; si tampoco, el primero."""
+    ids = {e.get("id") for e in cont["escenarios"]}
+    activo_id = override if override in ids else cont["activo"]
+    return next(
+        (e for e in cont["escenarios"] if e.get("id") == activo_id),
+        cont["escenarios"][0],
+    )
+
+
 def parametros_desde_proyecto(
     proyecto: Proyecto | None,
     modo_key: str | None = None,
     *,
     heredar_legado: bool = False,
     adaptar_a_existente: bool = False,
+    escenario_id: str | None = None,
 ) -> ParametrosRender:
-    """Lee parámetros del aggregate para un MODO; usa viabilidad como fallback.
+    """Lee parámetros del ESCENARIO ACTIVO de un MODO; usa viabilidad como fallback.
 
     - `modo_key`: clave del bloque del modo en `datos(RENDER_CALCULOS)`.
     - `heredar_legado`: si el modo no tiene bloque propio, ¿puede heredar el formato
       plano legado? (solo el modo por defecto / obra nueva debería).
     - `adaptar_a_existente`: si no hay params guardados, adapta al edificio existente
       (rehabilitación). El que decide estos flags es la capa que conoce los modos.
+    - `escenario_id`: fuerza qué pestaña se lee (para previsualizar otra sin persistir);
+      si no existe, cae al escenario activo guardado.
     """
     if proyecto is None:
         return ParametrosRender()
-    datos_render = proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}
-
-    bloque = None
-    if modo_key and isinstance(datos_render.get(modo_key), dict):
-        bloque = datos_render[modo_key]
-    elif heredar_legado and datos_render.get("parametros"):
-        bloque = datos_render  # formato plano legado = modo por defecto
-    if bloque and bloque.get("parametros"):
-        return parametros_desde_dict(bloque["parametros"])
+    cont = contenedor_escenarios_proyecto(proyecto, modo_key, heredar_legado=heredar_legado)
+    if cont:
+        activo = _escenario_activo(cont, escenario_id)
+        if activo.get("parametros"):
+            return parametros_desde_dict(activo["parametros"])
 
     # Sin params guardados para este modo: defaults + herencia de edificabilidad
     # introducida en §2.9 viabilidad (compat con la clave antigua).
