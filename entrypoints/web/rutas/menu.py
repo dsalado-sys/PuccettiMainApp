@@ -24,6 +24,10 @@ def menu_principal(
     rol: Rol = Depends(rol_activo),
     proyecto: Proyecto | None = Depends(proyecto_activo),
 ):
+    # Sin proyecto activo, la primera vista es Proyectos (el hub de tarjetas solo se
+    # muestra una vez hay proyecto seleccionado). Cubre también el post-login (→ "/").
+    if proyecto is None:
+        return RedirectResponse(url="/proyectos", status_code=303)
     tarjetas = [
         {
             "modulo": tarjeta,

@@ -89,6 +89,10 @@
     // evita que el modal salte en la carga inicial automática.
     excesoAceptado: false,
     interaccionUsuario: false,
+    // Alertas del último cálculo (para persistir un resumen por escenario en el
+    // aggregate — el flujo del proyecto lo clasifica en errores/avisos). `undefined`
+    // = todavía no se ha calculado este escenario.
+    ultimasAlertas: undefined,
   };
 
   function usoActivoForm() {
@@ -530,7 +534,17 @@
   // (dominio.py): antes faltaba "incumplimiento" e inventaba un "error" no emitido,
   // y por el fallback `?? 1` todo incumplimiento se degradaba al peso de "aviso".
   const NIVEL_PESO = { error: 0, incumplimiento: 1, aviso: 2, info: 3 };
+  // Conteo de alertas del último cálculo por nivel (para el resumen persistido por
+  // escenario). Los niveles casan con `NivelAlerta` del dominio.
+  function resumenAlertas(alertas) {
+    const c = { error: 0, incumplimiento: 0, aviso: 0, info: 0 };
+    (alertas || []).forEach(a => { if (a && c[a.nivel] !== undefined) c[a.nivel]++; });
+    return c;
+  }
+
   function repintarAlertas(alertas) {
+    // Se llama siempre tras un cálculo real → registra las alertas para el resumen.
+    ESTADO.ultimasAlertas = alertas || [];
     if (!alertasBox || !alertasUl) return;
     if (!alertas || !alertas.length) {
       alertasBox.hidden = true;
@@ -797,11 +811,17 @@
 
   function resumenActual() {
     // Iter. 3: el resumen viene de data.capacidad (no de edificio.totales).
-    return ESTADO.fullPayload?.capacidad
+    const base = ESTADO.fullPayload?.capacidad
       || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
       || ESTADO.fullPayload?.edificio?.totales
       || ESTADO.previewPayload?.envolvente
       || {};
+    // Si hubo cálculo, embebe el resumen de alertas (lo consume el flujo del
+    // proyecto). Sin cálculo aún → se deja fuera (escenario «sin calcular»).
+    if (ESTADO.ultimasAlertas !== undefined) {
+      return { ...base, alertas_resumen: resumenAlertas(ESTADO.ultimasAlertas) };
+    }
+    return base;
   }
 
   function _textoOpcion(sel) {

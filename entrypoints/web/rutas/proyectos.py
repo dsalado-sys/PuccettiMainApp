@@ -28,6 +28,7 @@ from app.contextos.proyectos.casos_uso import (
     EliminarProyecto,
     ListarProyectos,
 )
+from app.contextos.proyectos.flujo import calcular_flujo, flujo_a_dict
 from app.nucleo.modelo import Proyecto, Rol
 from app.nucleo.modelo.rol import PermisoModulo, puede_acceder
 
@@ -93,6 +94,8 @@ def datos(
             "estado": p.estado.value,
             "actualizado_en": p.actualizado_en.strftime("%Y-%m-%d %H:%M"),
             "carpeta_id": mapa.get(p.id),
+            # Flujo de estados (interno; la UI aún no lo pinta).
+            "flujo": flujo_a_dict(calcular_flujo(p)),
         }
         for p in uc.ejecutar()
     ]
