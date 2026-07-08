@@ -1815,23 +1815,18 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
             f"Factor limitante: {cap.factor_limitante}.",
         ))
 
-    # El total de patios (sumado por plantas) no debe superar la superficie libre
-    # (complemento de la ocupación máxima): los patios «viven» en esa superficie libre.
-    patio_total = sum(getattr(cap, "patio_por_planta", []) or [])
-    libre_total = sum(getattr(cap, "superficie_libre_por_planta", []) or [])
-    if patio_total > libre_total + 1e-6:
-        alertas.append(Alerta(
-            "aviso", "Capacidad",
-            f"La superficie total de patios ({patio_total:.2f} m²) supera la superficie "
-            f"libre disponible ({libre_total:.2f} m²).",
-        ))
-
-    if getattr(cap, "patio_sin_espacio", False):
+    # Modelo mixto: el patio vive en la superficie libre (parcela − construida); la
+    # parte que no cabe excava la huella construida y resta a la útil repartible. Si
+    # hay excavación, se avisa (y se indica que bajar la ocupación libera superficie).
+    patio_excavado = float(getattr(cap, "patio_excavado_m2", 0.0) or 0.0)
+    if patio_excavado > 1e-6:
+        area_patio = float(getattr(cap, "area_patio_min_m2", 0.0) or 0.0)
         alertas.append(Alerta(
             "aviso", "Normativa",
-            f"No hay espacio en la planta para los patios definidos "
-            f"({cap.area_patio_min_m2:.2f} m²) tras descontar muros, circulación y "
-            f"núcleo. Reduce la ocupación de la planta o la superficie de patio.",
+            f"El patio ({area_patio:.2f} m²) está excavando {patio_excavado:.2f} m² de "
+            f"la superficie construida, que se descuentan de la superficie útil "
+            f"repartible entre las unidades. Si se disminuye la ocupación máxima, el "
+            f"patio dispondrá de superficie libre y dejará de restar a las unidades.",
         ))
 
     # Cada patio definido debe alcanzar el área mínima exigida (`area_patio_min_m2`).
@@ -1857,8 +1852,7 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
         if sobrante >= cap.util_objetivo_viv_m2 * 0.5:
             alertas.append(Alerta(
                 "info", "Capacidad",
-                f"Sobran {sobrante:.2f} m² útiles tras truncar — si reduces el "
-                f"mínimo por estancias podría caber 1 unidad más.",
+                f"Sobran {sobrante:.2f} m² útiles tras truncar",
             ))
 
     if programa_uso is not None and programa_uso.tipo_unidad in (

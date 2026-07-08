@@ -1,10 +1,10 @@
-"""Superficie libre (complemento de la ocupación) y aviso de Capacidad.
+"""Superficie libre (complemento de la ocupación) y aviso de excavación de patio.
 
 Al eliminar el retranqueo de ocupación en el render, la ocupación deja de dibujarse
 como un anillo y su complemento se reporta como «superficie libre» = (1 − ocupación) ×
-sup_ref, sumada por plantas y contemplando las dos ocupaciones (PB y tipo). El total de
-patios (sumado por plantas) no debe superar esa superficie libre; si lo hace, salta un
-aviso `Alerta("aviso", "Capacidad", …)`.
+sup_ref, sumada por plantas y contemplando las dos ocupaciones (PB y tipo). Modelo
+mixto de patio: el patio vive en esa superficie libre; la parte que no cabe EXCAVA la
+huella construida y salta un aviso `Alerta("aviso", "Normativa", "… está excavando …")`.
 """
 from __future__ import annotations
 
@@ -57,21 +57,24 @@ def test_ocupacion_100_deja_superficie_libre_cero():
     assert abs(d["superficie_libre_total_m2"]) < 1.0
 
 
-def test_aviso_capacidad_cuando_patio_total_supera_superficie_libre():
-    """1 planta al 80% → superficie libre = 80 m². Un patio total de 100 m² la supera →
-    salta el aviso de Capacidad."""
+def test_aviso_excavacion_cuando_patio_total_supera_superficie_libre():
+    """1 planta al 80% → superficie libre = 80 m². Un patio de 100 m² no cabe en la
+    superficie libre → excava el resto y salta el aviso «está excavando»."""
     p = _render(80.0, 80.0, n_plantas=1, patios=[100.0])
     cap = _capacidad(p)
+    assert cap.patio_excavado_m2 > 0
     alertas = _alertas_capacidad(cap, p, None)
-    capacidad = [a for a in alertas if a.regla == "Capacidad"
-                 and "supera la superficie libre" in a.mensaje]
-    assert len(capacidad) == 1
-    assert capacidad[0].nivel == "aviso"
+    excavacion = [a for a in alertas if a.regla == "Normativa"
+                  and "está excavando" in a.mensaje]
+    assert len(excavacion) == 1
+    assert excavacion[0].nivel == "aviso"
 
 
-def test_sin_aviso_capacidad_cuando_patio_total_cabe_en_superficie_libre():
-    """1 planta al 80% → superficie libre = 80 m². Un patio total de 40 m² cabe → sin aviso."""
+def test_sin_aviso_excavacion_cuando_patio_total_cabe_en_superficie_libre():
+    """1 planta al 80% → superficie libre = 80 m². Un patio de 40 m² cabe en la
+    superficie libre → no excava y no salta aviso."""
     p = _render(80.0, 80.0, n_plantas=1, patios=[40.0])
     cap = _capacidad(p)
+    assert cap.patio_excavado_m2 == 0.0
     alertas = _alertas_capacidad(cap, p, None)
-    assert not any("supera la superficie libre" in a.mensaje for a in alertas)
+    assert not any("está excavando" in a.mensaje for a in alertas)

@@ -137,11 +137,12 @@ class Capacidad:
     area_servicios_comunes_m2: float = 0.0
     n_plantas_habitables: int = 0
     construida_computable_m2: float = 0.0
-    # Superficie de patio interior objetivo (mínimo normativo configurable). Si en
-    # alguna planta habitable no cabe ese mínimo tras descontar muros/circulación/
-    # núcleo, `patio_sin_espacio` queda en True para emitir el aviso correspondiente.
+    # Superficie de patio interior objetivo (mínimo normativo configurable). El
+    # patio vive preferentemente en la superficie libre (parcela − construida); la
+    # parte que no cabe EXCAVA la huella construida y se acumula en
+    # `patio_excavado_m2` (esa parte resta a la útil y dispara el aviso).
     area_patio_min_m2: float = 0.0
-    patio_sin_espacio: bool = False
+    patio_excavado_m2: float = 0.0
     # Accesibilidad (DB-SUA): nº de unidades adaptadas asignadas automáticamente
     # por tramos (0 en vivienda) y modo de adaptación ("total" o "parcial").
     n_unidades_adaptadas: int = 0
@@ -414,7 +415,7 @@ def calcular_capacidad(
     construida_computable_efectiva = 0.0
     idx_visual = 0
     area_patio_norm = float(getattr(params.diseno, "area_patio_min", 12.0))
-    patio_sin_espacio = False
+    patio_excavado_total = 0.0
     # § hotel: la composición POR PLANTA elegida se replica en cada planta habitable;
     # una planta con menos útil (PB con comunes) la trunca → aviso.
     composicion_truncada = False
@@ -490,24 +491,24 @@ def calcular_capacidad(
             # + patio + reservas (y la construida reportada = huella_i − patio_i).
             circ_i = min(circ_m2_planta + descuento_por_planta, max(0.0, construida_i - muros_i))
 
-            # Patio interior: superficie mínima normativa (configurable), SIN
-            # heurísticas (antes se topaba al 20% de la planta). Ocupa espacio físico
-            # de la huella; se coloca en lo que queda tras muros/circulación/núcleo.
-            # Si ese mínimo no cabe, se coloca solo el espacio disponible y se marca
-            # para avisar (no hay sitio en la planta para el patio mínimo).
+            # Patio interior (modelo MIXTO): se reporta ÍNTEGRO, nunca se trunca.
+            # Vive preferentemente en la superficie libre (parcela − construida); la
+            # parte que no cabe ahí EXCAVA la huella construida. Reducir la ocupación
+            # aumenta la superficie libre y reduce la excavación (comportamiento
+            # intuitivo, opuesto al tope antiguo contra el interior).
+            excavado_i = 0.0
             if area_patio_norm > 0:
-                espacio_para_patio = max(0.0, construida_i - muros_i - circ_i - nucl_i)
-                patio_i = min(area_patio_norm, espacio_para_patio)
-                if area_patio_norm > espacio_para_patio + 1e-6:
-                    patio_sin_espacio = True
+                patio_i = area_patio_norm
+                libre_planta = max(0.0, parcela_area - construida_i)
+                excavado_i = max(0.0, patio_i - libre_planta)
+                patio_excavado_total += excavado_i
 
-            # El patio ya NO resta a la útil: las unidades se construyen sobre la
-            # construida completa (el patio se contabiliza aparte, contra la superficie
-            # libre). `patio_i` se sigue calculando arriba solo para reportarlo y para
-            # el aviso de Capacidad.
+            # La parte EXCAVADA del patio ocupa interior del edificio → resta a la
+            # útil repartible entre las unidades. La parte que cae en superficie libre
+            # (no incluida en `excavado_i`) no toca la útil.
             util_bruto_i = max(
                 0.0,
-                construida_i - muros_i - circ_i - nucl_i,
+                construida_i - muros_i - circ_i - nucl_i - excavado_i,
             )
             if es_pb:
                 # Reservas de PB en m² ABSOLUTOS: local (vivienda/AT), otros (todos) y
@@ -656,7 +657,7 @@ def calcular_capacidad(
         n_plantas_habitables=n_plantas_habitables,
         construida_computable_m2=construida_computable_efectiva,
         area_patio_min_m2=area_patio_norm,
-        patio_sin_espacio=patio_sin_espacio,
+        patio_excavado_m2=patio_excavado_total,
         util_planta_representativa_m2=util_planta_representativa,
         composicion_truncada=composicion_truncada,
     )
@@ -733,7 +734,7 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "construida_computable_m2": round(cap.construida_computable_m2, 2),
         "area_servicios_comunes_m2": round(cap.area_servicios_comunes_m2, 2),
         "area_patio_min_m2": round(cap.area_patio_min_m2, 2),
-        "patio_sin_espacio": cap.patio_sin_espacio,
+        "patio_excavado_m2": round(cap.patio_excavado_m2, 2),
         "n_unidades_adaptadas": cap.n_unidades_adaptadas,
         "modo_adaptacion": cap.modo_adaptacion,
         "factor_limitante": cap.factor_limitante,

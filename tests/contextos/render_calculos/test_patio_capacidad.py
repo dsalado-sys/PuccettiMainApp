@@ -1,9 +1,10 @@
 """Patio interior: superficie mínima normativa (configurable), sin heurística.
 
 Antes el patio se topaba al 20% de la huella (`min(area_patio_min, huella×0.20)`),
-una heurística sin base normativa. Ahora se coloca el mínimo normativo completo si
-cabe en lo que queda tras muros/circulación/núcleo; si no cabe, se coloca solo el
-espacio disponible y `patio_sin_espacio` queda en True para avisar.
+una heurística sin base normativa. Modelo actual (MIXTO): el patio se reporta
+ÍNTEGRO (nunca se trunca). Vive preferentemente en la superficie libre
+(parcela − construida); la parte que no cabe ahí EXCAVA la huella construida, se
+acumula en `patio_excavado_m2`, resta a la útil repartible y dispara un aviso.
 """
 from __future__ import annotations
 
@@ -36,27 +37,31 @@ def _env(huella_m2: float, n_plantas: int = 1) -> SimpleNamespace:
 
 
 def test_patio_usa_el_minimo_normativo_no_el_20pct():
-    """Huella 50 m²: el 20% serían 10 m² (< 12), pero aún quedan > 12 tras
-    muros/circulación/núcleo → el patio toma el mínimo normativo COMPLETO (12)."""
+    """Huella 50 m²: el 20% serían 10 m² (< 12), pero el patio se reporta ÍNTEGRO
+    (mínimo normativo COMPLETO, 12). Como aquí parcela = huella (sin superficie
+    libre), esos 12 m² se excavan de la construida."""
     params = ParametrosRender()  # area_patio_min_m2 = 12 por defecto
     cap = calcular_capacidad(_env(50.0), params.a_parametros_motor())
     assert cap.patio_por_planta[0] == 12.0   # mínimo normativo, no 10.0 (viejo 20%)
-    assert cap.patio_sin_espacio is False
+    assert cap.patio_excavado_m2 == 12.0     # libre 0 → excava los 12
     assert cap.area_patio_min_m2 == 12.0
 
 
-def test_patio_avisa_cuando_no_cabe_el_minimo():
-    """Huella diminuta: tras muros/circulación/núcleo no caben 12 m² de patio →
-    se coloca lo disponible y se marca el aviso, sin dejar útil negativo."""
+def test_patio_excava_cuando_no_hay_superficie_libre():
+    """Sin superficie libre (parcela = huella) el patio se coloca ÍNTEGRO y excava
+    la construida: la parte excavada resta a la útil (sin dejarla negativa) y salta
+    el aviso «está excavando»."""
     params = ParametrosRender()
     cap = calcular_capacidad(_env(14.0), params.a_parametros_motor())
-    assert cap.patio_sin_espacio is True
-    assert cap.patio_por_planta[0] < 12.0
+    assert cap.patio_por_planta[0] == 12.0       # íntegro, ya no se trunca
+    assert cap.patio_excavado_m2 > 0
     assert cap.util_por_planta[0] >= 0.0
+    alertas = _alertas_capacidad(cap, params, None)
+    assert any("está excavando" in a.mensaje for a in alertas)
 
 
 def test_sin_patios_desactiva_patio_y_aviso():
-    """Sin patios definidos (lista vacía) no hay patio ni aviso (es opcional).
+    """Sin patios definidos (lista vacía) no hay patio ni excavación (es opcional).
 
     El cálculo lo dirige la lista `patios`, no el mínimo normativo
     `area_patio_min_m2` (que queda solo como referencia de cumplimiento)."""
@@ -64,7 +69,7 @@ def test_sin_patios_desactiva_patio_y_aviso():
     params.urbanisticos.patios = []
     cap = calcular_capacidad(_env(14.0), params.a_parametros_motor())
     assert cap.patio_por_planta[0] == 0.0
-    assert cap.patio_sin_espacio is False
+    assert cap.patio_excavado_m2 == 0.0
 
 
 def test_patio_total_es_la_suma_de_los_patios_definidos():
