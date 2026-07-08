@@ -218,7 +218,7 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
   </details>
   {% endif %}
 
-  <details class="rc-grupo" open data-visible-en-planta="pb tipo atico">
+  <details class="rc-grupo" open data-visible-en-planta="pb atico">
     <summary><span class="rc-grupo-titulo">Programa</span></summary>
     <div class="rc-grupo-cuerpo">
       {% set prog = parametros.programa %}
@@ -354,99 +354,96 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
           data-bloque="programa">
         <span>Salón-cocina integrado</span>
       </label>
-      {# Reservas de planta baja (local / otros / usos comunes): conceptos de
-      edificio que reparten el útil de la PB. No aplican a un inmueble suelto. #}
-      {% if not es_inmueble %}
-      <label class="rc-campo" data-cuando-uso="vivienda apartamentos_turisticos" data-visible-en-planta="pb">
-        <span class="rc-campo-label">Local en planta baja (m²)</span>
-        <input type="number" name="local_pb_m2" min="0" step="0.5" value="{{ prog.local_pb_m2 }}"
-          data-bloque="programa">
-        <small class="rc-hint">Reduce útiles de PB para local comercial.</small>
-      </label>
-      <label class="rc-campo" data-visible-en-planta="pb">
-        <span class="rc-campo-label">Otros en planta baja (m²)</span>
-        <input type="number" name="otros_pb_m2" min="0" step="0.5" value="{{ prog.otros_pb_m2 }}"
-          data-bloque="programa">
-        <small class="rc-hint">Reduce útiles de PB para otros usos.</small>
-      </label>
-      <label class="rc-campo" data-cuando-uso="apartamentos_turisticos hotelero" data-visible-en-planta="pb">
-        <span class="rc-campo-label">Usos comunes en planta baja (m²)</span>
-        <input type="number" name="usos_comunes_pb_m2" min="0" step="0.5"
-          value="{{ prog.usos_comunes_pb_m2 }}" data-bloque="programa">
-        <small class="rc-hint">Reduce útiles de PB para zonas comunes del establecimiento.</small>
-      </label>
-      {% endif %}
+    </div>
+  </details>
+
+  {# Configuración de planta baja: conceptos de EDIFICIO que reparten el útil de
+  la PB (núcleo vertical + reservas no residenciales). No aplican a un inmueble
+  suelto (se ocultan en modo inmueble vía `_ocultas`/`es_inmueble`). #}
+  {% if "nucleo" not in _ocultas or not es_inmueble %}
+  <details class="rc-grupo" data-visible-en-planta="pb">
+    <summary><span class="rc-grupo-titulo">Configuración de planta baja</span></summary>
+    <div class="rc-grupo-cuerpo">
+      {% set prog = parametros.programa %}
 
       {# Núcleo de comunicación vertical (escalera + ascensor): área FIJA en m² que
-      se reserva en CADA planta. Es de edificio (vertical y único); no aplica a
-      un inmueble suelto (se oculta en modo inmueble vía `_ocultas`). #}
+      se reserva en CADA planta. Es de edificio (vertical y único). #}
       {% if "nucleo" not in _ocultas %}
-      <label class="rc-campo" data-visible-en-planta="pb">
+      <label class="rc-campo">
         <span class="rc-campo-label">Núcleo escalera/ascensor (m²)</span>
         <input type="number" name="nucleo_m2" min="0" max="200" step="1" value="{{ prog.nucleo_m2 }}"
           data-bloque="programa">
         <small class="rc-hint">Superficie del núcleo, reservada en todas las plantas.</small>
       </label>
       {% endif %}
+
+      {# Reservas de planta baja (local / otros / usos comunes). #}
+      {% if not es_inmueble %}
+      <label class="rc-campo" data-cuando-uso="vivienda apartamentos_turisticos">
+        <span class="rc-campo-label">Local en planta baja (m²)</span>
+        <input type="number" name="local_pb_m2" min="0" step="0.5" value="{{ prog.local_pb_m2 }}"
+          data-bloque="programa">
+        <small class="rc-hint">Reduce útiles de PB para local comercial.</small>
+      </label>
+      <label class="rc-campo">
+        <span class="rc-campo-label">Otros en planta baja (m²)</span>
+        <input type="number" name="otros_pb_m2" min="0" step="0.5" value="{{ prog.otros_pb_m2 }}"
+          data-bloque="programa">
+        <small class="rc-hint">Reduce útiles de PB para otros usos.</small>
+      </label>
+      <label class="rc-campo" data-cuando-uso="apartamentos_turisticos hotelero">
+        <span class="rc-campo-label">Usos comunes en planta baja (m²)</span>
+        <input type="number" name="usos_comunes_pb_m2" min="0" step="0.5"
+          value="{{ prog.usos_comunes_pb_m2 }}" data-bloque="programa">
+        <small class="rc-hint">Reduce útiles de PB para zonas comunes del establecimiento.</small>
+      </label>
+      {% endif %}
     </div>
   </details>
+  {% endif %}
 
-  <details class="rc-grupo" data-visible-en-planta="pb tipo">
-    <summary><span class="rc-grupo-titulo">Diseño · muros</span></summary>
-    <div class="rc-grupo-cuerpo">
-      {% set d = parametros.diseno %}
-      {% set d_t = parametros.diseno_tipo %}
-      {{ dnum("Muro de fachada (m)", "espesor_muro_fachada_m", "diseno", d.espesor_muro_fachada_m, "0.10", "0.60",
-      "0.01", "pb") }}
-      {{ dnum("Muro de fachada (m)", "espesor_muro_fachada_m", "diseno_tipo", d_t.espesor_muro_fachada_m, "0.10",
-      "0.60", "0.01", "tipo") }}
-      {{ dnum("Muro medianero (m)", "espesor_muro_medianero_m", "diseno", d.espesor_muro_medianero_m, "0.10", "0.60",
-      "0.01", "pb") }}
-      {{ dnum("Muro medianero (m)", "espesor_muro_medianero_m", "diseno_tipo", d_t.espesor_muro_medianero_m, "0.10",
-      "0.60", "0.01", "tipo") }}
-      {{ dnum("Separación entre unidades (m)", "espesor_separacion_unidades_m", "diseno",
-      d.espesor_separacion_unidades_m, "0.10", "0.40", "0.01", "pb") }}
-      {{ dnum("Separación entre unidades (m)", "espesor_separacion_unidades_m", "diseno_tipo",
-      d_t.espesor_separacion_unidades_m, "0.10", "0.40", "0.01", "tipo") }}
-      {{ dnum("Tabique interior (m)", "espesor_tabique_m", "diseno", d.espesor_tabique_m, "0.05", "0.20", "0.01", "pb")
-      }}
-      {{ dnum("Tabique interior (m)", "espesor_tabique_m", "diseno_tipo", d_t.espesor_tabique_m, "0.05", "0.20", "0.01",
-      "tipo") }}
-    </div>
-  </details>
-
-  <details class="rc-grupo">
-    <summary><span class="rc-grupo-titulo">Diseño · circulación y accesibilidad</span></summary>
-    <div class="rc-grupo-cuerpo">
-      {% set d = parametros.diseno %}
-      {% set d_t = parametros.diseno_tipo %}
-
-      {{ dnum("Pasillo común mín. (m)", "ancho_min_pasillo_comun_m", "diseno", d.ancho_min_pasillo_comun_m, "0.90",
-      "2.0", "0.05", "pb") }}
-      {{ dnum("Pasillo común mín. (m)", "ancho_min_pasillo_comun_m", "diseno_tipo", d_t.ancho_min_pasillo_comun_m,
-      "0.90", "2.0", "0.05", "tipo") }}
-      {{ dnum("Pasillo en vivienda (m)", "ancho_min_pasillo_vivienda_m", "diseno", d.ancho_min_pasillo_vivienda_m,
-      "1.00", "1.50", "0.05", "pb") }}
-      {{ dnum("Pasillo en vivienda (m)", "ancho_min_pasillo_vivienda_m", "diseno_tipo",
-      d_t.ancho_min_pasillo_vivienda_m, "1.00", "1.50", "0.05", "tipo") }}
-      {{ dnum("Diámetro vestíbulo (m)", "diametro_min_vestibulo_m", "diseno", d.diametro_min_vestibulo_m, "1.20",
-      "2.50", "0.05", "pb") }}
-      {{ dnum("Diámetro vestíbulo (m)", "diametro_min_vestibulo_m", "diseno_tipo", d_t.diametro_min_vestibulo_m, "1.20",
-      "2.50", "0.05", "tipo") }}
-      {{ dnum("Puerta paso libre (m)", "ancho_min_puerta_m", "diseno", d.ancho_min_puerta_m, "0.60", "1.20", "0.05",
-      "pb") }}
-      {{ dnum("Puerta paso libre (m)", "ancho_min_puerta_m", "diseno_tipo", d_t.ancho_min_puerta_m, "0.60", "1.20",
-      "0.05", "tipo") }}
-    </div>
-  </details>
-
-  <details class="rc-grupo">
-    <summary><span class="rc-grupo-titulo">Diseño · muros y circulación</span></summary>
+  {# Diseño · estructura: espesores físicos + % muros (por categoría de planta) +
+  circulación común del edificio (m²). Todo lo que define la envolvente/superficie
+  construida vs útil, en un único grupo. #}
+  <details class="rc-grupo" data-visible-en-planta="pb tipo atico sotano">
+    <summary><span class="rc-grupo-titulo">Diseño · estructura</span></summary>
     <div class="rc-grupo-cuerpo">
       {% set d = parametros.diseno %}
       {% set d_t = parametros.diseno_tipo %}
       {% set d_a = parametros.diseno_atico %}
       {% set d_s = parametros.diseno_sotano %}
+
+      {{ dnum("Muro de fachada (m)", "espesor_muro_fachada_m", "diseno", d.espesor_muro_fachada_m, "0.10", "0.60",
+      "0.01", "pb") }}
+      {# Plantas tipo: solo % muros y circulación son editables (ver más abajo); el
+      espesor de tipo se mantiene en su valor (comparte input oculto, no se muestra
+      en ninguna pestaña) para no perder el dato ya guardado. #}
+      <label class="rc-campo" hidden>
+        <span class="rc-campo-label">Muro de fachada (m)</span>
+        <input type="number" name="espesor_muro_fachada_m" min="0.10" max="0.60" step="0.01"
+          value="{{ d_t.espesor_muro_fachada_m }}" data-bloque="diseno_tipo">
+      </label>
+      {{ dnum("Muro medianero (m)", "espesor_muro_medianero_m", "diseno", d.espesor_muro_medianero_m, "0.10", "0.60",
+      "0.01", "pb") }}
+      <label class="rc-campo" hidden>
+        <span class="rc-campo-label">Muro medianero (m)</span>
+        <input type="number" name="espesor_muro_medianero_m" min="0.10" max="0.60" step="0.01"
+          value="{{ d_t.espesor_muro_medianero_m }}" data-bloque="diseno_tipo">
+      </label>
+      {{ dnum("Separación entre unidades (m)", "espesor_separacion_unidades_m", "diseno",
+      d.espesor_separacion_unidades_m, "0.10", "0.40", "0.01", "pb") }}
+      <label class="rc-campo" hidden>
+        <span class="rc-campo-label">Separación entre unidades (m)</span>
+        <input type="number" name="espesor_separacion_unidades_m" min="0.10" max="0.40" step="0.01"
+          value="{{ d_t.espesor_separacion_unidades_m }}" data-bloque="diseno_tipo">
+      </label>
+      {{ dnum("Tabique interior (m)", "espesor_tabique_m", "diseno", d.espesor_tabique_m, "0.05", "0.20", "0.01", "pb")
+      }}
+      <label class="rc-campo" hidden>
+        <span class="rc-campo-label">Tabique interior (m)</span>
+        <input type="number" name="espesor_tabique_m" min="0.05" max="0.20" step="0.01"
+          value="{{ d_t.espesor_tabique_m }}" data-bloque="diseno_tipo">
+      </label>
 
       {# % muros de PERÍMETRO — por categoría de planta (PB / tipo / ático / sótano).
       En modo inmueble solo hay una unidad: la etiqueta no referencia plantas. #}
@@ -471,9 +468,35 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
       {{ dnum("Circulación (sótano) (m²)", "circulacion_tipo_m2", "diseno_sotano", d_s.circulacion_tipo_m2, "0", "",
       "0.5", "sotano") }}
       {% endif %}
+    </div>
+  </details>
 
-      {# La circulación INTERIOR de la unidad ya no se edita aquí: es un m² mínimo por
-      tipología en «Ver / editar mínimos» (estancia `circulacion_interior`). #}
+  {# Diseño · espacios y accesibilidad: pasillos, vestíbulo y puerta — todo lo que
+  regula el paso y la accesibilidad interior/común. La circulación INTERIOR de la
+  unidad no se edita aquí: es un m² mínimo por tipología en «Ver / editar mínimos»
+  (estancia `circulacion_interior`). #}
+  <details class="rc-grupo" data-visible-en-planta="pb atico sotano">
+    <summary><span class="rc-grupo-titulo">Diseño · espacios y accesibilidad</span></summary>
+    <div class="rc-grupo-cuerpo">
+      {% set d = parametros.diseno %}
+      {% set d_t = parametros.diseno_tipo %}
+
+      {{ dnum("Pasillo común mín. (m)", "ancho_min_pasillo_comun_m", "diseno", d.ancho_min_pasillo_comun_m, "0.90",
+      "2.0", "0.05", "pb") }}
+      {{ dnum("Pasillo común mín. (m)", "ancho_min_pasillo_comun_m", "diseno_tipo", d_t.ancho_min_pasillo_comun_m,
+      "0.90", "2.0", "0.05", "tipo") }}
+      {{ dnum("Pasillo en vivienda (m)", "ancho_min_pasillo_vivienda_m", "diseno", d.ancho_min_pasillo_vivienda_m,
+      "1.00", "1.50", "0.05", "pb") }}
+      {{ dnum("Pasillo en vivienda (m)", "ancho_min_pasillo_vivienda_m", "diseno_tipo",
+      d_t.ancho_min_pasillo_vivienda_m, "1.00", "1.50", "0.05", "tipo") }}
+      {{ dnum("Diámetro vestíbulo (m)", "diametro_min_vestibulo_m", "diseno", d.diametro_min_vestibulo_m, "1.20",
+      "2.50", "0.05", "pb") }}
+      {{ dnum("Diámetro vestíbulo (m)", "diametro_min_vestibulo_m", "diseno_tipo", d_t.diametro_min_vestibulo_m, "1.20",
+      "2.50", "0.05", "tipo") }}
+      {{ dnum("Puerta paso libre (m)", "ancho_min_puerta_m", "diseno", d.ancho_min_puerta_m, "0.60", "1.20", "0.05",
+      "pb") }}
+      {{ dnum("Puerta paso libre (m)", "ancho_min_puerta_m", "diseno_tipo", d_t.ancho_min_puerta_m, "0.60", "1.20",
+      "0.05", "tipo") }}
     </div>
   </details>
 </aside>

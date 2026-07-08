@@ -92,6 +92,7 @@
 .rc-hint em { color: var(--dorado); font-style: normal; font-weight: 600; }
 
 .rc-fila { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-sm); }
+.rc-fila[hidden] { display: none; }
 .rc-fila:has(.rc-campo:nth-child(2):last-child) { grid-template-columns: 1fr 1fr; }
 /* Los <input type=number> tienen un ancho intrínseco (~size=20 ≈ 170px). Sin esto,
    las columnas 1fr no pueden encoger por debajo de ese ancho (min-width:auto en las
