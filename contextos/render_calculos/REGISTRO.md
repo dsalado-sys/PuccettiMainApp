@@ -1,14 +1,14 @@
 # Registro — módulo Render y cálculos (§2.4 – §2.7)
 
-> Fotografía del estado a 2026-07-06 + reglas vigentes + fórmulas activas + bitácora.
-> Documento de memoria: léelo antes de reexplorar el módulo. El detalle exhaustivo
-> fichero-a-fichero vive en **README.md** (cadena de cálculo numérico, completa) y
-> **RENDER_GEOMETRICO.md** (dibujo de planos: patios hecho, unidades pendiente; tiene
-> su propia bitácora larga). Este registro **consolida ambos** en un solo sitio —
-> fórmulas y reglas inlineadas para no tener que saltar de fichero— y añade la foto de
-> estado + reglas transversales que no viven en ninguno de los dos. Actualiza la
-> bitácora (§5) cada vez que se toque este contexto; la fotografía (§3) solo si cambia
-> de forma sustancial.
+> Fotografía del estado a 2026-07-08 + reglas vigentes + fórmulas activas + bitácora.
+> Documento de memoria: léelo antes de reexplorar el módulo — es la referencia densa
+> pensada para gastar pocos tokens de contexto al retomar trabajo aquí. El detalle
+> exhaustivo fichero-a-fichero vive en **README.md** (cadena de cálculo numérico) y
+> **RENDER_GEOMETRICO.md** (dibujo de planos: patios hecho, unidades pendiente). Este
+> registro **consolida ambos** — fórmulas y reglas inlineadas para no saltar de fichero.
+> **Bitácora (§5) comprimida a propósito**: solo resumen + puntero a `git log`/memoria
+> persistente para el detalle; el "cómo funciona hoy" vive en §1/§2, no en la bitácora.
+> Actualiza §5 al tocar este contexto; §3 (foto de estado) solo si cambia sustancial.
 
 ---
 
@@ -239,6 +239,31 @@ NO desarrollada).
 - Detalle de decisiones (incl. por qué "XL" del brief inicial = categoría de
   llaves) en memoria persistente `project_pestanas_escenarios_render`.
 
+### 1.9 Combinaciones de tipologías POR PLANTA (hotel) + combinación persistida
+
+Botón **«Ver combinaciones»** en hotel (análogo al de dormitorios de vivienda/apartamentos,
+pero de **unidades enteras por planta**, no de dormitorios dentro de una unidad):
+
+- Enumera contra el útil de **UNA planta representativa** (máx. de `util_por_planta` entre
+  las habitables) con `enumerar_combinaciones_por_area` (`combinador_tipologias.py`):
+  empaquetados maximales de unidades enteras que no dejan hueco ni para la más pequeña.
+  **`requerir_todas=True`** (fijo en hotel): solo combinaciones que incluyan TODAS las
+  tipologías elegidas por el arquitecto (si eligió individual+doble+triple, las tres deben
+  estar presentes; si quisiera solo dos, elegiría dos).
+- La combinación elegida se **fija** (no la recalcula el reparto automático) y se **replica
+  idéntica en cada planta habitable** (`Capacidad.composicion_planta_forzada` en
+  `capacidad.py`, sustituye a `_reparto_planta`); si una planta tiene menos útil (p. ej. PB
+  con reservas comunes), se trunca ahí → `Capacidad.composicion_truncada` + aviso.
+- La **accesibilidad DB-SUA se aplica DESPUÉS** (orden sin cambios, §1.5): agranda unidades
+  en las plantas bajas y reajusta el recuento sobre la composición ya fijada.
+- **Persistencia unificada**: `ParametrosPrograma.combinacion` (slug multiconjunto,
+  semántica por uso — dormitorios de una unidad en vivienda/apartamentos, mezcla por planta
+  en hotel) round-trippea por `POST /escenarios` vía un `<input hidden name="combinacion">`
+  uso-agnóstico en el panel. Antes solo vivienda/apartamentos tenían combinación, y era
+  **temporal** (solo cliente); ahora **persiste para los 3 usos**.
+- Endpoint `POST /modulos/render-calculos/combinaciones-hotel`; caso de uso
+  `CalcularCombinacionesHotel`. Detalle de decisiones en memoria `project_combinaciones_hotel`.
+
 ---
 
 ## 2. Reglas vigentes (transversales — no romper sin decisión del arquitecto)
@@ -301,6 +326,7 @@ NO desarrollada).
 | Tablas por planta / por unidad | **COMPLETO** |
 | Patios: N editables, base/efectiva, prioridad, bloqueo, fusión, zoom, edición en sitio | **COMPLETO** (trabajo de `render-dev`, ya integrado en `dev`→`pre`→esta rama) |
 | Escenarios (pestañas): alta/baja/conmutación, nombre reactivo, persistencia por modo (§1.8) | **COMPLETO** (2026-07-06) |
+| Combinaciones de tipologías POR PLANTA (hotel) + persistencia de la combinación elegida (todos los usos) | **COMPLETO** (2026-07-08, §1.9) |
 | **Disposición geométrica de UNIDADES en planta** (rebanadas, núcleo, pasillos) | **NO EXISTE** — `"edificio": None` explícito en `CalcularLayout`/`CalcularEnvolvente` (`casos_uso.py`, comentario "render geométrico en backlog") |
 | **Geometría de estancias dentro de la unidad** (polígonos por estancia) | **NO EXISTE** |
 | Canvas: dibujo de unidades/núcleo/pasillos | Código YA escrito en `rc_canvas.js` (`_dibujarNucleo`, `_etiquetaUnidad`), **inerte** a la espera del contrato `edificio` |
@@ -318,12 +344,10 @@ NO desarrollada).
 > `9d37100`), el estado real es el de la tabla de arriba: solo patios, no unidades.
 
 **Tests**: específicos de este contexto en `app/tests/contextos/render_calculos/`
-(dominio/geometría, incl. `test_escenarios.py`, `test_util_minimo_tipologia.py`) ·
-**334** en total la suite del repo (`python -m pytest app/tests --collect-only -q`).
-Desde 2026-07-06 SÍ hay tests de ruta HTTP para `render_calculos`
-(`app/tests/entrypoints/web/test_render_calculos_rutas.py`, escenarios: página +
-roundtrip `POST /escenarios` + permisos) — cierra el hueco que este registro
-señalaba antes (ya alineado con `viabilidad`, `test_viabilidad_rutas.py`).
+(dominio/geometría, incl. `test_escenarios.py`, `test_combinaciones_hotel.py`) ·
+**370** en total la suite del repo (`python -m pytest app/tests -q`). Rutas HTTP de
+`render_calculos` en `app/tests/entrypoints/web/test_render_calculos_rutas.py`
+(escenarios, combinaciones-hotel, superficies, permisos).
 
 ---
 
@@ -352,63 +376,26 @@ señalaba antes (ya alineado con `viabilidad`, `test_viabilidad_rutas.py`).
 
 ## 5. Bitácora
 
-- **2026-07-08 (2)** — **Parametrización en m² (en vez de %) de circulación común,
-  reservas de PB y circulación interior por tipología.** (a) Panel: `pct_circulacion_pb/
-  tipo` → `circulacion_pb_m2`/`circulacion_tipo_m2` (m² por planta, acotados a la huella,
-  patrón del núcleo); `pct_local_pb`/`pct_otros_pb`/`pct_usos_comunes_pb` → `local_pb_m2`/
-  `otros_pb_m2`/`usos_comunes_pb_m2` (m² en PB, descuento secuencial acotado). **`% muros`
-  se mantiene en %.** (b) La circulación interior sale del panel (`pct_circulacion_interior`
-  eliminado) y pasa a un **m² mínimo por tipología** editable en «Ver / editar mínimos»
-  (estancia `circulacion_interior`) en los **3 usos**. El útil objetivo/mínimo de la unidad
-  pasa de `×(1+%)` a `+ circ_m2` (aditivo). Se implementó `util_objetivo_vivienda` ya en la
-  sesión previa; ahora las tres tablas Anexo I siembran `circulacion_interior` por tipología
-  y `consolidadas_*` emiten `CIRC_INTERIOR_M2`. Cambios: `parametros.py`, `geometria/config.py`,
-  `geometria/capacidad.py` (`DisenoPlanta.circulacion_m2`, aplicación m², KPIs renombrados),
-  `geometria/programa*.py` (config `circ_interior_m2`, sizing aditivo, quitado
-  `pct_circulacion_interior`), `geometria/serializacion.py` (circulación turística por m²),
-  `casos_uso.py` (`_disenos_por_categoria`, `_sincronizar_minimos` sin el %), los 3 adapters +
-  `seed_normativa.py` + `etiquetas_anexo.py`. Seeds turístico/hotelero ahora **idempotentes
-  add-missing** (las filas nuevas aparecen sin reset). Defaults orientativos: circulación
-  común 10 m²/planta; circ. interior vivienda 3/9/10/13/16/19, apt 5–8, hotel 4–8. Tests
-  nuevos: `test_parametros_m2.py`, `test_circ_interior_tipologia.py`, `test_circ_interior_editor.py`.
-  ⚠️ Escenarios guardados con los `pct_*` viejos NO son convertibles a m² (arrancan en los
-  defaults nuevos).
-- **2026-07-08 (1)** — **Útil mínimo editable por tipología (vivienda) + máximo derivado
-  = mínimo + 5.** Nueva fila **«Útil mínimo de la unidad»** por tipología en «Ver /
-  editar mínimos» (default 40/60/70/90/110/130); suelo duro en el cálculo (ninguna
-  vivienda baja de él; las estancias se reparten hasta completarlo). El útil máximo se
-  reintroduce **derivado** = mínimo + `MARGEN_UTIL_MAXIMO_VIVIENDA` (5.0), no editable;
-  el objetivo por unidad = el mínimo (implementado `util_objetivo_vivienda`, cierra
-  Pendiente 3.9). Cambios: `geometria/programa.py` (`MARGEN_UTIL_MAXIMO_VIVIENDA`,
-  `ProgramaViviendaConfig.util_min`, `util_minimo_tipologia`, suelo en
-  `util_minimo_vivienda(_combo)`, objetivo/máximo en `descriptor_tipologia_vivienda(_combo)`,
-  mapeo `UTIL_MIN` en `config_desde_repo`); `plataforma/persistencia/
-  catalogo_superficies_sqlalchemy.py` (columna `min_m2_util`, sentinela `_util_minimo`,
-  `util_minimo_por_tipologia`, `util_objetivo_vivienda`, fila sintética en
-  `filas_vivienda`, `UTIL_MIN` en `consolidadas_vivienda`, rama en `actualizar` con
-  máximo=mín+5); `seed_normativa.py` (min=base, max=base+5); `sqlalchemy_base.py`
-  (auto-migración idempotente `_asegurar_columna_min_util`, sin alembic);
-  `render_calculos.js` + `render_calculos.css` (realce de la fila). Tests nuevos:
-  `test_util_minimo_tipologia.py`, `test_catalogo_superficies_util_minimo.py` + 2 de
-  ruta en `test_render_calculos_rutas.py`. Suite **334** verde.
-- **2026-07-06 (2)** — Implementadas las **pestañas de escenario** (§1.8): barra de
-  escenarios encima de la catastral, nombre reactivo, persistencia por-modo
-  `{escenarios, activo}` con migración perezosa del formato antiguo. Cambios:
-  `casos_uso.py` (`GuardarEscenariosRender`, `contenedor_escenarios_proyecto`,
-  `_normalizar_escenarios`, `parametros_desde_proyecto(escenario_id=...)`, sustituye
-  a `GuardarRender`); `rutas/render_calculos.py` (`POST /escenarios` sustituye a
-  `/guardar`, `GET ?escenario=`); `templates/render_calculos.html`
-  (`#rc-escenarios` junto con `window.__RC_ESCENARIOS__`/`__RC_ESCENARIO_ACTIVO__`);
-  `render_calculos.js` (`nombreEscenario`, `dibujarTabsEscenarios`,
-  `cambiarEscenario`/`crearEscenario`/`borrarEscenario`); `render_calculos.css`
-  (`.rc-esc-*`). Tests nuevos:
-  `test_escenarios.py` (dominio/migración) y `test_render_calculos_rutas.py`
-  (primeros tests de ruta HTTP del contexto). Detalle de decisiones en memoria
-  persistente `project_pestanas_escenarios_render`.
-- **2026-07-06 (1)** — Creado este registro (lectura de README.md, RENDER_GEOMETRICO.md,
-  `dominio.py`, `casos_uso.py`, `accesibilidad.py`, `parametros.py` + verificación de
-  rama activa y recuento de tests). Sin cambios de código. Rama activa:
-  `pestañas-proyectos` (hija de `pre`, commit base `9d37100`). Para la evolución
-  detallada fichero-a-fichero y las bitácoras completas de cada pieza, ver
-  **README.md** (cálculo numérico) y **RENDER_GEOMETRICO.md** (patios + plan de
-  disposición de unidades; bitácora propia hasta 2026-06-30).
+> Comprimida (2026-07-08): el detalle exhaustivo fichero-a-fichero de cada entrada vive
+> en `git log`; aquí solo el resumen operativo. El "cómo funciona hoy" de cada pieza está
+> en §1 (con su propia subsección) y §2 (reglas), no hace falta repetirlo aquí.
+
+- **2026-07-08** — **Combinaciones de tipologías POR PLANTA (hotel) + persistencia de la
+  combinación (todos los usos).** Ver §1.9 para el funcionamiento vigente. Piezas:
+  `enumerar_combinaciones_por_area` (`combinador_tipologias.py`),
+  `Capacidad.composicion_planta_forzada`/`composicion_truncada` (`capacidad.py`),
+  `CalcularCombinacionesHotel` + ruta `POST /combinaciones-hotel`, campo persistido
+  `ParametrosPrograma.combinacion`. Detalle en memoria `project_combinaciones_hotel`.
+  Tests nuevos: `test_combinaciones_hotel.py`, `test_combinacion_persistencia.py` + rutas.
+  **370 tests** (antes 334).
+- **2026-07-08** — Útil mínimo editable por tipología de vivienda (suelo duro) + máximo
+  derivado (mín+5, `util_objetivo_vivienda`); parametrización en **m²** (antes %) de
+  circulación común, reservas de PB y circulación interior por tipología en los 3 usos
+  (ver §1.3 para las fórmulas vigentes). ⚠️ Escenarios con los `pct_*` viejos no son
+  convertibles: arrancan en los defaults nuevos. **334 tests**.
+- **2026-07-06** — Escenarios (pestañas): múltiples hipótesis de programa por parcela y
+  modo, persistencia `{escenarios, activo}` con migración perezosa, `POST /escenarios`
+  (ver §1.8 para el detalle vigente; sustituye a `/guardar`/`GuardarRender`, ya no
+  existen). Detalle de decisiones en memoria `project_pestanas_escenarios_render`.
+- **2026-07-06** — Creado este registro (consolidación de README.md + RENDER_GEOMETRICO.md
+  + verificación de código). Rama activa entonces: `pestañas-proyectos` (hija de `pre`).

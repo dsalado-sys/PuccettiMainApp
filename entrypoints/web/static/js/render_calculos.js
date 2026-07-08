@@ -80,10 +80,13 @@
     plantaActiva: 0,
     abortCalcular: null,
     debounceId: null,
-    // §2.5 — combinación de dormitorios elegida en el modal (apartamentos
-    // turísticos). Temporal: se inyecta en /calcular como `combo_dormitorios`
-    // pero NO se persiste en el formulario ni en /guardar.
+    // §2.5 — combinación de dormitorios elegida en el modal (vivienda /
+    // apartamentos turísticos). Persistida: se sincroniza con el input oculto
+    // `name="combinacion"`, que viaja en el payload y round-trippea por /escenarios.
     comboDormitorios: null,   // { slug, etiqueta } | null
+    // § hotel — combinación de habitaciones POR PLANTA elegida. Mismo canal de
+    // persistencia (input oculto `combinacion`), semántica distinta (mezcla por planta).
+    comboHotel: null,         // { slug, etiqueta } | null
     // Aviso de exceso de construida (rehabilitación): el modal salta una vez al
     // superar; tras aceptarlo, solo queda el aviso inferior. `interaccionUsuario`
     // evita que el modal salte en la carga inicial automática.
@@ -103,6 +106,39 @@
   // §2.5 — usos que se definen por nº de dormitorios + combinaciones.
   function usoUsaCombo() {
     return ["vivienda", "apartamentos_turisticos"].includes(usoActivoForm());
+  }
+
+  // Etiqueta legible de un slug de combinación (espejo de `_etiqueta_combo` del
+  // backend): "doble*2+individual*1" → "2 dobles + 1 individual". Se usa al
+  // restaurar la elección persistida (no hay respuesta de modal en la carga).
+  const PLURAL_COMBO = {
+    estudio: ["Estudio", "Estudios"],
+    individual: ["individual", "individuales"],
+    doble: ["doble", "dobles"],
+    triple: ["triple", "triples"],
+    cuadruple: ["cuádruple", "cuádruples"],
+    multiple: ["múltiple", "múltiples"],
+  };
+  function etiquetaDesdeSlug(slug) {
+    if (!slug) return "";
+    if (slug === "estudio") return "Estudio";
+    return slug.split("+").map(tok => {
+      const [tam, cnt] = tok.split("*");
+      const n = parseInt(cnt || "1", 10) || 1;
+      const [sing, plur] = PLURAL_COMBO[tam] || [tam, tam + "s"];
+      return `${n} ${n === 1 ? sing : plur}`;
+    }).join(" + ");
+  }
+
+  // Input oculto que persiste la combinación elegida (uso-agnóstico). Única fuente
+  // de verdad que viaja en el payload y round-trippea por /escenarios.
+  function setCombinacionHidden(slug) {
+    const inp = document.getElementById("rc-combinacion-hidden");
+    if (inp) inp.value = slug || "";
+  }
+  function getCombinacionHidden() {
+    const inp = document.getElementById("rc-combinacion-hidden");
+    return inp ? (inp.value || "") : "";
   }
 
   // ─── Lectura del formulario → payload backend ─────────────────────────
@@ -1340,6 +1376,7 @@
 
   function fijarCombo(combo) {
     ESTADO.comboDormitorios = combo;   // { slug, etiqueta } | null
+    setCombinacionHidden(combo ? combo.slug : "");   // persiste por /escenarios
     refrescarChipCombo();
   }
 
@@ -1444,6 +1481,139 @@
     if (ESTADO.comboDormitorios) fijarCombo(null);
   });
   refrescarChipCombo();
+
+  // ─── Modal "Combinaciones de habitaciones por planta" (hotel) ─────────
+  const modalCH = document.getElementById("rc-modal-comb-hotel");
+  const btnCombHotel = document.getElementById("rc-btn-combinaciones-hotel");
+  const comboHotelBox = document.getElementById("rc-combo-hotel-elegido");
+  const comboHotelTxt = document.getElementById("rc-combo-hotel-elegido-txt");
+  const btnComboHotelLimpiar = document.getElementById("rc-combo-hotel-limpiar");
+
+  function refrescarChipComboHotel() {
+    if (!comboHotelBox) return;
+    if (ESTADO.comboHotel) {
+      comboHotelBox.hidden = false;
+      comboHotelTxt.textContent = ESTADO.comboHotel.etiqueta;
+    } else {
+      comboHotelBox.hidden = true;
+      comboHotelTxt.textContent = "";
+    }
+  }
+
+  function fijarComboHotel(combo) {
+    ESTADO.comboHotel = combo;   // { slug, etiqueta } | null
+    setCombinacionHidden(combo ? combo.slug : "");
+    refrescarChipComboHotel();
+  }
+
+  async function abrirModalCombinacionesHotel() {
+    if (!modalCH) return;
+    if (estado !== "ok") { mostrarToast("Localiza primero la parcela", true); return; }
+    const bloques = leerFormulario();
+    const sub = document.getElementById("rc-modal-ch-sub");
+    const body = document.getElementById("rc-modal-ch-body");
+    const vacio = document.getElementById("rc-modal-ch-vacio");
+    const nocaben = document.getElementById("rc-modal-ch-nocaben");
+    body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Calculando…</td></tr>';
+    vacio.hidden = true;
+    if (nocaben) nocaben.hidden = true;
+    if (typeof modalCH.showModal === "function") modalCH.showModal();
+    else modalCH.setAttribute("open", "");
+    try {
+      const resp = await fetch("/modulos/render-calculos/combinaciones-hotel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bloques),
+      });
+      if (resp.status === 409) {
+        body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Localiza primero la parcela.</td></tr>';
+        return;
+      }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(err.detail || "Error")}</td></tr>`;
+        return;
+      }
+      const data = await resp.json();
+      if (data.error) {
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(data.error)}</td></tr>`;
+        return;
+      }
+      sub.textContent = `Mezclas de habitaciones que caben en una planta de ${fmt.m2.format(data.util_planta_m2)} m² útiles.`;
+      const combos = data.combinaciones || [];
+
+      // Conteo de las que no caben: tipologías que no caben ni una vez + combinaciones
+      // omitidas por la cota. Espejo del «no caben» del ejemplo del arquitecto.
+      const noCabenTipos = data.no_caben_tipos || [];
+      const noMostradas = data.no_mostradas || 0;
+      if (nocaben && (noCabenTipos.length || noMostradas)) {
+        const partes = [];
+        if (noCabenTipos.length) {
+          const nombres = noCabenTipos.map(s => (PLURAL_COMBO[s] ? PLURAL_COMBO[s][0] : s)).join(", ");
+          partes.push(`No caben ni una vez en la planta: ${nombres}`);
+        }
+        if (noMostradas) partes.push(`${noMostradas} combinación(es) adicionales no mostradas`);
+        nocaben.hidden = false;
+        nocaben.textContent = partes.join(". ") + ".";
+      }
+
+      body.innerHTML = "";
+      if (!combos.length) {
+        vacio.hidden = false;
+        return;
+      }
+      for (const c of combos) {
+        const tr = document.createElement("tr");
+        const elegida = ESTADO.comboHotel && ESTADO.comboHotel.slug === c.slug;
+        tr.className = "rc-modal-tip-fila" + (elegida ? " rc-modal-tip-elegida" : "");
+        tr.innerHTML =
+          `<td>${escapeHtml(c.etiqueta)}</td>` +
+          `<td class="rc-num"><strong>${fmt.int.format(c.unidades_por_planta)}</strong></td>` +
+          `<td class="rc-num">${fmt.int.format(c.plazas_por_planta)}</td>` +
+          `<td class="rc-num">${fmt.m2.format(c.util_usado_m2)} m²</td>` +
+          `<td><button type="button" class="boton-secundario rc-btn-pequeno rc-modal-tip-elegir">Elegir</button></td>`;
+        tr.querySelector(".rc-modal-tip-elegir").addEventListener("click", () => {
+          fijarComboHotel({ slug: c.slug, etiqueta: c.etiqueta });
+          modalCH.close();
+          mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
+          pedirCalculo();
+        });
+        body.appendChild(tr);
+      }
+    } catch (e) {
+      body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Error de red</td></tr>';
+    }
+  }
+
+  if (btnCombHotel) btnCombHotel.addEventListener("click", abrirModalCombinacionesHotel);
+  const btnModalCHCerrar = document.getElementById("rc-modal-ch-cerrar");
+  if (btnModalCHCerrar && modalCH) btnModalCHCerrar.addEventListener("click", () => modalCH.close());
+  if (btnComboHotelLimpiar) btnComboHotelLimpiar.addEventListener("click", () => {
+    fijarComboHotel(null);
+    pedirCalculo();
+  });
+
+  // Restaurar la combinación persistida del escenario (input oculto) al chip correcto.
+  (function restaurarCombinacion() {
+    const slug = getCombinacionHidden();
+    if (slug) {
+      const combo = { slug, etiqueta: etiquetaDesdeSlug(slug) };
+      if (usoActivoForm() === "hotelero") ESTADO.comboHotel = combo;
+      else ESTADO.comboDormitorios = combo;
+    }
+    refrescarChipCombo();
+    refrescarChipComboHotel();
+  })();
+
+  // Cambiar el USO invalida la combinación (era de otro uso): limpia ambos chips.
+  const selUsoCombo = form.querySelector('select[name="uso"]');
+  if (selUsoCombo) selUsoCombo.addEventListener("change", () => {
+    ESTADO.comboDormitorios = null;
+    ESTADO.comboHotel = null;
+    setCombinacionHidden("");
+    refrescarChipCombo();
+    refrescarChipComboHotel();
+  });
 
   // ─── Modal "Superficies mínimas de estancias" (vivienda · Normativa) ──
   const API_SUP = "/modulos/render-calculos/superficies-vivienda";

@@ -217,6 +217,14 @@ class ParametrosPrograma:
     # dependen del uso activo (vivienda: estudio/1d/2d/3d/4d+; apartamentos:
     # estudio/1d/2d/3d; hotelero: individual/doble/triple/cuadruple/multiple).
     tipologias_extra: list[str] = field(default_factory=list)
+    # Combinación elegida por el arquitecto (slug canónico multiconjunto). Su
+    # SEMÁNTICA depende del uso:
+    #   · vivienda/apartamentos → composición de DORMITORIOS dentro de una unidad
+    #     (edificio homogéneo), p. ej. "doble*1+individual*2".
+    #   · hotelero → composición de habitaciones POR PLANTA (patrón que se replica
+    #     en cada planta), p. ej. "doble*2+individual*1".
+    # Vacía ("") = reparto automático. Persistida por escenario.
+    combinacion: str = ""
     # Reservas de planta baja en m² ABSOLUTOS (antes eran % del útil de PB). Se
     # descuentan del útil de la PB, acotadas a lo disponible.
     local_pb_m2: float = 0.0                        # m² PB destinados a local no residencial
@@ -414,6 +422,7 @@ def _programa_a_dict(prog: ParametrosPrograma) -> dict[str, Any]:
         "grupo_apartamentos": prog.grupo_apartamentos.value,
         "salon_cocina_open": prog.salon_cocina_open,
         "tipologias_extra": list(prog.tipologias_extra),
+        "combinacion": prog.combinacion,
         "local_pb_m2": prog.local_pb_m2,
         "otros_pb_m2": prog.otros_pb_m2,
         "usos_comunes_pb_m2": prog.usos_comunes_pb_m2,
@@ -552,6 +561,17 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         else:
             tip_extra = [str(s) for s in tip_extra_raw if isinstance(s, str) and s in slugs_validos]
 
+        # Combinación elegida (slug multiconjunto). Se valida contra los slugs del uso
+        # activo (una combinación de otro uso, o con tipologías no permitidas, se
+        # descarta → reparto automático). Se re-canonicaliza vía ComboDormitorios.
+        from .geometria.combinador_tipologias import slug_a_combo
+        comb_raw = node.get("combinacion", base_prog.combinacion)
+        combinacion = ""
+        if comb_raw:
+            combo = slug_a_combo(str(comb_raw))
+            if not combo.composicion or all(k in slugs_validos for k in combo.composicion):
+                combinacion = combo.slug
+
         return ParametrosPrograma(
             uso=uso,
             categoria_vivienda=cat,
@@ -562,6 +582,7 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             grupo_apartamentos=grupo_apt,
             salon_cocina_open=_b(node, "salon_cocina_open", base_prog.salon_cocina_open),
             tipologias_extra=tip_extra,
+            combinacion=combinacion,
             local_pb_m2=max(0.0, _f(node, "local_pb_m2", base_prog.local_pb_m2)),
             otros_pb_m2=max(0.0, _f(node, "otros_pb_m2", base_prog.otros_pb_m2)),
             usos_comunes_pb_m2=max(0.0, _f(node, "usos_comunes_pb_m2", base_prog.usos_comunes_pb_m2)),

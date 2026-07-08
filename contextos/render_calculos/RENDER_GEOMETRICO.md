@@ -7,10 +7,10 @@
 > cadena de **cálculo numérico** (que ya existe); esto documenta la capa de **dibujo**
 > (que está por construir) y su contrato.
 >
-> Rama de origen del trabajo: **`render-dev`** · ya **integrado en `dev` → `pre` → `main`**
-> (2026-06-29/30; squash en `dev`: «Render de patios implementado», «Cambio de frontend»,
-> «Funcion de bloqueo y union de los patios»). Baseline al abrir el trabajo: **157** tests ·
-> hoy: **182** (`python -m pytest app/tests -q`). Mantén este archivo al día (hay una bitácora al final).
+> Rama de origen del trabajo de patios: **`render-dev`** · ya **integrado en `dev` → `pre` →
+> `main`** (2026-06-29/30). Suite completa hoy: **370 tests** (`python -m pytest app/tests -q`;
+> detalle de la evolución del recuento en `REGISTRO.md`, no repetido aquí). Mantén este
+> archivo al día (bitácora comprimida al final, §9).
 
 ---
 
@@ -67,6 +67,13 @@ Todo esto existe y es correcto; es la materia prima del dibujo:
 - **`programa_vivienda/_apartamentos/programa_habitacion(...)` → `list[Estancia]`** — el
   reparto de m² de estancias de UNA unidad (área objetivo por estancia). Es lo que habría
   que **posicionar** dentro del polígono de cada unidad.
+- **`Capacidad.composicion_planta_forzada` (hotel, opcional, 2026-07-08)** — segundo
+  camino de reparto: el arquitecto elige una combinación de tipologías POR PLANTA («Ver
+  combinaciones») y esa mezcla se replica idéntica en cada planta habitable (en vez del
+  reparto automático). **Mismo contrato de salida** (`unidades_por_planta`/
+  `tipologias_unidad_por_planta`, invariante de cardinalidad intacto) — el futuro motor de
+  disposición no necesita rama especial. Detalle: `REGISTRO.md` §5 (2026-07-08) y memoria
+  `project_combinaciones_hotel`.
 
 ---
 
@@ -161,36 +168,36 @@ Notas del consumo en el canvas (verificadas en `rc_canvas.js`):
 | `envolvente.py` | ~530 | **Huella por planta** (PB/tipo/ático/sótano) en UTM: retranqueos direccionales, ocupación máx. por categoría (bisección de buffer), interior (huella−muro). Patios: `colocar_patios` (N patios; **prioridad por orden de lista**: cada patio cede solo ante los ANTERIORES, no exclusión mutua) + `conformar_patio`/`_inflar_a_area` (**relleno LOCAL anclado**: `hi_max=2·√área` + `_pieza_anclada`, sin teletransporte) + `_ajustar_area` (área fija). `Planta`, `Patio{base,cabe,area_efectiva_m2}`, `Envolvente`, `construir_envolvente`. |
 | `parcelas.py` | 144 | Clasifica lados `fachada`/`medianera` (sondeo a vecinas; sin vecinas→todo fachada), azimut, orientación cardinal, normal exterior. `LadoParcela`, `clasificar_lados`. |
 | `config.py` | 93 | Dataclasses de parámetros del motor: `ParametrosDiseno`/`Urbanisticos`/`Programa`/`Parametros`. |
-| `capacidad.py` | 652 | **Fuente de verdad numérica**: `Capacidad` (~50 campos), `calcular_capacidad`, reparto por planta (`_reparto_planta`), factor limitante, `capacidad_a_dict`. Sin geometría. |
+| `capacidad.py` | 740 | **Fuente de verdad numérica**: `Capacidad` (~55 campos), `calcular_capacidad`, reparto por planta (`_reparto_planta` o, si hay `composicion_planta_forzada`, `_colocar_composicion_forzada`), factor limitante, `capacidad_a_dict`. Sin geometría. |
 | `programa.py` | 693 | Reparto de m² en estancias de **vivienda** (Anexo I.5): `Estancia` (compartida), `programa_vivienda(_combo)`, `ProgramaViviendaConfig`, `config_desde_repo`. |
 | `programa_uso.py` | 104 | Descriptores cross-uso: `ProgramaUso`, `TipologiaUnidadDescriptor`, `reparto_multi_tipologia_generico` (cuántas unidades caben por planta). |
 | `programa_apartamentos.py` | 521 | Apartamentos turísticos (Decreto 194/2010, I.3 edificios / I.4 conjuntos): mínimos por categoría 1L–4L, `programa_apartamentos(_combo)`, áreas comunes. |
-| `programa_hotelero.py` | 237 | Hotelero (I.1): la **habitación** es la unidad; `programa_habitacion`, áreas sociales del establecimiento. |
-| `combinador_tipologias.py` | 139 | **(no está en el árbol del README)** Combina ocupaciones de N dormitorios (§2.5): `ComboDormitorios`, `enumerar_combinaciones`, codec de slug canónico. Puro. |
-| `accesibilidad.py` | 194 | **(no está en el árbol del README)** Unidades adaptadas DB-SUA por tramos (sustituye `pct_unidades_adaptadas`): `aplicar_adaptacion_capacidad`, `_repack_adaptadas`. Solo usos turísticos; vivienda nunca. |
+| `programa_hotelero.py` | 248 | Hotelero (I.1): la **habitación** es la unidad; `programa_habitacion`, `descriptor_tipologia_hotelero`, áreas sociales del establecimiento. |
+| `combinador_tipologias.py` | 232 | Combina ocupaciones de N dormitorios (§2.5): `ComboDormitorios`, `enumerar_combinaciones`, codec de slug canónico. **+ (2026-07-08)** `enumerar_combinaciones_por_area` (empaquetados maximales de UNA planta por útil disponible, `requerir_todas` — § hotel, ver `REGISTRO.md`). Puro. |
+| `accesibilidad.py` | 194 | Unidades adaptadas DB-SUA por tramos (sustituye `pct_unidades_adaptadas`): `aplicar_adaptacion_capacidad`, `_repack_adaptadas`. Solo usos turísticos; vivienda nunca. Corre DESPUÉS de cualquier reparto, incl. la composición forzada de hotel. |
 | `serializacion.py` | 484 | Contrato JSON: `ring`, `lados_a_dict`, `tabla_planta/unidad_desde_capacidad`, `_estancias_por_unidad_dorms`, `_nivel_diametro`. **`edificio` no se serializa aquí todavía.** |
 
 ### Capa hexagonal del contexto
 | Fichero | Líneas | Rol |
 |---|---:|---|
 | `dominio.py` | 166 | Enums (`UsoEdificio`, categorías/tipologías por uso), `NivelAlerta` (`error/incumplimiento/aviso/info`, debe casar con `NIVEL_PESO` del JS), `Alerta`, `IndicadoresDiseno`, `ResumenEnvolvente`. |
-| `parametros.py` | 571 | `ParametrosRender` (4 buckets diseño PB/tipo/ático/sótano + 2 programa) → traducción al motor (`a_parametros_motor[_tipo]`), parser JSON tolerante, herencia tipo←pb / atico←tipo / sotano←pb. `N_PLANTAS_LIMITE=60`. |
+| `parametros.py` | 704 | `ParametrosRender` (4 buckets diseño PB/tipo/ático/sótano + 2 programa) → traducción al motor (`a_parametros_motor[_tipo]`), parser JSON tolerante, herencia tipo←pb / atico←tipo / sotano←pb. `N_PLANTAS_LIMITE=60`. **+ (2026-07-08)** `ParametrosPrograma.combinacion` (slug persistido de la combinación elegida, semántica por uso). |
 | `puertos.py` | 115 | 4 puertos `Protocol`: `NormativaMunicipalRepositorio` + catálogos vivienda/apartamentos/hotelero. |
-| `casos_uso.py` | ~1390 | **Orquestación**: `CalcularEnvolvente`, `CalcularLayout` (central, devuelve `edificio:None`), `CalcularTipologiasDormitorios`, `CalcularEstanciasInmueble`, `ValidarCumplimiento`, `GuardarRender` + parcela métrica (huso UTM dinámico) + rehabilitación. La serialización de `parcela` expone `area_m2` (catastral/`sup_ref`, gobierna edificabilidad/ocupación) **y** `area_geometrica_m2` (área REAL del polígono, la que ve el KPI «Superficie del polígono»). |
+| `casos_uso.py` | 1888 | **Orquestación**: `CalcularEnvolvente`, `CalcularLayout` (central, devuelve `edificio:None`), `CalcularTipologiasDormitorios`, `CalcularCombinacionesHotel` (2026-07-08), `CalcularEstanciasInmueble`, `ValidarCumplimiento`, `GuardarEscenariosRender` + parcela métrica (huso UTM dinámico) + rehabilitación. La serialización de `parcela` expone `area_m2` (catastral/`sup_ref`, gobierna edificabilidad/ocupación) **y** `area_geometrica_m2` (área REAL del polígono, la que ve el KPI «Superficie del polígono»). |
 
 ### Web
 | Fichero | Líneas | Rol |
 |---|---:|---|
-| `entrypoints/web/rutas/render_calculos.py` | 827 | Router `/modulos/render-calculos`: `/preview`, `/calcular`, `/estancias`, `/tipologias-dormitorios`, `/guardar`, `/aplicar-normativa`, `/normativa…`, `/superficies-vivienda…`, `/minimos/{uso}…`, `/export.csv`. Permisos por endpoint. |
+| `entrypoints/web/rutas/render_calculos.py` | 968 | Router `/modulos/render-calculos`: `/preview`, `/calcular`, `/estancias`, `/tipologias-dormitorios`, `/combinaciones-hotel` (2026-07-08), `/escenarios`, `/aplicar-normativa`, `/normativa…`, `/superficies-vivienda…`, `/minimos/{uso}…`, `/export.csv`. Permisos por endpoint. |
 | `entrypoints/web/render_modos.py` | 110 | 3 modos `obra-nueva`/`rehabilitacion`/`inmueble` (`ModoRender`, `MODOS`, `MODO_POR_DEFECTO`). `inmueble` se auto-deriva si §2.1 eligió un inmueble. |
-| `templates/render_calculos.html` | 262 | Pantalla principal: hero (botón «Pintar render» **disabled**), barra catastral, form 3 columnas, `<canvas id="rc-canvas">`, 6 modales. |
+| `templates/render_calculos.html` | 262 | Pantalla principal: hero (botón «Pintar render» **disabled**), barra catastral, form 3 columnas, `<canvas id="rc-canvas">`, 8 modales. |
 | `templates/render_calculos_landing.html` | 327 | Selección de modo + preview parcela + modal de normativa obligatoria. |
-| `templates/_rc_panel_params.html` | 432 | Panel izquierdo de parámetros (`data-bloque` × `data-cuando-uso` × `data-visible-en-planta`). Macros `tip_bloque`, `dnum`. |
-| `templates/_rc_modal_*.html` | — | unidad (60), tipologias (37), superficies (22), minimos (24), normativa (71), exceso (27). |
+| `templates/_rc_panel_params.html` | 529 | Panel izquierdo de parámetros (`data-bloque` × `data-cuando-uso` × `data-visible-en-planta`). Macros `tip_bloque`, `dnum`. **+ (2026-07-08)** botón «Ver combinaciones» solo-hotel + `<input hidden name="combinacion">` uso-agnóstico (persiste la elección por escenario). |
+| `templates/_rc_modal_*.html` | — | unidad (60), tipologias (37), **combinaciones_hotel (2026-07-08)**, superficies (22), minimos (24), normativa (71), exceso (27). |
 | `static/js/rc_canvas.js` | ~390 | **Render 2D**: `RenderCanvas`. Dibuja parcela/footprint/patios/lados/orientación **y** (cuando lleguen) unidades/núcleo/pasillos. UTM→pantalla, Y invertida, rotación de brújula. Inversas `_pantallaAMundo`/`_mundoAPantalla` + `setOverlay`/`repintar`. **Zoom Ctrl+rueda al cursor** (`zoomEn`/`resetVista` + listener de rueda; vista persistente entre repintados mientras la bbox no cambie; 1×–12×). |
-| `static/js/rc_patios.js` | ~500 | **Editor de patios**: `PatioEditor`. Mover/estirar/girar/reformar de cada patio (área fija); sin bloqueo (puede salir y el backend lo adapta al borde al soltar). **Edita la forma EFECTIVA** (la adaptada y visible), no la base ideal → un patio adaptado se edita desde su forma adaptada y no revierte. Overlay de tiradores + commit por `data-vertices`. **Ciclado de tiradores superpuestos** (clic suelto alterna vértice↔rombo, el arrastre coge el resaltado). **Umbral de arrastre `DRAG_PX`** (un clic con micro-jitter NO comete «mover») y **anti-autointersección** (`autoCruza`: `_move` rechaza bowties al reformar, mantiene `_ultimoValido`). **Doble-clic** SOBRE una arista inserta vértice EN SITIO (vía `onFijarGeom`, **sin reorden ni recálculo**); en el cuerpo **ya no hace nada** (el «volver a cuadrado»/centrado se **eliminó** a petición del arquitecto). Clic derecho sobre vértice lo elimina (≥3, EN SITIO). |
+| `static/js/rc_patios.js` | ~500 | **Editor de patios**: `PatioEditor`. Mover/estirar/girar/reformar de cada patio (área fija, edita la forma EFECTIVA); bloqueo/fusión/edición en sitio (ver `REGISTRO.md` §2 reglas de patios para el detalle vigente). |
 | `static/js/rc_brujula.js` | 156 | Brújula SVG girable; `onRotate(cb)` → `renderer.setRotation`. Funcional. |
-| `static/js/render_calculos.js` | ~1740 | Toda la UI: estado (`ESTADO`), recálculo automático por debounce 300 ms, tablas, 8 modales, visibilidad por uso×planta, tabs por planta, conmutador planta/unidad. Patios: `commitPatioGeom` (mueve la fila al final → prioridad más baja, recalcula), **`fijarPatioGeom`** (cuadrar en sitio: solo escribe `data-vertices`, **sin reorden ni recálculo**), `sincronizarPatiosDesdePayload` (persiste la EFECTIVA + aviso «no cabe» con botón **«Adaptar»** que fija forma+área a la que cabe). |
+| `static/js/render_calculos.js` | 2392 | Toda la UI: estado (`ESTADO`), recálculo automático por debounce 300 ms, tablas, 9 modales, visibilidad por uso×planta, tabs por planta, escenarios (pestañas), editor de patios. **+ (2026-07-08)** modal «combinaciones-hotel», `<input hidden name="combinacion">` sincronizado (persiste por escenario para todos los usos, ya no solo cliente). |
 
 ---
 
@@ -237,24 +244,16 @@ Notas del consumo en el canvas (verificadas en `rc_canvas.js`):
 
 - Sin parcelas vecinas, **todos los lados salen `fachada`** → no hay medianera contra la que
   pegar el núcleo; decidir fallback.
-- ~~`detectar_patio` coloca **un solo patio rectangular** por planta~~ **RESUELTO (2026-06-26, refinado 2026-06-29)**:
-  `colocar_patios` (envolvente.py) coloca **N patios como secciones individuales** (polígono
-  libre por patio, editable en el lienzo: mover/estirar/girar/reformar). Cada patio es un
-  `PatioDef{area_m2, id, vertices}` (parametros.py) → `PatioPlacement` (config.py) → `Patio{id,
-  base, area_efectiva_m2, cabe}`. **Área fija**: `_ajustar_area` normaliza cualquier polígono a su
-  `area_m2` asignado. **Prioridad por orden de lista** (no exclusión mutua): cada patio cede solo
-  ante los ANTERIORES; el frontend mueve el patio recién editado al FINAL de la lista → solo ÉL se
-  adapta, los demás quedan donde estaban. **Adaptación LOCAL al borde** (no bloqueo, no teletransporte):
-  el patio puede salir; al soltar, `conformar_patio` recorta a `footprint − patios_anteriores` y
-  **rellena el hueco LOCAL** (`_inflar_a_area` acotado a `hi_max=2·√área` + `_pieza_anclada`); se queda
-  donde se soltó. Si no cabe en ese hueco → `cabe=False` + aviso rojo con botón **«Adaptar»** (fija
-  forma+área a la que cabe). Capacidad sigue deduciendo la SUMA de áreas asignadas (invariante intacto).
-  `Patio.base` = forma ideal; `Patio.geometry` = efectiva dibujada. **El editor edita la EFECTIVA**
-  (`static/js/rc_patios.js`, `_editable`→`poligono||base`): un patio adaptado se edita desde su forma
-  adaptada y no revierte a la ideal que asomaba. `detectar_patio` queda como fallback (sin lista de patios).
+- **Patios: RESUELTO** (histórico completo en `git log`, no repetido aquí). Estado vigente:
+  N patios editables como secciones individuales (`Patio{base, geometry, area_efectiva_m2,
+  cabe}`), área fija, prioridad por orden de lista, relleno local anclado al soltar, bloqueo
+  y fusión por cuello fino. El motor de disposición debe tratarlos como **obstáculos ya
+  colocados** (polígonos fijos a evitar) — el detalle de edición vive en `rc_patios.js` y las
+  reglas transversales en `REGISTRO.md` §2. `detectar_patio` es solo el fallback sin lista.
 - El reparto numérico **no verifica** que las unidades quepan físicamente (ancho/profundidad):
-  trunca por área total. La validación geométrica de adyacencia/forma es responsabilidad del
-  nuevo motor (parcela profunda con fachada corta puede no alojar lo prometido → `no_ubicada` + aviso).
+  trunca por área total (o, en hotel con composición forzada, por planta — mismo hueco). La
+  validación geométrica de adyacencia/forma es responsabilidad del nuevo motor (parcela
+  profunda con fachada corta puede no alojar lo prometido → `no_ubicada` + aviso).
 - Apartamentos/hotel: el interior fiel por uso no-vivienda y la geometría de áreas comunes
   (recepción, sociales) están sin resolver (hoy solo restan m² del techo).
 
@@ -275,111 +274,28 @@ Notas del consumo en el canvas (verificadas en `rc_canvas.js`):
 
 ## 9. Bitácora
 
-- **2026-06-26** — Mapeado a fondo el módulo en `render-dev` (workflow de 10 lectores).
-  Confirmado: cálculo numérico completo y verde (157 tests); render geométrico de unidades
-  **no existe** (`edificio: None`); `rc_canvas.js` ya tiene el código de dibujo de
-  unidades/núcleo/pasillos, inerte por falta de contrato. Creado este documento + corregido
-  el árbol del README. **Pendiente**: decidir algoritmo de disposición y empezar el motor.
-- **2026-06-26** — **Patios editables individuales (1ª tarea).** Cada patio pasa de un `float`
-  a `PatioDef{area_m2, id, vertices?}` (polígono libre UTM). Motor: `colocar_patios` coloca N
-  patios (con posición → tal cual; sin posición → auto-place en el polo del residual sin solape);
-  `_ajustar_area` impone «área fija» (reescala al área asignada respecto al centroide); capacidad
-  intacta (sigue deduciendo la suma de áreas). Salida y params round-trippean `id`+`vertices`
-  (persiste por el aggregate). Frontend: `rc_canvas.js` gana inversas pantalla→mundo
-  (`_pantallaAMundo`/`_mundoAPantalla`) + `setOverlay`; nuevo `rc_patios.js` (`PatioEditor`):
-  seleccionar, **mover/girar/estirar** (escala anisótropa que conserva el área) y **reformar
-  vértices** (al soltar reescala al área), con restricción «impedir/encajar» (dentro de la huella,
-  sin solape). 166 tests verdes (+9). `ESTATICOS_VERSION`→86. **Pendiente render geométrico de
-  unidades** (rebanadas/núcleo) sigue abierto.
-- **2026-06-26** — **Patios: plegado/adaptación al borde** (sustituye «impedir/encajar»). El patio
-  ahora **puede salir**; al **soltar**, el backend lo **recorta al borde y rellena hacia dentro**
-  conservando los m² (forma adaptada, una sola pieza). Modelo **BASE vs EFECTIVA**: `Patio.base` =
-  forma ideal del usuario (lo que se edita/persiste); `Patio.geometry` = efectiva dibujada
-  (`conformar_patio` = `∩ footprint−otros_patios` + `_inflar_a_area` por bisección de buffer). Si no
-  cabe → `cabe=False` + `area_efectiva_m2`; el frontend pinta la fila del panel en rojo con «El patio
-  de XX m² ahora tiene YY m²…». Cuando la base vuelve dentro, `footprint.contains(base)` ⇒ efectiva ==
-  base (los vértices temporales desaparecen). `rc_patios.js` edita la **base** (sin bloqueo);
-  `sincronizar` sella la base en `data-vertices`. Capacidad intacta. 173 tests (+7).
-  `ESTATICOS_VERSION`→88.
-- **2026-06-29** — **Patios: prioridad por orden + relleno LOCAL anclado.** En `colocar_patios`
-  (Fase B) cada patio cede solo ante los ANTERIORES de la lista (no exclusión mutua); el frontend
-  (`commitPatioGeom`) mueve el patio recién editado al final → solo ÉL se adapta, los demás quedan
-  intactos. En `conformar_patio`/`_inflar_a_area`: eliminada la **re-siembra al polo** (teletransporte)
-  y acotado el relleno a `hi_max=2·√área` + **pieza ANCLADA** (`_pieza_anclada`): el patio rellena su
-  hueco local y, si no cabe, se queda ahí con `cabe=False` (no salta a otra zona). `conformar_patio`
-  recibe la huella para el fallback de recorte. 176 tests (+2: prioridad, hueco muerto).
-- **2026-06-29** — **Botón «Adaptar» + editar la forma EFECTIVA.** En el aviso «no cabe» aparece un
-  botón **«Adaptar»** que adopta la forma efectiva + su área (de backend, `area_efectiva_m2`, menos
-  0,05 de margen — el `ring()` serializa aproximado: simplifica/redondea/descarta agujeros) para que
-  quepa justo. **Cambio de modelo de edición**: el editor pasa a operar sobre la **EFECTIVA** (forma
-  adaptada y visible): `_editable`→`poligono||base`, `_up` no revierte en clic suelto (sella la forma
-  arrastrada, no la base), `sincronizar` persiste `p.poligono`. Un patio adaptado se edita desde su
-  forma adaptada y ya no «revierte» a la ideal que asomaba.
-- **2026-06-29** — **Lienzo: zoom Ctrl+rueda + tiradores superpuestos.** `rc_canvas.js` gana zoom al
-  cursor (`zoomEn`/`resetVista` + listener de rueda con Ctrl; vista persistente entre repintados
-  mientras la bbox no cambie; 1×–12×, alejar del todo re-encaja). `rc_patios.js`: cuando vértice y
-  rombo se solapan, un clic suelto cicla cuál queda ENCIMA/resaltado y el arrastre agarra el resaltado
-  (`_candidatosHandle`, `_ciclo`, `_handleResaltado`).
-- **2026-06-29** — **KPI «Superficie del polígono»** (antes «Superficie del solar»): el panel de
-  resultados muestra el área geométrica REAL del polígono (`parcela.area_geometrica_m2`), distinta de
-  la catastral (`sup_ref`/`area_m2`), que sigue gobernando edificabilidad/ocupación.
-- **2026-06-29** — **Cache-busting AUTOMÁTICO**: `plantillas.py` deriva `estaticos_version` del mtime
-  más reciente de `static/` (reevaluado en cada render). Ya NO hay que subir la versión a mano al
-  tocar CSS/JS.
-- **2026-06-29** — **Patios: anti-autointersección al reformar (bowtie).** Reformar un vértice podía cruzar
-  aristas (figura imposible): el backend no sabe adaptar un anillo inválido y `escalarAArea` (shoelace) lo agranda
-  con área falseada → «no cabe» falso y botón «Adaptar» vacío. Nuevo helper `autoCruza(v)` (par de aristas no
-  adyacentes que se cruzan); `_move` rechaza el candidato autointersectante y mantiene `_ultimoValido` (sembrado
-  en `_down`). Nunca se commitea un patio bowtie. 176 tests verdes.
-- **2026-06-29** — **Patios: bloqueo (congelado) + fusión por proximidad.** Nuevo campo `bloqueado`
-  propagado por todo el pipeline (`PatioDef`→`PatioPlacement`→`Patio`→dict de salida; parse/serialize en
-  `parametros.py`, emitido solo si `True`). **Bloqueo**: botón candado 🔒/🔓 a la izquierda del `×` en cada
-  `.rc-patio-fila`; un patio bloqueado NO admite interacción (lienzo, área `readonly`, `×` `disabled`) y en
-  `colocar_patios` tiene **prioridad máxima** (`orden = bloqueados primero, luego lista` → los vecinos se
-  adaptan alrededor; el bloqueado conserva su base). Persistente (round-trip por params). El editor
-  (`rc_patios.js`) gatea los bloqueados leyendo `patio.bloqueado` del payload (`_bloqueado`): saltados en
-  `_hit`/`_down`/`_candidatosHandle`/`_dblclick`/`_contextmenu`. **Fusión**: cuando dos patios NO bloqueados
-  quedan a ≤ 0,1 m (`distanciaPoligonos`), `dibujarOverlay` pinta una **ventanita azul** (`COLOR.azul`
-  `#2D6CDF`, excepción a la paleta pedida por el arquitecto) con un botón `+`; al pulsarlo, `fusionarPatios`
-  (render_calculos.js) los une en uno: forma = **envolvente convexa** (`convexHull`, cadena monótona) de
-  ambos, superficie = **suma** de áreas (el backend la normaliza vía `_ajustar_area`); se elimina el patio B
-  y el A baja a última prioridad. 180 tests (+4: round-trip `bloqueado`, propagación motor/Patio, prioridad
-  congelada, contrato del dict de salida).
-- **2026-06-29** — **Fusión: cuello fino (sustituye la envolvente convexa) + fila del panel en una línea.**
-  El hull deformaba («rellenaba alrededor»); ahora la fusión **conserva ambas formas/vértices exactos** y las
-  une por un **cuello finísimo** en una sola figura (superficie = suma). La unión robusta se hace con **shapely
-  en el backend**: `fusionar_poligonos(a, b, ancho=ANCHO_PUENTE=0.06)` (`envolvente.py`) = `unary_union([a, b,
-  puente])` donde `puente` = buffer fino del segmento entre `nearest_points(a, b)` (o disco mínimo si ya se
-  tocan); `_normalizar` garantiza un único Polygon válido. Endpoint **`POST /modulos/render-calculos/fusionar-patios`**
-  (permiso editar): recibe `{a, b}` (anillos UTM), devuelve `{poligono: ring(fused)}` vía `fusionar_anillos`
-  (wrapper coords→Polygon). `fusionarPatios` (render_calculos.js) ahora es **async**: pide la unión al backend,
-  la fija como `vertices` del patio A (área = suma) y borra el B; `convexHull` eliminado. El anillo fusionado
-  viaja luego como un patio normal (el pipeline lo preserva: `_ajustar_area`≈identidad, `conformar_patio`
-  idéntico si cabe). **CSS**: `.rc-patio-fila input { flex:1 1 60px; min-width:0 }` → candado + `×` en la misma
-  línea (el aviso «no cabe» sigue cayendo solo por `flex-basis:100%`). 182 tests (+2: fusión conserva ambas
-  formas / un solo Polygon; fusión tocándose).
-- **2026-06-29** — **Doble-clic en patios: edición de vértices EN SITIO (vivo) + «volver a cuadrado» AÑADIDO Y
-  RETIRADO el mismo día.** **Vivo:** doble-clic SOBRE una arista inserta un vértice (`mejorD <= tolPx`) y clic
-  derecho sobre un vértice lo borra (≥3); ambas conservan el área (`escalarAArea`), así que se fijan **EN SITIO**:
-  callback `onFijarGeom` (`rc_patios.js`, helper `_fijar`) → `fijarPatioGeom` (`render_calculos.js`) solo escribe
-  `data-vertices` (**sin reorden a última prioridad, sin `pedirCalculo`**); el lienzo se repinta en local desde
-  `_lastPayload`. Umbral de arrastre `DRAG_PX=4` (preview) + gate de `_up` `COMMIT_PX=8`/`ev.detail>=2`
-  (confirmación) → un clic con micro-jitter no comete un «mover» accidental. **Retirado (decisión del arquitecto):**
-  el doble-clic en el CUERPO reconstruía el patio como cuadrado centrado; tras dos intentos fallidos de evitar que se
-  teletransportara y desapareciera, se eliminó **solo** esa rama de `_dblclick` (y su discriminación por centroide,
-  que solo existía para ella). Hoy el doble-clic en el cuerpo no hace nada. **Lección durable (motor del
-  teletransporte, aplica a CUALQUIER commit de patio):** `commitPatioGeom` **reordena el patio a última prioridad
-  (`appendChild`) + `pedirCalculo`** → el backend `conformar_patio` re-adapta una forma que protruye o «no cabe» y
-  **desplaza su centroide** → el patio camina hasta desaparecer. Toda edición que conserve el área debe ir por
-  `_fijar`, **nunca** por `onCommit`; el único camino que aún reordena+recalcula es `_up` con arrastre deliberado
-  ≥ COMMIT_PX (correcto). Sin cambios de backend; 176 verdes.
-- **2026-06-30** — **Sincronización del doc + integración de la rama.** Todo el trabajo de patios
-  hecho en `render-dev` (editable individual → base/efectiva → prioridad por orden + relleno local →
-  zoom/tiradores → anti-bowtie → bloqueo + fusión → doble-clic en sitio) **ya está fusionado en
-  `dev`, `pre` y `main`** (en `dev` aparece squashed en 3 commits del 2026-06-29). Recuento real
-  confirmado: **182 tests** (`pytest --collect-only`); el encabezado seguía en 176. **El hecho central
-  del documento NO cambia**: el render geométrico de **unidades** (rebanadas/núcleo/pasillos) sigue
-  **sin existir** — `CalcularLayout`/`CalcularEnvolvente` devuelven `edificio: None`
-  (casos_uso.py:410/430/494, comentario «render geométrico en backlog»). «Render de patios implementado»
-  se refiere a los PATIOS, no a las unidades; el §4 (plan de integración) y las preguntas abiertas del
-  §8 siguen vigentes como próximo trabajo.
+> Comprimida (2026-07-08) para lectura rápida: el detalle línea-a-línea de cada commit
+> vive en `git log`; aquí solo lo que sigue siendo operativo y no está ya en §6/§7.
+
+- **2026-06-26 → 2026-06-30** (`render-dev`, integrado en `dev`→`pre`→`main`) — Todo el
+  trabajo de **patios editables**: individual → base/efectiva → prioridad por orden +
+  relleno local anclado → zoom/tiradores en canvas → anti-bowtie → bloqueo + fusión por
+  cuello fino → edición en sitio (doble-clic/clic-derecho sin reordenar ni recalcular).
+  Reglas vigentes consolidadas en §7 (arriba) y `REGISTRO.md` §2. **Lección durable**: solo
+  el arrastre deliberado (`≥COMMIT_PX`) debe reordenar+recalcular un patio; cualquier commit
+  que reordene una forma que no cabe le desplaza el centroide hasta hacerlo desaparecer
+  («teletransporte») — toda edición que conserve el área va por `_fijar`, no por `onCommit`.
+  182 tests al cerrar esta fase. **No toca el render de UNIDADES** (sigue sin existir).
+- **2026-06-29** — KPI «Superficie del polígono» (área geométrica real, distinta de la
+  catastral que gobierna edificabilidad/ocupación) + cache-busting automático de estáticos
+  (ambos ya recogidos en `app/CLAUDE.md` y `REGISTRO.md` §2).
+- **2026-07-08** — `Capacidad` gana una vía de reparto POR PLANTA para hotel
+  (`composicion_planta_forzada`): sigue siendo puramente NUMÉRICO, mismo contrato de salida
+  (ver §2 arriba) — no adelanta el trabajo de disposición geométrica de este documento, pero
+  es la fuente de datos que el futuro motor deberá leer también para hotel con combinación
+  forzada. Detalle completo: `REGISTRO.md` §5 y memoria `project_combinaciones_hotel`.
+
+**El hecho central de este documento NO cambia**: el render geométrico de **UNIDADES**
+(rebanadas/núcleo/pasillos, §1/§3) sigue sin existir — `edificio: None` explícito en
+`CalcularLayout`/`CalcularEnvolvente`. El §4 (plan de integración) y las preguntas del §8
+siguen vigentes como el próximo trabajo real de este módulo.

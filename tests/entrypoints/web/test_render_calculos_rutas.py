@@ -27,6 +27,24 @@ def _sembrar_proyecto_con_parcela(session_factory) -> str:
         return p.id
 
 
+def _sembrar_proyecto_con_contorno(session_factory) -> str:
+    """Proyecto con un contorno WGS84 real → `construir_parcela_metrica` da geometría."""
+    # Cuadrado de ~30 m cerca de Sevilla (para reproyección UTM válida).
+    lon0, lat0 = -5.99, 37.38
+    dlon, dlat = 0.00034, 0.00027   # ≈ 30 m
+    contorno = [
+        [lon0, lat0], [lon0 + dlon, lat0],
+        [lon0 + dlon, lat0 + dlat], [lon0, lat0 + dlat],
+    ]
+    with session_factory() as s:
+        p = Proyecto(nombre="Parcela hotel")
+        p.fijar_datos(ModuloPuccetti.LOCALIZACION, {
+            "superficie_m2": 900.0, "contorno_wgs84": contorno,
+        })
+        ProyectosSQLAlchemy(s).guardar(p)
+        return p.id
+
+
 def test_pantalla_render_muestra_barra_escenarios(cliente_autenticado, engine_memoria):
     _engine, session_factory = engine_memoria
     pid = _sembrar_proyecto_con_parcela(session_factory)
@@ -86,6 +104,55 @@ def test_escenarios_lista_vacia_da_422(cliente_autenticado, engine_memoria):
     c.cookies.set("puccetti_proyecto", pid)
     assert c.post("/modulos/render-calculos/escenarios",
                   json={"modo": "obra-nueva", "escenarios": []}).status_code == 422
+
+
+def test_combinaciones_hotel_devuelve_lista(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto_con_contorno(session_factory)
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set("puccetti_proyecto", pid)
+
+    payload = _params_uso("hotelero")
+    payload["programa"] = {
+        "uso": "hotelero", "categoria_hotelero": "hotel_3",
+        "tipologia_habitacion": "doble", "tipologias_extra": ["individual"],
+    }
+    payload["urbanisticos"] = {"coeficiente_edificabilidad": 3.0, "n_plantas_max": 4,
+                               "ocupacion_maxima_pct": 100.0}
+    r = c.post("/modulos/render-calculos/combinaciones-hotel", json=payload)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "combinaciones" in data
+    assert isinstance(data["combinaciones"], list)
+    assert data["util_planta_m2"] > 0
+
+
+def test_combinaciones_hotel_sin_proyecto_no_sirve(cliente_autenticado, engine_memoria):
+    # Sin proyecto activo el gate redirige a /proyectos (no llega al endpoint).
+    c = cliente_autenticado(Rol.ARQUITECTO)  # sin cookie de proyecto
+    r = c.post("/modulos/render-calculos/combinaciones-hotel",
+               json=_params_uso("hotelero"), follow_redirects=False)
+    assert r.status_code in (303, 307, 409)
+
+
+def test_combinacion_persiste_por_escenario(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto_con_parcela(session_factory)
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set("puccetti_proyecto", pid)
+
+    params = _params_uso("hotelero")
+    params["programa"]["categoria_hotelero"] = "hotel_3"
+    params["programa"]["combinacion"] = "doble*2+individual*1"
+    body = {"modo": "obra-nueva", "activo": "e1",
+            "escenarios": [{"id": "e1", "nombre": "H", "parametros": params, "resumen": {}}]}
+    assert c.post("/modulos/render-calculos/escenarios", json=body).status_code == 200
+
+    # El GET del escenario renderiza el input oculto con la combinación persistida.
+    resp = c.get("/modulos/render-calculos?modo=obra-nueva&escenario=e1")
+    assert resp.status_code == 200
+    assert 'id="rc-combinacion-hidden"' in resp.text
+    assert "doble*2+individual*1" in resp.text
 
 
 def test_superficies_vivienda_incluye_util_minimo(cliente_autenticado, engine_memoria):

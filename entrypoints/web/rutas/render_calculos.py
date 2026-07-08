@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.contextos.proyectos.puertos import ProyectoRepositorio
 from app.contextos.render_calculos.casos_uso import (
+    CalcularCombinacionesHotel,
     CalcularEnvolvente,
     CalcularEstanciasInmueble,
     CalcularLayout,
@@ -575,6 +576,36 @@ def tipologias_dormitorios(
         catalogo_apartamentos=catalogo_apt,
         catalogo_hotelero=catalogo_hot,
     ).ejecutar(parcela, params, n_dorms)
+    return JSONResponse(resultado)
+
+
+# ─── Combinaciones de tipologías de unidad POR PLANTA (hotel) ────────────────
+@router.post("/combinaciones-hotel")
+def combinaciones_hotel(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Enumera las combinaciones de tipologías de habitación que caben en una planta
+    (individual/doble/triple…) sobre el útil de una planta representativa. El cliente
+    muestra el modal de selección; la elección viaja como `programa.combinacion` (que
+    el escenario persiste) y el motor la replica en cada planta habitable."""
+    _exige_permiso(rol, PermisoModulo.VER)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    parcela = construir_parcela_metrica(proyecto)
+    if parcela is None:
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
+
+    params = parametros_desde_dict(payload)
+    resultado = CalcularCombinacionesHotel(
+        catalogo_vivienda=catalogo_viv,
+        catalogo_apartamentos=catalogo_apt,
+        catalogo_hotelero=catalogo_hot,
+    ).ejecutar(parcela, params)
     return JSONResponse(resultado)
 
 

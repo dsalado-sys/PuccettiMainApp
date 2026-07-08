@@ -391,18 +391,37 @@ class CalcularLayout:
         params: ParametrosRender,
         combo_override: str | None = None,
     ) -> dict[str, Any]:
-        """`combo_override` (§2.5): slug de combinación de dormitorios elegida por
-        el técnico. Si se indica y el uso es apartamentos turísticos, sustituye la
-        tipología por la combinación (toda la unidad, PB y plantas tipo). Selección
-        temporal: el caso de uso no la persiste."""
+        """`combo_override`: slug de combinación elegida por el técnico (preview). Si
+        es None se toma de `params.programa.combinacion` (persistida en el escenario).
+        Su semántica depende del uso:
+        - vivienda/apartamentos → combinación de DORMITORIOS de una unidad (edificio
+          homogéneo de esa combinación; PB y plantas tipo).
+        - hotelero → composición de habitaciones POR PLANTA que se replica en cada
+          planta habitable (no es un combo de dormitorios); se traduce a
+          `composicion_planta_forzada` para el motor y la accesibilidad la reajusta."""
         # §3.8 — construye la config inmutable del motor (mínimos editados de BBDD +
         # % circulación del panel) para el uso activo y la pasa por la cadena de
         # cálculo. Sustituye al volcado a globals de módulo (concurrencia/aislamiento).
         cfg = self._sincronizar_minimos(params)
 
+        uso = params.programa.uso
+        # La combinación viaja persistida en los parámetros; el arg explícito (preview
+        # de combinaciones de dormitorios) tiene prioridad.
+        combinacion = combo_override if combo_override is not None else params.programa.combinacion
+        combinacion = (combinacion or "").strip()
+        # Hotel: composición POR PLANTA (no combo_override homogéneo). Vivienda/apt: la
+        # combinación alimenta el camino homogéneo existente.
+        composicion_forzada = None
+        combo_override_efectivo = None
+        if uso == UsoEdificio.HOTELERO:
+            if combinacion:
+                composicion_forzada = self._composicion_planta_hotel(params, combinacion, cfg)
+        else:
+            combo_override_efectivo = combinacion or None
+
         # R3: error bloqueante si la suma de mínimos de una tipología de vivienda
         # supera su útil máximo editable (antes se infradimensionaba en silencio).
-        err_util_max = self._validar_util_maximo_vivienda(params, combo_override=combo_override, cfg=cfg)
+        err_util_max = self._validar_util_maximo_vivienda(params, combo_override=combo_override_efectivo, cfg=cfg)
         if err_util_max:
             return {
                 "error": err_util_max,
@@ -436,23 +455,23 @@ class CalcularLayout:
             }
 
         # 1) Resolver tamaño objetivo de la tipología principal (PB y plantas tipo).
-        util_objetivo = self._resolver_util_objetivo(params, combo_override=combo_override, cfg=cfg)
+        util_objetivo = self._resolver_util_objetivo(params, combo_override=combo_override_efectivo, cfg=cfg)
         util_objetivo_tipo = self._resolver_util_objetivo(
-            params, params.programa_tipo, combo_override=combo_override, cfg=cfg
+            params, params.programa_tipo, combo_override=combo_override_efectivo, cfg=cfg
         )
 
         # 2) Descriptores de tipología (principal + extras → mezcla), PB y tipo.
         descriptores = self._construir_descriptores_tipologia(
-            params, util_objetivo, combo_override=combo_override, cfg=cfg
+            params, util_objetivo, combo_override=combo_override_efectivo, cfg=cfg
         )
         descriptores_tipo = self._construir_descriptores_tipologia(
-            params, util_objetivo_tipo, params.programa_tipo, combo_override=combo_override, cfg=cfg
+            params, util_objetivo_tipo, params.programa_tipo, combo_override=combo_override_efectivo, cfg=cfg
         )
 
         # 3) Construir programa_uso (áreas comunes/sociales obligatorias — de edificio).
         programa_uso = self._construir_programa_uso(
             params, envolvente, params_motor, util_objetivo, descriptores,
-            combo_override=combo_override, cfg=cfg,
+            combo_override=combo_override_efectivo, cfg=cfg,
         )
         area_comunes = programa_uso.area_servicios_obligatorios_m2 if programa_uso else 0.0
 
@@ -471,6 +490,7 @@ class CalcularLayout:
             descriptores_tipologia_tipo=descriptores_tipo,
             disenos=_disenos_por_categoria(params),
             cfg_vivienda=cfg_vivienda,
+            composicion_planta_forzada=composicion_forzada,
         )
 
         # 4.bis) Accesibilidad (DB-SUA): asignación automática de unidades
@@ -488,6 +508,12 @@ class CalcularLayout:
         indicadores = _indicadores_disenho(parcela, envolvente.plantas)
         alertas = _alertas_envolvente(envolvente, parcela, params)
         alertas += _alertas_capacidad(cap, params, programa_uso)
+        if getattr(cap, "composicion_truncada", False):
+            alertas.append(Alerta(
+                "aviso", "Normativa",
+                "Alguna planta tiene menos superficie útil y no admite entera la "
+                "composición elegida; se ajustó a las unidades que caben.",
+            ))
 
         return {
             "edificio": None,                          # render geométrico en backlog
@@ -720,6 +746,32 @@ class CalcularLayout:
         descriptores = [constructor(slug) for slug in slugs]
         return descriptores or None
 
+    # ─── Composición POR PLANTA forzada (§ hotel) ───────────────────────────
+    def _composicion_planta_hotel(self, params: ParametrosRender, combinacion: str, cfg=None):
+        """Traduce el slug de combinación de hotel a la lista de unidades POR PLANTA.
+
+        Devuelve `[(slug, util_objetivo, plazas), ...]` con UNA entrada por unidad de
+        la planta (p. ej. «1 individual + 2 dobles» → 3 entradas). El motor la coloca
+        idéntica en cada planta habitable (truncando si alguna tiene menos útil) y la
+        accesibilidad DB-SUA la reajusta después. Devuelve None si la combinación es
+        vacía o no aplica al uso hotelero.
+        """
+        if params.programa.uso != UsoEdificio.HOTELERO or not combinacion:
+            return None
+        from .geometria.combinador_tipologias import slug_a_combo
+        from .geometria.programa_hotelero import CONFIG_DEFAULT, descriptor_tipologia_hotelero
+        cfg_uso = cfg if cfg is not None else CONFIG_DEFAULT
+        combo = slug_a_combo(combinacion)
+        if not combo.composicion:
+            return None
+        cat = params.programa.categoria_hotelero.value
+        unidades: list[tuple[str, float, int]] = []
+        for slug, count in combo.composicion.items():
+            d = descriptor_tipologia_hotelero(cat, slug, cfg_uso)
+            for _ in range(max(0, int(count))):
+                unidades.append((slug, d.util_objetivo, d.n_dorms_label))
+        return unidades or None
+
     def _construir_programa_uso(
         self,
         params: ParametrosRender,
@@ -801,6 +853,7 @@ def _etiqueta_combo(composicion: dict[str, int]) -> str:
         "doble": ("doble", "dobles"),
         "triple": ("triple", "triples"),
         "cuadruple": ("cuádruple", "cuádruples"),
+        "multiple": ("múltiple", "múltiples"),
     }
     partes = []
     for tam, n in sorted(composicion.items()):
@@ -938,6 +991,95 @@ class CalcularTipologiasDormitorios:
             "excluidas_util_maximo": excluidas,
             "combinaciones": viables,
         }
+
+
+# ─── Caso de uso: CalcularCombinacionesHotel (§ hotel — combinaciones por planta) ──
+@dataclass
+class CalcularCombinacionesHotel:
+    """Enumera las combinaciones de tipologías de habitación que caben en UNA planta.
+
+    A diferencia de `CalcularTipologiasDormitorios` (combinaciones de dormitorios
+    DENTRO de una unidad, vivienda/apartamentos), aquí se combinan UNIDADES enteras
+    (habitaciones) hasta llenar el útil de una planta representativa. El arquitecto
+    elige una y esa composición se replica en cada planta habitable (la accesibilidad
+    DB-SUA la reajusta después). Solo aplica a hotelero.
+    """
+
+    catalogo_vivienda: CatalogoSuperficiesRepositorio | None = None
+    catalogo_apartamentos: CatalogoApartamentosRepositorio | None = None
+    catalogo_hotelero: CatalogoHoteleroRepositorio | None = None
+
+    def ejecutar(self, parcela: ParcelaMetrica, params: ParametrosRender) -> dict[str, Any]:
+        from .geometria.combinador_tipologias import enumerar_combinaciones_por_area
+        from .geometria.programa_hotelero import descriptor_tipologia_hotelero
+
+        prog = params.programa
+        if prog.uso != UsoEdificio.HOTELERO:
+            return {
+                "error": "Las combinaciones por planta solo aplican al uso hotelero.",
+                "combinaciones": [],
+            }
+
+        layout = CalcularLayout(
+            catalogo_vivienda=self.catalogo_vivienda,
+            catalogo_apartamentos=self.catalogo_apartamentos,
+            catalogo_hotelero=self.catalogo_hotelero,
+        )
+        cfg = layout._sincronizar_minimos(params)
+
+        # Útil de una planta representativa (independiente del reparto/combinación:
+        # `util_por_planta` se calcula antes de repartir). Reutiliza el layout completo.
+        res = layout.ejecutar(parcela, params)
+        if res.get("error"):
+            return {"error": res["error"], "combinaciones": []}
+        cap = res.get("capacidad") or {}
+        util_planta = float(cap.get("util_planta_representativa_m2", 0.0) or 0.0)
+
+        # Tipologías consideradas: principal + extras (las que el arquitecto declaró).
+        cat = prog.categoria_hotelero.value
+        slugs: list[str] = []
+        for s in [prog.tipologia_habitacion.value] + list(prog.tipologias_extra):
+            if s not in slugs:
+                slugs.append(s)
+        tamanos: dict[str, float] = {}
+        plazas_map: dict[str, int] = {}
+        for s in slugs:
+            d = descriptor_tipologia_hotelero(cat, s, cfg)
+            tamanos[s] = d.util_objetivo
+            plazas_map[s] = d.plazas
+
+        # `requerir_todas`: solo combinaciones que incluyan TODAS las tipologías
+        # elegidas (criterio del arquitecto: si quiere solo dos, elige dos).
+        combos, meta = enumerar_combinaciones_por_area(util_planta, tamanos, requerir_todas=True)
+
+        filas: list[dict[str, Any]] = []
+        for c in combos:
+            comp = dict(c.composicion)
+            unidades = sum(comp.values())
+            plazas = sum(int(plazas_map.get(s, 2)) * n for s, n in comp.items())
+            util_usado = sum(float(tamanos.get(s, 0.0)) * n for s, n in comp.items())
+            filas.append({
+                "slug": c.slug,
+                "composicion": comp,
+                "etiqueta": _etiqueta_combo(comp),
+                "unidades_por_planta": unidades,
+                "plazas_por_planta": plazas,
+                "util_usado_m2": round(util_usado, 2),
+                "util_planta_m2": round(util_planta, 2),
+            })
+        # Ordena por capacidad (plazas) desc y, a igualdad, por nº de unidades asc.
+        filas.sort(key=lambda f: (-f["plazas_por_planta"], f["unidades_por_planta"]))
+
+        return {
+            "categoria": cat,
+            "util_planta_m2": round(util_planta, 2),
+            "total": meta["total"],
+            "mostradas": len(filas),
+            "no_mostradas": meta["no_mostradas"],
+            "no_caben_tipos": meta["no_caben_tipos"],
+            "combinaciones": filas,
+        }
+
 
 # Uso del edificio → tipo de unidad que entiende el motor de estancias (Anexo I).
 _USO_A_TIPO_UNIDAD: dict[UsoEdificio, str] = {

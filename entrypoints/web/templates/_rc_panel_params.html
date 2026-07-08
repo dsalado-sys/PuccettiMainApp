@@ -236,6 +236,13 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
         </select>
       </label>
 
+      {# Combinación elegida (persistida por escenario). Uso-agnóstico: lo sincroniza
+      el JS al elegir una combinación (dormitorios de vivienda/apartamento, o mezcla
+      de habitaciones por planta en hotel). Sin `data-cuando-uso` → siempre en el
+      payload, así round-trippea por `/escenarios`. #}
+      <input type="hidden" name="combinacion" data-bloque="programa"
+        value="{{ prog.combinacion }}" id="rc-combinacion-hidden">
+
       {# Editor de superficies mínimas de estancias (vivienda · Anexo I.5).
       Recoge los mínimos por estancia y tipología (incluido estudio), los
       muestra y permite editarlos desde el modal. #}
@@ -336,6 +343,27 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
       permitir_extra=(not es_inmueble)) }}
       {{ tip_bloque("hotelero", "hotelero", lbl_hab, "tipologia_habitacion", prog_t, "programa_tipo", "tipo",
       "rc-tip-hotelero-tipo", permitir_extra=(not es_inmueble)) }}
+
+      {# § hotel — combinaciones de tipologías de habitación que caben en UNA planta.
+      El arquitecto elige una y esa mezcla se replica en cada planta habitable (la
+      accesibilidad reajusta las plantas bajas). Enumera sobre las tipologías elegidas
+      (principal + «+ Tipología»). Selección persistida en el escenario. #}
+      {% if not es_inmueble %}
+      <div class="rc-campo" data-cuando-uso="hotelero" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Combinación de habitaciones por planta</span>
+        <button type="button" class="boton-secundario rc-btn-pequeno" id="rc-btn-combinaciones-hotel">
+          Ver combinaciones
+        </button>
+        <small class="rc-hint">Mezclas de habitaciones que caben en una planta, con las tipologías elegidas.</small>
+        <div id="rc-combo-hotel-elegido" class="rc-combo-elegido" hidden>
+          <span class="rc-combo-elegido-pre">Combinación aplicada:</span>
+          <span class="rc-badge rc-badge-dorado" id="rc-combo-hotel-elegido-txt"></span>
+          <button type="button" class="rc-tip-quitar" id="rc-combo-hotel-limpiar"
+            aria-label="Quitar combinación elegida">−</button>
+        </div>
+      </div>
+      {% endif %}
+
       <div class="rc-campo" data-cuando-uso="hotelero" data-visible-en-planta="pb">
         <span class="rc-campo-label">Superficies mínimas de estancias</span>
         <button type="button" class="boton-secundario rc-btn-pequeno rc-btn-minimos" data-uso="hotelero">Ver / editar

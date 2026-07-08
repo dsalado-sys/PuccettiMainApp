@@ -146,6 +146,12 @@ class Capacidad:
     # por tramos (0 en vivienda) y modo de adaptación ("total" o "parcial").
     n_unidades_adaptadas: int = 0
     modo_adaptacion: str = "total"
+    # Útil de una planta representativa (planta tipo estándar): m² contra los que se
+    # enumeran las combinaciones por planta (§ hotel).
+    util_planta_representativa_m2: float = 0.0
+    # § hotel: True si la composición por planta forzada no cupo entera en alguna
+    # planta habitable (p. ej. la PB con reservas comunes) → se truncó ahí.
+    composicion_truncada: bool = False
 
 
 def _nombre_planta(idx_visual: int, tipo: str) -> str:
@@ -214,6 +220,34 @@ def _reparto_planta(
     return unidades, tipologias
 
 
+def _colocar_composicion_forzada(
+    util_disponible: float,
+    composicion: list[tuple[str, float, int]],
+):
+    """Coloca una composición fija de unidades en una planta (§ hotel).
+
+    `composicion` = lista `(slug, util_objetivo, n_dorms_label)` con UNA entrada por
+    unidad (la composición POR PLANTA elegida por el arquitecto). Coloca las unidades
+    de mayor a menor útil mientras quepan en `util_disponible`; las que no caben se
+    descartan (planta con menos útil que la representativa → `truncada=True`).
+
+    Devuelve `(unidades, tipologias, truncada)` con el mismo formato que
+    `_reparto_planta` (`unidades=[(n_dorms_label, util_m2)…]`, `tipologias=[slug…]`).
+    """
+    restante = util_disponible
+    unidades: list[tuple[int, float]] = []
+    tipologias: list[str] = []
+    truncada = False
+    for slug, util_obj, label in sorted(composicion, key=lambda t: -t[1]):
+        if util_obj <= restante + 1e-6:
+            unidades.append((label, util_obj))
+            tipologias.append(slug)
+            restante -= util_obj
+        else:
+            truncada = True
+    return unidades, tipologias, truncada
+
+
 def calcular_capacidad(
     envolvente,
     params: Parametros,
@@ -226,6 +260,7 @@ def calcular_capacidad(
     descriptores_tipologia_tipo: list[TipologiaUnidadDescriptor] | None = None,
     disenos: dict[str, DisenoPlanta] | None = None,
     cfg_vivienda: ProgramaViviendaConfig | None = None,
+    composicion_planta_forzada: list[tuple[str, float, int]] | None = None,
 ) -> Capacidad:
     """Deriva la capacidad numérica del edificio (sin geometría de unidades).
 
@@ -380,6 +415,9 @@ def calcular_capacidad(
     idx_visual = 0
     area_patio_norm = float(getattr(params.diseno, "area_patio_min", 12.0))
     patio_sin_espacio = False
+    # § hotel: la composición POR PLANTA elegida se replica en cada planta habitable;
+    # una planta con menos útil (PB con comunes) la trunca → aviso.
+    composicion_truncada = False
 
     es_primera_regular = True
 
@@ -500,8 +538,18 @@ def calcular_capacidad(
             util_disponible_planta = util_disponible_i
             util_total += util_disponible_planta
 
-            if util_disponible_i > 0 and perfil.util_viv > 0:
-                unidades_i, tipologias_i = _reparto_planta(util_disponible_i, perfil, cfg_vivienda)
+            if util_disponible_i > 0 and (
+                composicion_planta_forzada is not None or perfil.util_viv > 0
+            ):
+                if composicion_planta_forzada is not None:
+                    # Composición fija por planta (§ hotel): la misma mezcla en cada
+                    # planta habitable, truncada si esta planta tiene menos útil.
+                    unidades_i, tipologias_i, trunc_i = _colocar_composicion_forzada(
+                        util_disponible_i, composicion_planta_forzada)
+                    if trunc_i:
+                        composicion_truncada = True
+                else:
+                    unidades_i, tipologias_i = _reparto_planta(util_disponible_i, perfil, cfg_vivienda)
                 viv_i = len(unidades_i)
                 mix_counts: dict[str, int] = {}
                 for slug in tipologias_i:
@@ -555,6 +603,12 @@ def calcular_capacidad(
         util_total / max(1, n_plantas_habitables) if n_plantas_habitables else 0.0
     )
 
+    # Útil de una planta REPRESENTATIVA (planta tipo estándar): el máximo útil de las
+    # plantas habitables — la PB, con reservas comunes, suele tener menos. Es el
+    # «100 m² de útil en planta» contra el que el arquitecto enumera combinaciones.
+    util_habitables = [u for u, t in zip(util_por_planta, tipo_planta) if t != "sotano"]
+    util_planta_representativa = max(util_habitables) if util_habitables else 0.0
+
     return Capacidad(
         superficie_parcela_m2=parcela_area,
         coeficiente_edificabilidad=coef,
@@ -603,6 +657,8 @@ def calcular_capacidad(
         construida_computable_m2=construida_computable_efectiva,
         area_patio_min_m2=area_patio_norm,
         patio_sin_espacio=patio_sin_espacio,
+        util_planta_representativa_m2=util_planta_representativa,
+        composicion_truncada=composicion_truncada,
     )
 
 
@@ -636,6 +692,8 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "usos_comunes_pb_m2": cap.usos_comunes_pb_m2,
         "util_objetivo_viv_m2": round(cap.util_objetivo_viv_m2, 2),
         "util_planta_disponible_m2": round(cap.util_planta_disponible_m2, 2),
+        "util_planta_representativa_m2": round(cap.util_planta_representativa_m2, 2),
+        "composicion_truncada": cap.composicion_truncada,
         "n_dormitorios": cap.n_dormitorios,
         "viv_por_planta": list(cap.viv_por_planta),
         "viv_por_planta_objetivo": cap.viv_por_planta_objetivo,
