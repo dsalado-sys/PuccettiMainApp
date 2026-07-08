@@ -1677,6 +1677,17 @@ def _alertas_capacidad(cap, params: ParametrosRender, programa_uso) -> list[Aler
             f"Factor limitante: {cap.factor_limitante}.",
         ))
 
+    # El total de patios (sumado por plantas) no debe superar la superficie libre
+    # (complemento de la ocupación máxima): los patios «viven» en esa superficie libre.
+    patio_total = sum(getattr(cap, "patio_por_planta", []) or [])
+    libre_total = sum(getattr(cap, "superficie_libre_por_planta", []) or [])
+    if patio_total > libre_total + 1e-6:
+        alertas.append(Alerta(
+            "aviso", "Capacidad",
+            f"La superficie total de patios ({patio_total:.2f} m²) supera la superficie "
+            f"libre disponible ({libre_total:.2f} m²).",
+        ))
+
     if getattr(cap, "patio_sin_espacio", False):
         alertas.append(Alerta(
             "aviso", "Normativa",

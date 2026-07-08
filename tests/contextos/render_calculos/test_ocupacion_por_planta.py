@@ -45,33 +45,43 @@ def _envolvente(p: ParametrosRender):
     return construir_envolvente(PARCELA, p.a_parametros_motor(), None, superficie_referencia=AREA)
 
 
-# ─── Geometría: footprint por categoría ─────────────────────────────────────
-def test_footprint_pb_y_tipo_usan_su_propia_ocupacion():
+# ─── Geometría: la huella es ÍNTEGRA; la ocupación es un cap numérico ─────────
+def test_footprint_integro_y_ocupacion_solo_en_la_construida():
+    """La ocupación ya NO recorta la huella (no hay anillo de retranqueo): PB y plantas
+    tipo comparten la huella íntegra tras retranqueos normativos (aquí = área de parcela).
+    La ocupación se aplica como cap numérico sobre la CONSTRUIDA: PB 90%, tipo 60%."""
     env = _envolvente(_render(90.0, 60.0))
     regulares = [pl for pl in env.plantas if pl.tipo == "regular"]
     assert len(regulares) == 2
     pb, tipo = regulares
-    assert abs(pb.footprint.area - 0.90 * AREA) < 1.0      # ≈ 360
-    assert abs(tipo.footprint.area - 0.60 * AREA) < 1.0    # ≈ 240
-    assert tipo.footprint.area < pb.footprint.area
+    # Huella íntegra e IGUAL en PB y tipo (sin recorte de ocupación).
+    assert abs(pb.footprint.area - AREA) < 1.0
+    assert abs(tipo.footprint.area - AREA) < 1.0
+    assert abs(pb.footprint.area - tipo.footprint.area) < 1e-6
+    # La ocupación se refleja en la construida (cap numérico), no en la geometría.
+    assert abs(pb.area_construida_m2 - 0.90 * AREA) < 1.0
+    assert abs(tipo.area_construida_m2 - 0.60 * AREA) < 1.0
+    assert tipo.area_construida_m2 < pb.area_construida_m2
 
 
 def test_misma_ocupacion_comparte_huella():
-    """Con la misma ocupación en PB y tipo todas las plantas comparten huella
-    (comportamiento histórico de un proyecto con una sola ocupación)."""
+    """Con la misma ocupación en PB y tipo la construida coincide (huella siempre íntegra)."""
     env = _envolvente(_render(90.0, 90.0))
     regulares = [pl for pl in env.plantas if pl.tipo == "regular"]
     assert abs(regulares[0].footprint.area - regulares[1].footprint.area) < 1e-6
+    assert abs(regulares[0].area_construida_m2 - regulares[1].area_construida_m2) < 1e-6
 
 
-def test_atico_se_apoya_en_la_huella_de_plantas_tipo():
-    """Ático (retranqueo 0) toma la huella de la planta tipo, no la de PB."""
+def test_atico_construida_usa_la_ocupacion_de_plantas_tipo():
+    """Ático (retranqueo 0): huella íntegra como el resto; su construida se acota con la
+    ocupación de plantas tipo (60%), no la de PB (90%)."""
     p = _render(90.0, 60.0, tiene_atico=True, retranqueo_atico_m=0.0)
     env = _envolvente(p)
     pb = next(pl for pl in env.plantas if pl.tipo == "regular")
     atico = next(pl for pl in env.plantas if pl.tipo == "atico")
-    assert abs(atico.footprint.area - 0.60 * AREA) < 1.0
-    assert atico.footprint.area < pb.footprint.area
+    assert abs(atico.footprint.area - AREA) < 1.0             # huella íntegra
+    assert abs(atico.area_construida_m2 - 0.60 * AREA) < 1.0   # cap por ocupación tipo
+    assert atico.area_construida_m2 < pb.area_construida_m2
 
 
 def test_sotano_usa_la_ocupacion_de_pb():
@@ -79,8 +89,9 @@ def test_sotano_usa_la_ocupacion_de_pb():
     env = _envolvente(p)
     sotano = next(pl for pl in env.plantas if pl.tipo == "sotano")
     pb = next(pl for pl in env.plantas if pl.tipo == "regular")
+    # Huella íntegra e igual a la de PB; construida acotada con la ocupación de PB (90%).
     assert abs(sotano.footprint.area - pb.footprint.area) < 1e-6
-    assert abs(sotano.footprint.area - 0.90 * AREA) < 1.0
+    assert abs(sotano.area_construida_m2 - 0.90 * AREA) < 1.0
 
 
 # ─── Capacidad: la construida por planta refleja la huella de su categoría ───
@@ -90,7 +101,7 @@ def test_capacidad_construida_menor_en_plantas_tipo():
     cap = calcular_capacidad(
         env, p.a_parametros_motor(), params_tipo=p.a_parametros_motor_tipo()
     )
-    # construida = huella (sin patio en este test) → PB (360) > tipo (240).
+    # construida = huella acotada por ocupación (sin patio) → PB (360) > tipo (240).
     assert cap.construida_por_planta[0] > cap.construida_por_planta[1]
     assert abs(cap.construida_por_planta[0] - 0.90 * AREA) < 1.0
     assert abs(cap.construida_por_planta[1] - 0.60 * AREA) < 1.0

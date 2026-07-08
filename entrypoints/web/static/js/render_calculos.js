@@ -218,12 +218,13 @@
       set("construida_total_m2", fmt.m2.format(cap.construida_total_m2) + " m²");
       set("superficie_poligono_m2", fmt.m2.format(parcelaGeom ?? cap.superficie_parcela_m2) + " m²");
       set("edificabilidad_m2", fmt.m2.format(cap.edificabilidad_m2) + " m²");
-      set("n_viviendas", fmt.int.format(cap.n_viviendas_objetivo));
+      set("superficie_libre_m2", fmt.m2.format(cap.superficie_libre_total_m2 ?? 0) + " m²");
     } else if (env) {
       set("construida_total_m2", fmt.m2.format(env.edificabilidad_consumida_m2) + " m²");
       set("superficie_poligono_m2", fmt.m2.format(parcelaGeom ?? parcelaArea ?? 0) + " m²");
       set("edificabilidad_m2", fmt.m2.format(env.edificabilidad_max_m2) + " m²");
-      set("n_viviendas", fmt.int.format(env.n_viviendas_objetivo) + " obj.");
+      // La superficie libre solo está disponible tras el cálculo completo (capacidad).
+      set("superficie_libre_m2", "—");
     }
   }
 

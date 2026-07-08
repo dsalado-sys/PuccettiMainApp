@@ -416,7 +416,8 @@
       }
 
       if (planta) {
-        // Footprint con muros
+        // Footprint con muros. La huella llega íntegra tras retranqueos normativos
+        // (la ocupación máxima ya no la recorta: no hay anillo de retranqueo por ocupación).
         if (planta.footprint) {
           this._trazarPoligono(planta.footprint, "rgba(255,255,255,0.85)", null, 0);
         }

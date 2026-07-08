@@ -113,6 +113,11 @@ class Capacidad:
     circulacion_por_planta: list[float] = field(default_factory=list)
     nucleo_por_planta: list[float] = field(default_factory=list)
     patio_por_planta: list[float] = field(default_factory=list)
+    # Superficie libre por planta (complemento de la ocupación máxima): en cada
+    # planta habitable = superficie de referencia − construida = (1 − ocupación) ×
+    # sup_ref. Sótano → 0. Su suma es la «superficie libre» contra la que se compara
+    # el total de patios para el aviso de Capacidad.
+    superficie_libre_por_planta: list[float] = field(default_factory=list)
     local_por_planta: list[float] = field(default_factory=list)
     otros_por_planta: list[float] = field(default_factory=list)
     usos_comunes_por_planta: list[float] = field(default_factory=list)
@@ -364,6 +369,7 @@ def calcular_capacidad(
     circulacion_por_planta: list[float] = []
     nucleo_por_planta: list[float] = []
     patio_por_planta: list[float] = []
+    superficie_libre_por_planta: list[float] = []
     local_por_planta: list[float] = []
     otros_por_planta: list[float] = []
     usos_comunes_por_planta: list[float] = []
@@ -400,6 +406,15 @@ def calcular_capacidad(
         # PB usa el perfil de tipología de planta baja; tipo y ático, el de
         # plantas tipo (ver §perfiles arriba). El sótano no aloja unidades.
         perfil = perfil_pb if cat == "pb" else perfil_tipo
+
+        # Ocupación máxima como CAP NUMÉRICO (el retranqueo de ocupación ya no es
+        # geometría: la huella llega íntegra). La construible de la planta se acota a
+        # ocupación × sup_ref; PB/sótano usan la ocupación de PB, tipo/ático la de tipo.
+        ocup_cat = urb.ocupacion_maxima if cat in ("pb", "sotano") else \
+            getattr(urb, "ocupacion_maxima_tipo", urb.ocupacion_maxima)
+        lim_ocup = max(0.0, float(ocup_cat)) * parcela_area
+        if lim_ocup > 0:
+            construida_i = min(construida_i, lim_ocup)
 
         # Muros de PLANTA = solo perímetro/edificio (pct_muros): fachadas, medianeras
         # y separaciones entre unidades. La tabiquería INTERIOR de las unidades
@@ -452,9 +467,13 @@ def calcular_capacidad(
                 if area_patio_norm > espacio_para_patio + 1e-6:
                     patio_sin_espacio = True
 
+            # El patio ya NO resta a la útil: las unidades se construyen sobre la
+            # construida completa (el patio se contabiliza aparte, contra la superficie
+            # libre). `patio_i` se sigue calculando arriba solo para reportarlo y para
+            # el aviso de Capacidad.
             util_bruto_i = max(
                 0.0,
-                construida_i - muros_i - circ_i - nucl_i - patio_i,
+                construida_i - muros_i - circ_i - nucl_i,
             )
             if es_pb:
                 # Reservas de PB, todas como % del útil bruto de planta baja y en
@@ -496,16 +515,23 @@ def calcular_capacidad(
             nombre = _nombre_planta(idx_visual, p.tipo)
             idx_visual += 1
 
-        # El patio interior es un vacío a cielo abierto: NO computa como
-        # superficie construida. La construida reportada es la huella menos el
-        # patio, de modo que `construida = útil + muros + circ + núcleo + local`.
-        construida_neta_i = max(0.0, construida_i - patio_i)
+        # Los patios ya NO restan a la construida reportada: las unidades se construyen
+        # sobre la construida completa y el patio se contabiliza aparte, contra la
+        # superficie libre. La construida reportada es la huella de cálculo íntegra.
+        construida_neta_i = construida_i
         construida_total += construida_neta_i
+
+        # Superficie libre de la planta = complemento de la ocupación (sup_ref −
+        # construida). Como `construida_i` = huella erosionada por ocupación, esto es
+        # (1 − ocupación_planta) × sup_ref y contempla PB y plantas tipo por
+        # construcción. El sótano (bajo rasante) no aporta superficie libre.
+        libre_i = 0.0 if p.tipo == "sotano" else max(0.0, parcela_area - construida_neta_i)
 
         # Se guardan los m² SIN redondear (precisión completa). El redondeo a
         # 2 decimales se aplica solo en la serialización (capa de presentación).
         viv_por_planta.append(viv_i)
         construida_por_planta.append(construida_neta_i)
+        superficie_libre_por_planta.append(libre_i)
         util_por_planta.append(util_disponible_planta)
         muros_por_planta.append(muros_i)
         muros_interior_por_planta.append(muros_int_i)
@@ -567,6 +593,7 @@ def calcular_capacidad(
         circulacion_por_planta=circulacion_por_planta,
         nucleo_por_planta=nucleo_por_planta,
         patio_por_planta=patio_por_planta,
+        superficie_libre_por_planta=superficie_libre_por_planta,
         local_por_planta=local_por_planta,
         otros_por_planta=otros_por_planta,
         usos_comunes_por_planta=usos_comunes_por_planta,
@@ -625,6 +652,7 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "circulacion_total_m2": round(sum(cap.circulacion_por_planta), 2),
         "nucleo_total_m2": round(sum(cap.nucleo_por_planta), 2),
         "patio_total_m2": round(sum(cap.patio_por_planta), 2),
+        "superficie_libre_total_m2": round(sum(cap.superficie_libre_por_planta), 2),
         "local_total_m2": round(sum(cap.local_por_planta), 2),
         "otros_total_m2": round(sum(cap.otros_por_planta), 2),
         "usos_comunes_total_m2": round(sum(cap.usos_comunes_por_planta), 2),
@@ -636,6 +664,7 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "circulacion_por_planta": _l2(cap.circulacion_por_planta),
         "nucleo_por_planta": _l2(cap.nucleo_por_planta),
         "patio_por_planta": _l2(cap.patio_por_planta),
+        "superficie_libre_por_planta": _l2(cap.superficie_libre_por_planta),
         "local_por_planta": _l2(cap.local_por_planta),
         "otros_por_planta": _l2(cap.otros_por_planta),
         "usos_comunes_por_planta": _l2(cap.usos_comunes_por_planta),

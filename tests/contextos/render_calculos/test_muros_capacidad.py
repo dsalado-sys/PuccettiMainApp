@@ -50,16 +50,18 @@ def test_tabiqueria_no_cambia_los_muros_de_planta_y_baja_la_util():
 
     # Muros de planta IDÉNTICOS: la tabiquería no se suma aquí.
     assert abs(cap1.muros_por_planta[0] - cap0.muros_por_planta[0]) < 1e-6
-    # Ahora hay tabiquería = 10% del útil disponible (45 → 4.5).
-    assert abs(cap1.muros_interior_por_planta[0] - 4.5) < 1e-6
-    # Y la útil baja en esa misma cantidad (45 → 40.5).
-    assert abs(cap1.util_por_planta[0] - (util0 - 4.5)) < 1e-6
+    # Ahora hay tabiquería = 10% del útil disponible (57 → 5.7). El patio ya no resta
+    # a la útil, así que la base es 100 − 20 muros − 8 circ − 15 núcleo = 57.
+    assert abs(cap1.muros_interior_por_planta[0] - 5.7) < 1e-6
+    # Y la útil baja en esa misma cantidad (57 → 51.3).
+    assert abs(cap1.util_por_planta[0] - (util0 - 5.7)) < 1e-6
     assert cap1.util_por_planta[0] < util0
 
 
 def test_conservacion_construida_incluye_tabiqueria():
-    """construida = útil + muros(perímetro) + muros_interior + circ + núcleo
-    (el patio queda fuera de la construida reportada)."""
+    """construida = útil + muros(perímetro) + muros_interior + circ + núcleo. El patio ya
+    no resta a la construida ni a la útil: su superficie queda absorbida en la útil (no
+    aparece como término aparte en esta identidad)."""
     p = ParametrosRender()
     p.diseno.pct_muros_interior = 10.0
     cap = calcular_capacidad(_env(100.0), p.a_parametros_motor())
