@@ -133,6 +133,18 @@ tenía 42 m² de estancias sobre 60 útiles, 18 m² sin asignar):
 m²** (mínimo VPO). `util_minimo_vivienda(0) = max(25, Σmin × 1.15)` garantiza ≥ 25
 siempre.
 
+**Útil mínimo editable por tipología (suelo duro)** — desde 2026-07-08 cada tipología
+de vivienda tiene un **útil mínimo editable** (default Estudio 40 · 1d 60 · 2d 70 · 3d
+90 · 4d 110 · >4 130) que es un **suelo duro**: el reparto nunca dimensiona una vivienda
+por debajo. El **útil máximo es DERIVADO = mínimo + 5** (`MARGEN_UTIL_MAXIMO_VIVIENDA`,
+`programa.py`; no es un campo editable, se quitó en su día). El **objetivo por unidad =
+el mínimo** (mono-tipología clava cada unidad al mínimo vía `util_objetivo_vivienda`;
+las mezclas multi-tipología llenan la última unidad hasta `min+5`). Se edita en «Ver /
+editar mínimos» como la fila **«Útil mínimo de la unidad»** por tipología. Persistencia:
+columna nueva `anexo_i_vivienda.min_m2_util` (auto-migración idempotente en `init_db`,
+sin alembic); consolidadas emite `UTIL_MIN`/`UTIL_MAX`; `ProgramaViviendaConfig.util_min`.
+`util_minimo_vivienda` aplica `max(blando calculado, util_min[n])` como piso.
+
 Apartamentos y hotelero **no** aplican este escalado por %: sus estancias salen de
 mínimos legales + áreas comunes obligatorias (recepción, sociales, 2º baño >5
 usuarios) descontadas del techo de planta — no hay pasillo interno propio por unidad.
@@ -305,9 +317,9 @@ NO desarrollada).
 > trabajando realmente — hoy, en `pestañas-proyectos` (hija de `pre`, base común
 > `9d37100`), el estado real es el de la tabla de arriba: solo patios, no unidades.
 
-**Tests**: **154** específicos de este contexto (`app/tests/contextos/
-render_calculos/`, 15 ficheros — dominio/geometría, incl. `test_escenarios.py`) ·
-**259** en total la suite del repo (`python -m pytest app/tests --collect-only -q`).
+**Tests**: específicos de este contexto en `app/tests/contextos/render_calculos/`
+(dominio/geometría, incl. `test_escenarios.py`, `test_util_minimo_tipologia.py`) ·
+**334** en total la suite del repo (`python -m pytest app/tests --collect-only -q`).
 Desde 2026-07-06 SÍ hay tests de ruta HTTP para `render_calculos`
 (`app/tests/entrypoints/web/test_render_calculos_rutas.py`, escenarios: página +
 roundtrip `POST /escenarios` + permisos) — cierra el hueco que este registro
@@ -340,6 +352,24 @@ señalaba antes (ya alineado con `viabilidad`, `test_viabilidad_rutas.py`).
 
 ## 5. Bitácora
 
+- **2026-07-08** — **Útil mínimo editable por tipología (vivienda) + máximo derivado
+  = mínimo + 5.** Nueva fila **«Útil mínimo de la unidad»** por tipología en «Ver /
+  editar mínimos» (default 40/60/70/90/110/130); suelo duro en el cálculo (ninguna
+  vivienda baja de él; las estancias se reparten hasta completarlo). El útil máximo se
+  reintroduce **derivado** = mínimo + `MARGEN_UTIL_MAXIMO_VIVIENDA` (5.0), no editable;
+  el objetivo por unidad = el mínimo (implementado `util_objetivo_vivienda`, cierra
+  Pendiente 3.9). Cambios: `geometria/programa.py` (`MARGEN_UTIL_MAXIMO_VIVIENDA`,
+  `ProgramaViviendaConfig.util_min`, `util_minimo_tipologia`, suelo en
+  `util_minimo_vivienda(_combo)`, objetivo/máximo en `descriptor_tipologia_vivienda(_combo)`,
+  mapeo `UTIL_MIN` en `config_desde_repo`); `plataforma/persistencia/
+  catalogo_superficies_sqlalchemy.py` (columna `min_m2_util`, sentinela `_util_minimo`,
+  `util_minimo_por_tipologia`, `util_objetivo_vivienda`, fila sintética en
+  `filas_vivienda`, `UTIL_MIN` en `consolidadas_vivienda`, rama en `actualizar` con
+  máximo=mín+5); `seed_normativa.py` (min=base, max=base+5); `sqlalchemy_base.py`
+  (auto-migración idempotente `_asegurar_columna_min_util`, sin alembic);
+  `render_calculos.js` + `render_calculos.css` (realce de la fila). Tests nuevos:
+  `test_util_minimo_tipologia.py`, `test_catalogo_superficies_util_minimo.py` + 2 de
+  ruta en `test_render_calculos_rutas.py`. Suite **334** verde.
 - **2026-07-06 (2)** — Implementadas las **pestañas de escenario** (§1.8): barra de
   escenarios encima de la catastral, nombre reactivo, persistencia por-modo
   `{escenarios, activo}` con migración perezosa del formato antiguo. Cambios:

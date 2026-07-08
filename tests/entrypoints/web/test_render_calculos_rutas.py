@@ -86,3 +86,30 @@ def test_escenarios_lista_vacia_da_422(cliente_autenticado, engine_memoria):
     c.cookies.set("puccetti_proyecto", pid)
     assert c.post("/modulos/render-calculos/escenarios",
                   json={"modo": "obra-nueva", "escenarios": []}).status_code == 422
+
+
+def test_superficies_vivienda_incluye_util_minimo(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto_con_parcela(session_factory)
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set("puccetti_proyecto", pid)
+    r = c.get("/modulos/render-calculos/superficies-vivienda")
+    assert r.status_code == 200, r.text
+    filas = r.json()["filas"]
+    umin = [f for f in filas if f["estancia"] == "_util_minimo"]
+    assert {f["n_dormitorios"] for f in umin} == {0, 1, 2, 3, 4, 5}
+    assert next(f for f in umin if f["n_dormitorios"] == 2)["min_m2"] == 70.0
+
+
+def test_superficies_vivienda_editar_util_minimo_persiste(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto_con_parcela(session_factory)
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set("puccetti_proyecto", pid)
+    body = {"cambios": [{"n_dormitorios": 2, "estancia": "_util_minimo", "valor": 76.0}]}
+    r = c.post("/modulos/render-calculos/superficies-vivienda", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["aplicados"] == 1
+    filas = c.get("/modulos/render-calculos/superficies-vivienda").json()["filas"]
+    umin2 = next(f for f in filas if f["estancia"] == "_util_minimo" and f["n_dormitorios"] == 2)
+    assert umin2["min_m2"] == 76.0

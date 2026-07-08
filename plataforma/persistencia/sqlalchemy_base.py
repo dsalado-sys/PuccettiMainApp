@@ -90,6 +90,34 @@ def _registrar_modelos() -> None:
     from . import umbrales_pr_sqlalchemy  # noqa: F401
 
 
+def _asegurar_columna_min_util(eng: Engine) -> None:
+    """Migración idempotente: añade `anexo_i_vivienda.min_m2_util` si falta.
+
+    Sin Alembic en el árbol: esto evoluciona el esquema de una BBDD ya existente
+    sin pasos manuales. En BBDD nueva la columna la crea `create_all` y esto es
+    no-op. Al añadirla se rellena `min_m2_util = max_m2_util` (los valores base
+    40/60/… pasan a ser el MÍNIMO) y se recalcula `max_m2_util = mínimo + margen`
+    para reintroducir el útil máximo derivado.
+    """
+    from sqlalchemy import inspect, text
+
+    from app.contextos.render_calculos.geometria.programa import MARGEN_UTIL_MAXIMO_VIVIENDA
+
+    insp = inspect(eng)
+    if "anexo_i_vivienda" not in insp.get_table_names():
+        return
+    columnas = {c["name"] for c in insp.get_columns("anexo_i_vivienda")}
+    if "min_m2_util" in columnas:
+        return
+    with eng.begin() as conn:
+        conn.execute(text("ALTER TABLE anexo_i_vivienda ADD COLUMN min_m2_util FLOAT"))
+        conn.execute(text(
+            "UPDATE anexo_i_vivienda SET min_m2_util = max_m2_util WHERE min_m2_util IS NULL"))
+        conn.execute(text(
+            "UPDATE anexo_i_vivienda SET max_m2_util = min_m2_util + :margen"
+        ), {"margen": float(MARGEN_UTIL_MAXIMO_VIVIENDA)})
+
+
 def init_db(
     engine: Engine | None = None,
     session_factory: sessionmaker | None = None,
@@ -107,6 +135,8 @@ def init_db(
     # migraciones automáticas: Alembic se retiró del árbol, así que evolucionar
     # el esquema sobre una BBDD existente se hace a mano (ver `app/CLAUDE.md`).
     Base.metadata.create_all(bind=eng)
+    # Migración manual (sin Alembic) del esquema evolucionado sobre BBDD existente.
+    _asegurar_columna_min_util(eng)
 
     from .callejero_seed import sembrar_callejero
     from .seed_normativa import sembrar_todo

@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contextos.render_calculos.geometria.programa import (
+    MARGEN_UTIL_MAXIMO_VIVIENDA,
     MIN_BANO,
     MIN_COCINA,
     MIN_DORM_DOBLE,
@@ -141,7 +142,8 @@ def sembrar_anexo_i_vivienda(session: Session, forzar: bool = False, commit: boo
                         n_dormitorios=n_dorms,
                         estancia=estancia,
                         min_m2=min_m2,
-                        max_m2_util=max_m2,
+                        min_m2_util=max_m2,
+                        max_m2_util=max_m2 + MARGEN_UTIL_MAXIMO_VIVIENDA,
                         area_target_m2=target,
                         editable_por_usuario=0,
                         actualizado_en=ahora,
@@ -160,7 +162,8 @@ def sembrar_anexo_i_vivienda(session: Session, forzar: bool = False, commit: boo
                 n_dormitorios=n_dorms,
                 estancia=estancia,
                 min_m2=min_m2,
-                max_m2_util=max_m2,
+                min_m2_util=max_m2,
+                max_m2_util=max_m2 + MARGEN_UTIL_MAXIMO_VIVIENDA,
                 area_target_m2=target,
                 editable_por_usuario=0,
                 actualizado_en=ahora,

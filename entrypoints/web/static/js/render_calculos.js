@@ -1473,6 +1473,8 @@
   // Construye una fila <tr> de estancia editable. `f` es la fila del backend.
   function filaSuperficie(f) {
     const tr = document.createElement("tr");
+    // La fila del útil mínimo de la unidad no es una estancia: se resalta como total.
+    if (f.estancia === "_util_minimo") tr.className = "rc-sup-fila-util";
     const td1 = document.createElement("td");
     td1.textContent = f.etiqueta;
     const td2 = document.createElement("td");

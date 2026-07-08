@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from sqlalchemy import DateTime, Float, Integer, String, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
+from app.contextos.render_calculos.geometria.programa import MARGEN_UTIL_MAXIMO_VIVIENDA
+
 from .sqlalchemy_base import Base
 
 
@@ -21,6 +23,11 @@ _ESTANCIAS_NO_EDITABLES = {"circulacion_interior"}
 # estancia; es el techo de la unidad, columna `max_m2_util`). El editor la envía
 # como una fila aparte por tipología (R3).
 _UTIL_MAXIMO_ESTANCIA = "_util_maximo"
+
+# Clave sintética para editar el ÚTIL MÍNIMO de una tipología (suelo duro de la
+# unidad, columna `min_m2_util`). El editor la muestra como fila por tipología; el
+# útil máximo se deriva = mínimo + `MARGEN_UTIL_MAXIMO_VIVIENDA` (no editable).
+_UTIL_MINIMO_ESTANCIA = "_util_minimo"
 
 
 def _exigir_min_le_max(valor_min: float, maximo: float, ref: str) -> None:
@@ -90,6 +97,8 @@ def _etiqueta_estancia(estancia: str) -> str:
 
 def _orden_estancia(estancia: str) -> tuple[int, int]:
     """Orden de presentación de las estancias dentro de una tipología."""
+    if estancia == _UTIL_MINIMO_ESTANCIA:
+        return (-1, 0)  # útil mínimo de la unidad: arriba de la sección
     fijo = {"salon": 0, "salon_cocina": 1, "espacio_principal": 2, "cocina": 3, "aseo": 4}
     if estancia in fijo:
         return (fijo[estancia], 0)
@@ -118,6 +127,10 @@ class AnexoIViviendaORM(Base):
     estancia: Mapped[str] = mapped_column(String(40), primary_key=True)
     min_m2: Mapped[float] = mapped_column(Float, nullable=False)
     max_m2_util: Mapped[float] = mapped_column(Float, nullable=False)
+    # Útil MÍNIMO de la tipología (suelo duro de la unidad). Igual en todas las
+    # estancias de la tipología. Nullable para que el ALTER TABLE de la BBDD ya
+    # existente no exija DEFAULT; al leer se coalesce a `max_m2_util`.
+    min_m2_util: Mapped[float | None] = mapped_column(Float, nullable=True)
     area_target_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
     editable_por_usuario: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -159,6 +172,33 @@ class CatalogoSuperficiesSQLAlchemy:
             out[f.estancia + "_max"] = f.max_m2_util
         return out
 
+    @staticmethod
+    def _util_min_fila(f: AnexoIViviendaORM) -> float:
+        """Útil mínimo de la fila (coalesce a `max_m2_util` si la columna es NULL)."""
+        return f.min_m2_util if f.min_m2_util is not None else f.max_m2_util
+
+    def util_minimo_por_tipologia(self) -> dict[int, float]:
+        """Útil mínimo editable por nº de dormitorios (suelo duro de la unidad).
+
+        Espejo de `util_maximo_por_tipologia`: mínimo de `min_m2_util` (coalescido)
+        entre las estancias de cada tipología — el `UTIL_MIN[n]` de `consolidadas`.
+        """
+        out: dict[int, float] = {}
+        for f in self._session.scalars(select(AnexoIViviendaORM)).all():
+            n = f.n_dormitorios
+            v = self._util_min_fila(f)
+            if n not in out or v < out[n]:
+                out[n] = v
+        return out
+
+    def util_objetivo_vivienda(self, n_dormitorios: int) -> float | None:
+        """m² útiles objetivo por unidad = útil MÍNIMO de la tipología (Pendiente 3.9).
+
+        Dimensiona cada unidad mono-tipología al mínimo (no al máximo `min+margen`),
+        maximizando el nº de viviendas conformes. `None` si la tipología no existe.
+        """
+        return self.util_minimo_por_tipologia().get(n_dormitorios)
+
     def filas_vivienda(self) -> list[dict]:
         """Filas crudas de superficies mínimas para el editor de la UI.
 
@@ -169,6 +209,25 @@ class CatalogoSuperficiesSQLAlchemy:
         """
         filas = self._session.scalars(select(AnexoIViviendaORM)).all()
         out: list[dict] = []
+        # Fila sintética por tipología: útil mínimo de la unidad (editable). No es
+        # una estancia almacenada; su valor vive en la columna `min_m2_util`.
+        util_min = self.util_minimo_por_tipologia()
+        editable_min = {
+            n: any(
+                f.editable_por_usuario for f in filas if f.n_dormitorios == n and f.min_m2_util is not None
+            )
+            for n in util_min
+        }
+        for n, v in util_min.items():
+            out.append({
+                "n_dormitorios": n,
+                "estancia": _UTIL_MINIMO_ESTANCIA,
+                "etiqueta": "Útil mínimo de la unidad",
+                "min_m2": v,
+                "editable_por_usuario": bool(editable_min.get(n, False)),
+                "ambito": "tipologia",
+                "clave_global": "",
+            })
         for f in filas:
             if f.estancia in _ESTANCIAS_NO_EDITABLES:
                 continue
@@ -221,6 +280,7 @@ class CatalogoSuperficiesSQLAlchemy:
         salon_min: dict[int, float] = {}
         salon_mas_cocina_min: dict[int, float] = {}
         util_max: dict[int, float] = {}
+        util_min: dict[int, float] = {}
         valores: dict[str, float] = {}
         area_target: dict[int, dict[str, float | None]] = {}
         for f in filas:
@@ -244,10 +304,14 @@ class CatalogoSuperficiesSQLAlchemy:
                 valores["MIN_DORM_INDIVIDUAL"] = f.min_m2
             if n not in util_max or f.max_m2_util > util_max[n]:
                 util_max[n] = f.max_m2_util
+            vmin = self._util_min_fila(f)
+            if n not in util_min or vmin < util_min[n]:
+                util_min[n] = vmin
             area_target.setdefault(n, {})[est] = f.area_target_m2
         out = dict(valores)
         if salon_min: out["SALON_MIN"] = salon_min
         if salon_mas_cocina_min: out["SALON_MAS_COCINA_MIN"] = salon_mas_cocina_min
+        if util_min: out["UTIL_MIN"] = util_min
         if util_max: out["UTIL_MAX"] = util_max
         if area_target: out["AREA_TARGET_VIVIENDA"] = area_target
 
@@ -298,6 +362,31 @@ class CatalogoSuperficiesSQLAlchemy:
             n_dorms = int(categoria)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Categoría inválida para vivienda: {categoria!r}") from exc
+
+        # Útil MÍNIMO de la tipología (suelo duro): no es una estancia, es el
+        # útil objetivo de la unidad. Se escribe en `min_m2_util` de TODAS las
+        # estancias de la tipología y el máximo se deriva = mínimo + margen.
+        if estancia == _UTIL_MINIMO_ESTANCIA:
+            filas = self._session.scalars(
+                select(AnexoIViviendaORM).where(AnexoIViviendaORM.n_dormitorios == n_dorms)
+            ).all()
+            # El mínimo no puede quedar por debajo del mayor mínimo de estancia:
+            # las estancias no cabrían en la unidad.
+            if filas:
+                min_mayor = max(f.min_m2 for f in filas)
+                if valor < min_mayor:
+                    raise ValueError(
+                        f"El útil mínimo ({valor:g} m²) no puede ser menor que el mayor "
+                        f"mínimo de estancia ({min_mayor:g} m²) de la tipología {n_dorms}d."
+                    )
+            ahora = datetime.now(timezone.utc)
+            for orm in filas:
+                orm.min_m2_util = valor
+                orm.max_m2_util = valor + MARGEN_UTIL_MAXIMO_VIVIENDA
+                orm.editable_por_usuario = 1
+                orm.actualizado_en = ahora
+            self._session.commit()
+            return
 
         # Útil máximo de la tipología (R3): no es una estancia, es el techo de la
         # unidad. Se escribe en `max_m2_util` de TODAS las estancias de la

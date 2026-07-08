@@ -600,7 +600,7 @@ class CalcularLayout:
     def _resolver_util_objetivo(self, params: ParametrosRender, prog=None, combo_override=None, cfg=None) -> float | None:
         """Lee el m² útil objetivo por unidad desde la BBDD del Anexo I.
 
-        Vivienda: `anexo_i_vivienda.max_m2_util` para `n_dormitorios`.
+        Vivienda: útil MÍNIMO editable de la tipología (`anexo_i_vivienda.min_m2_util`).
         Apartamentos: `anexo_i_apartamentos.max_m2_util` × 1.15.
 
         `prog` permite resolver el objetivo de las plantas tipo (`programa_tipo`);
@@ -623,12 +623,11 @@ class CalcularLayout:
                 cfg if cfg is not None else CONFIG_DEFAULT,
             )
         if prog.uso == UsoEdificio.VIVIENDA:
-            # El puerto declara `util_objetivo_vivienda` como hook de fallback, pero
-            # el adapter SQLAlchemy aún no lo implementa: hasta entonces la vivienda
-            # simple cae al `util_maximo(n_dorms)` del motor en `calcular_capacidad`.
-            # Se resuelve por `getattr` para no enmascarar un AttributeError de
-            # programación tras el `except` genérico (unificar vivienda con la
-            # política de mínimos editados está pendiente: cambia el nº de unidades).
+            # `util_objetivo_vivienda` devuelve el útil MÍNIMO editable de la
+            # tipología (BBDD): la vivienda simple se dimensiona al mínimo (suelo
+            # duro), no al máximo `min+margen`. Se resuelve por `getattr` para no
+            # enmascarar un AttributeError de programación tras el `except` genérico
+            # (si el adapter no lo trae → None y `calcular_capacidad` cae al motor).
             metodo = getattr(self.catalogo_vivienda, "util_objetivo_vivienda", None)
             if metodo is None:
                 return None
