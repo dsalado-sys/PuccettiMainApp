@@ -81,8 +81,10 @@ class CatalogoApartamentosSQLAlchemy:
         ).all()
         if not filas:
             return None
+        # La suma de estancias incluye ya la circulación interior (m² por tipología);
+        # el útil objetivo = Σ mínimos + circulación (antes era Σ mínimos × 1.15).
         base = sum(float(f.min_m2) for f in filas)
-        return round(base * 1.15, 2)
+        return round(base, 2)
 
     def consolidadas_apartamentos(self, grupo: str = "edificios") -> dict:
         """Mínimos editables de BBDD en la forma de las constantes del motor.
@@ -106,11 +108,14 @@ class CatalogoApartamentosSQLAlchemy:
         salon: dict[str, float] = {}
         cocina: dict[str, float] = {}
         bano: dict[str, float] = {}
+        circ: dict[str, float] = {}
         for f in filas:
             if str(f.categoria).startswith("comunes"):
                 continue
             cat, tip, est = f.categoria, f.tipologia, f.estancia
-            if est == "dormitorio_1" and tip in ("individual", "doble", "triple", "cuadruple"):
+            if est == "circulacion_interior":
+                circ[tip] = float(f.min_m2)
+            elif est == "dormitorio_1" and tip in ("individual", "doble", "triple", "cuadruple"):
                 dorm.setdefault(tip, {})[cat] = float(f.min_m2)
             elif est == "cocina":
                 cocina[cat] = float(f.min_m2)
@@ -132,6 +137,8 @@ class CatalogoApartamentosSQLAlchemy:
             out["MIN_COCINA"] = cocina
         if bano:
             out["MIN_BANO"] = bano
+        if circ:
+            out["CIRC_INTERIOR_M2"] = circ
         return out
 
     def areas_comunes(self, categoria: str, grupo: str = "edificios") -> dict[str, float]:
@@ -164,6 +171,23 @@ class CatalogoApartamentosSQLAlchemy:
         grupo: str = "edificios",
     ) -> None:
         orm_cls = self._orm(grupo)
+        # La circulación interior es por TIPOLOGÍA (no por categoría): editarla se
+        # propaga a todas las categorías con esa tipología (el motor la consolida por
+        # tipología; evita el last-write-wins entre categorías).
+        if estancia == "circulacion_interior":
+            ahora = datetime.now(timezone.utc)
+            filas = self._session.scalars(
+                select(orm_cls)
+                .where(orm_cls.tipologia == tipologia)
+                .where(orm_cls.estancia == "circulacion_interior")
+            ).all()
+            for f in filas:
+                f.min_m2 = valor
+                f.editable_por_usuario = 1
+                f.actualizado_en = ahora
+            self._session.commit()
+            return
+
         orm = self._session.get(orm_cls, (categoria, tipologia, estancia))
         if orm is None:
             orm = orm_cls(

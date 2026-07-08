@@ -194,12 +194,12 @@ class ParametrosDiseno:
     # construida, junto con `pct_muros` (perímetro), para obtener la útil neta de la
     # unidad. Default 0 (opt-in): sin él, la útil solo descuenta el perímetro.
     pct_muros_interior: float = 0.0
-    pct_circulacion_pb: float = 8.0     # % circulación en planta baja
-    pct_circulacion_tipo: float = 8.0   # % circulación en plantas tipo / ático
-    # % circulación INTERIOR de la unidad (pasillos+vestíbulo dentro de cada
-    # vivienda/apartamento/habitación). Único, compartido por todos los usos;
-    # solo se lee del bloque de PB (`diseno`). Sustituye el 1.15 antes fijo.
-    pct_circulacion_interior: float = 15.0
+    # Circulación común de la planta en m² ABSOLUTOS (antes eran %). Reserva fija por
+    # planta (como el núcleo), acotada a la huella disponible.
+    circulacion_pb_m2: float = 10.0     # m² circulación en planta baja
+    circulacion_tipo_m2: float = 10.0   # m² circulación en plantas tipo / ático
+    # La circulación INTERIOR de la unidad ya no es un % del panel: es un m² mínimo
+    # por tipología editable en «Ver / editar mínimos» (estancia `circulacion_interior`).
 
 
 @dataclass
@@ -217,9 +217,11 @@ class ParametrosPrograma:
     # dependen del uso activo (vivienda: estudio/1d/2d/3d/4d+; apartamentos:
     # estudio/1d/2d/3d; hotelero: individual/doble/triple/cuadruple/multiple).
     tipologias_extra: list[str] = field(default_factory=list)
-    pct_local_pb: float = 0.0                       # % útil PB destinado a local no residencial
-    pct_otros_pb: float = 0.0                       # % útil PB destinado a otros usos
-    pct_usos_comunes_pb: float = 0.0                # % útil PB para usos comunes (AT / hoteles)
+    # Reservas de planta baja en m² ABSOLUTOS (antes eran % del útil de PB). Se
+    # descuentan del útil de la PB, acotadas a lo disponible.
+    local_pb_m2: float = 0.0                        # m² PB destinados a local no residencial
+    otros_pb_m2: float = 0.0                        # m² PB destinados a otros usos
+    usos_comunes_pb_m2: float = 0.0                 # m² PB para usos comunes (AT / hoteles)
     # Núcleo de comunicación vertical (escalera + ascensor): área FIJA en m² que se
     # reserva en cada planta. Es de EDIFICIO (único y vertical); no aplica a un
     # inmueble suelto.
@@ -278,11 +280,11 @@ class ParametrosRender:
             n_dorms = CATEGORIA_A_NUM_DORMS.get(programa.categoria_vivienda, 2)
             categoria_label = programa.categoria_vivienda.value
 
-        # Sanitiza porcentajes 0..100; suma se valida en el motor.
+        # Sanitiza porcentajes de muros 0..80; la circulación común es m² absolutos.
         pct_muros = max(0.0, min(80.0, float(diseno.pct_muros)))
         pct_muros_interior = max(0.0, min(80.0, float(getattr(diseno, "pct_muros_interior", 0.0))))
-        pct_circulacion_pb = max(0.0, min(50.0, float(diseno.pct_circulacion_pb)))
-        pct_circulacion_tipo = max(0.0, min(50.0, float(diseno.pct_circulacion_tipo)))
+        circulacion_pb_m2 = max(0.0, float(diseno.circulacion_pb_m2))
+        circulacion_tipo_m2 = max(0.0, float(diseno.circulacion_tipo_m2))
 
         # La vía int-based de `tipologias_extra` solo la consume el preview de
         # vivienda. Para el resto de usos la mezcla la resuelve `casos_uso`
@@ -318,8 +320,8 @@ class ParametrosRender:
                 area_patio_min=sum(area_de_patio(pd) for pd in self.urbanisticos.patios),
                 pct_muros=pct_muros,
                 pct_muros_interior=pct_muros_interior,
-                pct_circulacion_pb=pct_circulacion_pb,
-                pct_circulacion_tipo=pct_circulacion_tipo,
+                circulacion_pb_m2=circulacion_pb_m2,
+                circulacion_tipo_m2=circulacion_tipo_m2,
                 pct_muros_normativo=max(0.0, min(80.0, float(self.urbanisticos.pct_muros_normativo))),
             ),
             urbanismo=UrbMotor(
@@ -343,9 +345,9 @@ class ParametrosRender:
                 salon_cocina_open=programa.salon_cocina_open,
                 n_plantas=self.urbanisticos.n_plantas_max,
                 tipologias_extra=tipologias_extra_n,
-                pct_local_pb=max(0.0, min(100.0, float(programa.pct_local_pb))),
-                pct_otros_pb=max(0.0, min(100.0, float(programa.pct_otros_pb))),
-                pct_usos_comunes_pb=max(0.0, min(100.0, float(programa.pct_usos_comunes_pb))),
+                local_pb_m2=max(0.0, float(programa.local_pb_m2)),
+                otros_pb_m2=max(0.0, float(programa.otros_pb_m2)),
+                usos_comunes_pb_m2=max(0.0, float(programa.usos_comunes_pb_m2)),
                 nucleo_m2=max(0.0, float(programa.nucleo_m2)),
             ),
             # Colocación individual de cada patio (polígono libre opcional). El motor
@@ -396,9 +398,8 @@ def _diseno_a_dict(d: ParametrosDiseno) -> dict[str, Any]:
         "ancho_min_puerta_m": d.ancho_min_puerta_m,
         "pct_muros": d.pct_muros,
         "pct_muros_interior": d.pct_muros_interior,
-        "pct_circulacion_pb": d.pct_circulacion_pb,
-        "pct_circulacion_tipo": d.pct_circulacion_tipo,
-        "pct_circulacion_interior": d.pct_circulacion_interior,
+        "circulacion_pb_m2": d.circulacion_pb_m2,
+        "circulacion_tipo_m2": d.circulacion_tipo_m2,
     }
 
 
@@ -413,9 +414,9 @@ def _programa_a_dict(prog: ParametrosPrograma) -> dict[str, Any]:
         "grupo_apartamentos": prog.grupo_apartamentos.value,
         "salon_cocina_open": prog.salon_cocina_open,
         "tipologias_extra": list(prog.tipologias_extra),
-        "pct_local_pb": prog.pct_local_pb,
-        "pct_otros_pb": prog.pct_otros_pb,
-        "pct_usos_comunes_pb": prog.pct_usos_comunes_pb,
+        "local_pb_m2": prog.local_pb_m2,
+        "otros_pb_m2": prog.otros_pb_m2,
+        "usos_comunes_pb_m2": prog.usos_comunes_pb_m2,
         "nucleo_m2": prog.nucleo_m2,
     }
 
@@ -504,13 +505,6 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         (p. ej. solo % muros + % circulación) y completen el resto desde su padre.
         """
         node = node or {}
-
-        def _circ(field: str, base_val: float) -> float:
-            # Compat JSON antiguo: `pct_circulacion` único alimenta pb y tipo.
-            if "pct_circulacion" in node and field not in node:
-                return max(0.0, min(50.0, _f(node, "pct_circulacion", base_val)))
-            return max(0.0, min(50.0, _f(node, field, base_val)))
-
         return ParametrosDiseno(
             espesor_muro_fachada_m=_f(node, "espesor_muro_fachada_m", base_d.espesor_muro_fachada_m),
             espesor_muro_medianero_m=_f(node, "espesor_muro_medianero_m", base_d.espesor_muro_medianero_m),
@@ -522,9 +516,8 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             ancho_min_puerta_m=_f(node, "ancho_min_puerta_m", base_d.ancho_min_puerta_m),
             pct_muros=max(0.0, min(80.0, _f(node, "pct_muros", base_d.pct_muros))),
             pct_muros_interior=max(0.0, min(80.0, _f(node, "pct_muros_interior", base_d.pct_muros_interior))),
-            pct_circulacion_pb=_circ("pct_circulacion_pb", base_d.pct_circulacion_pb),
-            pct_circulacion_tipo=_circ("pct_circulacion_tipo", base_d.pct_circulacion_tipo),
-            pct_circulacion_interior=max(0.0, min(40.0, _f(node, "pct_circulacion_interior", base_d.pct_circulacion_interior))),
+            circulacion_pb_m2=max(0.0, _f(node, "circulacion_pb_m2", base_d.circulacion_pb_m2)),
+            circulacion_tipo_m2=max(0.0, _f(node, "circulacion_tipo_m2", base_d.circulacion_tipo_m2)),
         )
 
     def _parse_programa(node: dict[str, Any] | None, base_prog: ParametrosPrograma) -> ParametrosPrograma:
@@ -569,9 +562,9 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             grupo_apartamentos=grupo_apt,
             salon_cocina_open=_b(node, "salon_cocina_open", base_prog.salon_cocina_open),
             tipologias_extra=tip_extra,
-            pct_local_pb=max(0.0, min(100.0, _f(node, "pct_local_pb", base_prog.pct_local_pb))),
-            pct_otros_pb=max(0.0, min(100.0, _f(node, "pct_otros_pb", base_prog.pct_otros_pb))),
-            pct_usos_comunes_pb=max(0.0, min(100.0, _f(node, "pct_usos_comunes_pb", base_prog.pct_usos_comunes_pb))),
+            local_pb_m2=max(0.0, _f(node, "local_pb_m2", base_prog.local_pb_m2)),
+            otros_pb_m2=max(0.0, _f(node, "otros_pb_m2", base_prog.otros_pb_m2)),
+            usos_comunes_pb_m2=max(0.0, _f(node, "usos_comunes_pb_m2", base_prog.usos_comunes_pb_m2)),
             nucleo_m2=max(0.0, _f(node, "nucleo_m2", base_prog.nucleo_m2)),
         )
 
@@ -667,9 +660,9 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             "grupo_apartamentos": programa.grupo_apartamentos.value,
             "categoria_hotelero": programa.categoria_hotelero.value,
             "salon_cocina_open": programa.salon_cocina_open,
-            "pct_local_pb": programa.pct_local_pb,
-            "pct_otros_pb": programa.pct_otros_pb,
-            "pct_usos_comunes_pb": programa.pct_usos_comunes_pb,
+            "local_pb_m2": programa.local_pb_m2,
+            "otros_pb_m2": programa.otros_pb_m2,
+            "usos_comunes_pb_m2": programa.usos_comunes_pb_m2,
             "categoria_vivienda": prog_tipo_node.get("categoria_vivienda", programa.categoria_vivienda.value),
             "tipologia_apartamento": prog_tipo_node.get("tipologia_apartamento", programa.tipologia_apartamento.value),
             "tipologia_habitacion": prog_tipo_node.get("tipologia_habitacion", programa.tipologia_habitacion.value),

@@ -10,17 +10,15 @@ menos el patio, y se cumple
 
 Planta baja (idx_visual == 0, tipo "regular"):
     huella_i      = huella_planta (ya con retranqueos + ocupación)
-    muros_i       = huella_i × pct_muros / 100
-    circ_i_pb     = huella_i × pct_circulacion_pb / 100
+    muros_i       = huella_i × pct_muros / 100            # muros SÍ es %
+    circ_i_pb     = min(circulacion_pb_m2, huella_i − muros_i)   # circulación es m²
     nucleo_i      = min(nucleo_m2, huella_i)   # área fija del núcleo, por planta
-    patio_i       = min(area_patio_min, huella_i × 0.20)
-    local_i       = (huella_i − muros_i − circ_i_pb − nucleo_i − patio_i) × pct_local_pb / 100
-    util_unidades_pb = huella_i − muros_i − circ_i_pb − nucleo_i − patio_i − local_i − comunes_planta
+    local_i       = min(local_pb_m2, útil restante)      # reservas de PB en m²
+    util_unidades_pb = huella_i − muros_i − circ_i − nucleo_i − reservas_pb
     construida_i  = huella_i − patio_i  (el patio no computa a construido)
 
 Planta tipo / ático:
-    Mismo esquema pero con pct_circulacion_tipo, sin local. El patio se
-    descuenta también (es vertical) con el mismo área normativa.
+    Mismo esquema pero con circulacion_tipo_m2, sin reservas de PB.
 
 Sótanos: viv=0 forzado. Ático: si computa_edif=False no consume techo.
 Reparto multi-tipología: si hay tipologías_extra, se asigna ≥1 unidad de
@@ -52,15 +50,18 @@ def _truncar(x: float) -> int:
 
 @dataclass(frozen=True)
 class DisenoPlanta:
-    """Porcentajes de descuento de una categoría de planta (muros/circulación).
+    """Descuentos de una categoría de planta: % muros + m² de circulación común.
 
     Iteración 6: cada categoría (pb / tipo / atico / sotano) trae los suyos, lo que
     permite que PB sea independiente de las plantas tipo y que ático y sótano tengan
-    su propio % muros y % circulación. El núcleo (m² fijos) es de edificio y no
+    su propio % muros y su circulación. El núcleo (m² fijos) es de edificio y no
     vive aquí: lo aporta el programa (`nucleo_m2`), igual en todas las plantas.
+
+    `circulacion_m2` es la circulación común de la planta en m² ABSOLUTOS (antes era
+    un %); se reserva como el núcleo, acotada a la huella disponible.
     """
     pct_muros: float
-    pct_circulacion: float
+    circulacion_m2: float
     # % muros INTERIORES de la unidad (tabiquería). Se suma a `pct_muros` al descontar
     # de la construida; default 0 (sin él, comportamiento idéntico al previo).
     pct_muros_interior: float = 0.0
@@ -95,13 +96,13 @@ class Capacidad:
     viv_por_planta_objetivo: int
     n_viviendas_objetivo: int
     pct_muros: float
-    pct_circulacion_pb: float
-    pct_circulacion_tipo: float
+    circulacion_pb_m2: float
+    circulacion_tipo_m2: float
     nucleo_m2: float
     pct_muros_normativo: float = 20.0
-    pct_local_pb: float = 0.0
-    pct_otros_pb: float = 0.0
-    pct_usos_comunes_pb: float = 0.0
+    local_pb_m2: float = 0.0
+    otros_pb_m2: float = 0.0
+    usos_comunes_pb_m2: float = 0.0
     viv_por_planta: list[int] = field(default_factory=list)
     construida_por_planta: list[float] = field(default_factory=list)
     util_por_planta: list[float] = field(default_factory=list)
@@ -258,8 +259,8 @@ def calcular_capacidad(
     if disenos is None:
         _pm = max(0.0, min(80.0, float(params.diseno.pct_muros)))
         _pmi = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_interior", 0.0))))
-        _cpb = max(0.0, min(50.0, float(params.diseno.pct_circulacion_pb)))
-        _ct = max(0.0, min(50.0, float(params.diseno.pct_circulacion_tipo)))
+        _cpb = max(0.0, float(getattr(params.diseno, "circulacion_pb_m2", 10.0)))
+        _ct = max(0.0, float(getattr(params.diseno, "circulacion_tipo_m2", 10.0)))
         disenos = {
             "pb": DisenoPlanta(_pm, _cpb, _pmi),
             "tipo": DisenoPlanta(_pm, _ct, _pmi),
@@ -270,9 +271,9 @@ def calcular_capacidad(
     dis_tipo = disenos["tipo"]
     pct_muros_normativo = max(0.0, min(80.0, float(getattr(params.diseno, "pct_muros_normativo", 20.0))))
     uso_edificio = str(getattr(params.programa, "uso", "vivienda"))
-    pct_local_pb = max(0.0, min(100.0, float(getattr(params.programa, "pct_local_pb", 0.0))))
-    pct_otros_pb = max(0.0, min(100.0, float(getattr(params.programa, "pct_otros_pb", 0.0))))
-    pct_usos_comunes_pb = max(0.0, min(100.0, float(getattr(params.programa, "pct_usos_comunes_pb", 0.0))))
+    local_pb_m2 = max(0.0, float(getattr(params.programa, "local_pb_m2", 0.0)))
+    otros_pb_m2 = max(0.0, float(getattr(params.programa, "otros_pb_m2", 0.0)))
+    usos_comunes_pb_m2 = max(0.0, float(getattr(params.programa, "usos_comunes_pb_m2", 0.0)))
     # Núcleo (escalera/ascensor): área FIJA en m² reservada en cada planta. Es de
     # edificio (vertical y única), no un % por planta. Se acota por planta a la huella.
     nucleo_m2 = max(0.0, float(getattr(params.programa, "nucleo_m2", 15.0)))
@@ -283,20 +284,14 @@ def calcular_capacidad(
     # El uso pone a 0 la reserva que no le corresponde, de modo que su columna/fila
     # no aparezca (el frontend la oculta además por uso).
     if uso_edificio not in ("vivienda", "apartamentos_turisticos"):
-        pct_local_pb = 0.0
+        local_pb_m2 = 0.0
     if uso_edificio == "vivienda":
-        pct_usos_comunes_pb = 0.0
-    # Verificación de no quedar útil: usamos el % de circulación más exigente. La
-    # tabiquería interior (pct_muros_interior) NO entra aquí: se descuenta a nivel
-    # de unidad sobre el útil disponible, no sobre la huella, así que nunca puede
-    # por sí sola dejar la planta sin útil.
-    # El núcleo ya no es un %: es un área fija en m². Se descuenta por planta más
-    # abajo y puede por sí solo dejar la planta sin útil (util cae a 0 con max(0,…)),
-    # pero no entra en esta suma de porcentajes de "no queda útil".
-    pct_total_max = (
-        dis_pb.pct_muros
-        + max(dis_pb.pct_circulacion, dis_tipo.pct_circulacion)
-    )
+        usos_comunes_pb_m2 = 0.0
+    # Verificación de "no queda útil": ahora la circulación común y las reservas de PB
+    # son m² absolutos (se acotan por planta y no pueden por sí solos dejar útil
+    # negativo). Solo el % de muros puede vaciar la planta por porcentaje; el resto
+    # (circulación, núcleo, reservas) se descuenta en m² más abajo con max(0, …).
+    pct_total_max = dis_pb.pct_muros
 
     huella = envolvente.plantas[0].footprint.area if envolvente.plantas else parcela_area
     coef = urb.coeficiente_edificabilidad
@@ -426,7 +421,8 @@ def calcular_capacidad(
         muros_est_i = construida_i * pct_muros_normativo / 100.0
         # Núcleo: área fija en m² (misma en todas las plantas), acotada a la huella.
         nucl_i = min(nucleo_m2, construida_i)
-        circ_i = construida_i * dis.pct_circulacion / 100.0
+        # Circulación común: m² fijos por planta, acotados a lo que queda tras muros.
+        circ_i = min(dis.circulacion_m2, max(0.0, construida_i - muros_i))
         patio_i = 0.0
         local_i = 0.0
         otros_i = 0.0
@@ -443,18 +439,18 @@ def calcular_capacidad(
             patio_i = 0.0
             nombre = _nombre_planta(0, "sotano")
         else:
-            # PB: usa pct_circulacion_pb + descuenta local. Resto (planta tipo /
-            # ático): usa pct_circulacion_tipo, sin local.
+            # PB: usa circulacion_pb_m2 + descuenta reservas de PB. Resto (planta
+            # tipo / ático): usa circulacion_tipo_m2, sin reservas.
             es_pb = es_primera_regular and p.tipo == "regular"
             # La circulación por categoría ya viene resuelta en `dis`
-            # (disenos["pb"]→pct_circulacion_pb, "tipo"/"atico"→pct_circulacion_tipo).
-            pct_circ_planta = dis.pct_circulacion
-            # La circulación de la planta engloba: pasillos comunes
-            # (`pct_circulacion_*`) + cuota de áreas comunes obligatorias del
-            # uso (`descuento_por_planta`, sólo no-vivienda). Así la huella
-            # cuadra: huella_i = util + muros + circ + núcleo + patio + local
-            # (y la construida reportada = huella_i − patio_i).
-            circ_i = construida_i * pct_circ_planta / 100.0 + descuento_por_planta
+            # (disenos["pb"]→circulacion_pb_m2, "tipo"/"atico"→circulacion_tipo_m2).
+            circ_m2_planta = dis.circulacion_m2
+            # La circulación de la planta engloba: pasillos comunes (m² fijos) + cuota
+            # de áreas comunes obligatorias del uso (`descuento_por_planta`, sólo
+            # no-vivienda). Se acota a lo que queda tras muros para no dejar útil
+            # negativo. Así la huella cuadra: huella_i = util + muros + circ + núcleo
+            # + patio + reservas (y la construida reportada = huella_i − patio_i).
+            circ_i = min(circ_m2_planta + descuento_por_planta, max(0.0, construida_i - muros_i))
 
             # Patio interior: superficie mínima normativa (configurable), SIN
             # heurísticas (antes se topaba al 20% de la planta). Ocupa espacio físico
@@ -476,13 +472,13 @@ def calcular_capacidad(
                 construida_i - muros_i - circ_i - nucl_i,
             )
             if es_pb:
-                # Reservas de PB, todas como % del útil bruto de planta baja y en
-                # paralelo: local (vivienda/AT), otros (todos) y usos comunes (AT/hoteles).
-                # El uso ya ha puesto a 0 las que no le corresponden. La suma se acota
-                # con max(0, ...) para no dejar útil negativo si superan el 100%.
-                local_i = util_bruto_i * pct_local_pb / 100.0
-                otros_i = util_bruto_i * pct_otros_pb / 100.0
-                comunes_i = util_bruto_i * pct_usos_comunes_pb / 100.0
+                # Reservas de PB en m² ABSOLUTOS: local (vivienda/AT), otros (todos) y
+                # usos comunes (AT/hoteles). El uso ya ha puesto a 0 las que no le
+                # corresponden. Se descuentan secuencialmente, cada una acotada al útil
+                # restante (nunca dejan útil negativo).
+                local_i = min(local_pb_m2, util_bruto_i)
+                otros_i = min(otros_pb_m2, max(0.0, util_bruto_i - local_i))
+                comunes_i = min(usos_comunes_pb_m2, max(0.0, util_bruto_i - local_i - otros_i))
                 util_disponible_bruto_i = max(0.0, util_bruto_i - local_i - otros_i - comunes_i)
                 es_primera_regular = False
             else:
@@ -577,13 +573,13 @@ def calcular_capacidad(
         viv_por_planta_objetivo=viv_pp_obj,
         n_viviendas_objetivo=n_total,
         pct_muros=dis_pb.pct_muros,
-        pct_circulacion_pb=dis_pb.pct_circulacion,
-        pct_circulacion_tipo=dis_tipo.pct_circulacion,
+        circulacion_pb_m2=dis_pb.circulacion_m2,
+        circulacion_tipo_m2=dis_tipo.circulacion_m2,
         nucleo_m2=nucleo_m2,
         pct_muros_normativo=pct_muros_normativo,
-        pct_local_pb=pct_local_pb,
-        pct_otros_pb=pct_otros_pb,
-        pct_usos_comunes_pb=pct_usos_comunes_pb,
+        local_pb_m2=local_pb_m2,
+        otros_pb_m2=otros_pb_m2,
+        usos_comunes_pb_m2=usos_comunes_pb_m2,
         viv_por_planta=viv_por_planta,
         construida_por_planta=construida_por_planta,
         util_por_planta=util_por_planta,
@@ -632,12 +628,12 @@ def capacidad_a_dict(cap: Capacidad) -> dict:
         "n_plantas_habitables": cap.n_plantas_habitables,
         "pct_muros": cap.pct_muros,
         "pct_muros_normativo": cap.pct_muros_normativo,
-        "pct_circulacion_pb": cap.pct_circulacion_pb,
-        "pct_circulacion_tipo": cap.pct_circulacion_tipo,
+        "circulacion_pb_m2": cap.circulacion_pb_m2,
+        "circulacion_tipo_m2": cap.circulacion_tipo_m2,
         "nucleo_m2": cap.nucleo_m2,
-        "pct_local_pb": cap.pct_local_pb,
-        "pct_otros_pb": cap.pct_otros_pb,
-        "pct_usos_comunes_pb": cap.pct_usos_comunes_pb,
+        "local_pb_m2": cap.local_pb_m2,
+        "otros_pb_m2": cap.otros_pb_m2,
+        "usos_comunes_pb_m2": cap.usos_comunes_pb_m2,
         "util_objetivo_viv_m2": round(cap.util_objetivo_viv_m2, 2),
         "util_planta_disponible_m2": round(cap.util_planta_disponible_m2, 2),
         "n_dormitorios": cap.n_dormitorios,

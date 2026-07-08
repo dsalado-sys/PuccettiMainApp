@@ -358,21 +358,21 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
       edificio que reparten el útil de la PB. No aplican a un inmueble suelto. #}
       {% if not es_inmueble %}
       <label class="rc-campo" data-cuando-uso="vivienda apartamentos_turisticos" data-visible-en-planta="pb">
-        <span class="rc-campo-label">% local en planta baja</span>
-        <input type="number" name="pct_local_pb" min="0" max="100" step="1" value="{{ prog.pct_local_pb }}"
+        <span class="rc-campo-label">Local en planta baja (m²)</span>
+        <input type="number" name="local_pb_m2" min="0" step="0.5" value="{{ prog.local_pb_m2 }}"
           data-bloque="programa">
         <small class="rc-hint">Reduce útiles de PB para local comercial.</small>
       </label>
       <label class="rc-campo" data-visible-en-planta="pb">
-        <span class="rc-campo-label">% otros en planta baja</span>
-        <input type="number" name="pct_otros_pb" min="0" max="100" step="1" value="{{ prog.pct_otros_pb }}"
+        <span class="rc-campo-label">Otros en planta baja (m²)</span>
+        <input type="number" name="otros_pb_m2" min="0" step="0.5" value="{{ prog.otros_pb_m2 }}"
           data-bloque="programa">
         <small class="rc-hint">Reduce útiles de PB para otros usos.</small>
       </label>
       <label class="rc-campo" data-cuando-uso="apartamentos_turisticos hotelero" data-visible-en-planta="pb">
-        <span class="rc-campo-label">% usos comunes en planta baja</span>
-        <input type="number" name="pct_usos_comunes_pb" min="0" max="100" step="1"
-          value="{{ prog.pct_usos_comunes_pb }}" data-bloque="programa">
+        <span class="rc-campo-label">Usos comunes en planta baja (m²)</span>
+        <input type="number" name="usos_comunes_pb_m2" min="0" step="0.5"
+          value="{{ prog.usos_comunes_pb_m2 }}" data-bloque="programa">
         <small class="rc-hint">Reduce útiles de PB para zonas comunes del establecimiento.</small>
       </label>
       {% endif %}
@@ -441,7 +441,7 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
   </details>
 
   <details class="rc-grupo">
-    <summary><span class="rc-grupo-titulo">Diseño · porcentajes</span></summary>
+    <summary><span class="rc-grupo-titulo">Diseño · muros y circulación</span></summary>
     <div class="rc-grupo-cuerpo">
       {% set d = parametros.diseno %}
       {% set d_t = parametros.diseno_tipo %}
@@ -460,23 +460,20 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
       {{ dnum("% muros interiores unidad", "pct_muros_interior", "diseno", d.pct_muros_interior, "0", "60", "1", "pb")
       }}
 
-      {# % circulación común del edificio — por categoría de planta. No aplica a un
+      {# Circulación común del edificio — m² por categoría de planta. No aplica a un
       inmueble suelto (es circulación de edificio): se oculta en modo inmueble. #}
       {% if "circulacion_comun" not in _ocultas %}
-      {{ dnum("% circulación (PB)", "pct_circulacion_pb", "diseno", d.pct_circulacion_pb, "0", "40", "1", "pb") }}
-      {{ dnum("% circulación (tipo)", "pct_circulacion_tipo", "diseno_tipo", d_t.pct_circulacion_tipo, "0", "40", "1",
+      {{ dnum("Circulación (PB) (m²)", "circulacion_pb_m2", "diseno", d.circulacion_pb_m2, "0", "", "0.5", "pb") }}
+      {{ dnum("Circulación (tipo) (m²)", "circulacion_tipo_m2", "diseno_tipo", d_t.circulacion_tipo_m2, "0", "", "0.5",
       "tipo") }}
-      {{ dnum("% circulación (ático)", "pct_circulacion_tipo", "diseno_atico", d_a.pct_circulacion_tipo, "0", "40", "1",
+      {{ dnum("Circulación (ático) (m²)", "circulacion_tipo_m2", "diseno_atico", d_a.circulacion_tipo_m2, "0", "", "0.5",
       "atico") }}
-      {{ dnum("% circulación (sótano)", "pct_circulacion_tipo", "diseno_sotano", d_s.pct_circulacion_tipo, "0", "40",
-      "1", "sotano") }}
+      {{ dnum("Circulación (sótano) (m²)", "circulacion_tipo_m2", "diseno_sotano", d_s.circulacion_tipo_m2, "0", "",
+      "0.5", "sotano") }}
       {% endif %}
 
-      {# % circulación INTERIOR de la unidad — único, compartido por todos los usos
-      (vivienda/AT/hotel). Solo se edita en PB; reemplaza el 15% fijo.
-      En modo inmueble es el único reparto de circulación que aplica. #}
-      {{ dnum("% circulación interior unidad", "pct_circulacion_interior", "diseno", d.pct_circulacion_interior, "0",
-      "40", "1", "pb") }}
+      {# La circulación INTERIOR de la unidad ya no se edita aquí: es un m² mínimo por
+      tipología en «Ver / editar mínimos» (estancia `circulacion_interior`). #}
     </div>
   </details>
 </aside>

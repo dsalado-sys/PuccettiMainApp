@@ -24,9 +24,10 @@ from app.contextos.render_calculos.parametros import (
 
 # ── A1.1 Hotelero (modelo de habitación) ────────────────────────────────────
 def test_hotelero_util_objetivo_y_estancias():
-    # hotel_3 doble: habitación 17 + baño objetivo (3.5 + 0.5) = 21.0; objetivo ×1.15.
+    # hotel_3 doble: habitación 17 + baño objetivo (3.5 + 0.5) = 21.0; objetivo = mín + circ (m²).
     assert ph.util_minimo_habitacion("hotel_3", "doble") == pytest.approx(21.0, abs=0.01)
-    assert ph.util_objetivo_habitacion("hotel_3", "doble") == pytest.approx(21.0 * 1.15, abs=0.01)
+    assert ph.util_objetivo_habitacion("hotel_3", "doble") == pytest.approx(
+        21.0 + ph.circ_interior_habitacion("doble"), abs=0.01)
     estancias = ph.programa_habitacion("doble", "hotel_3", 24.0)
     assert [e.nombre for e in estancias] == ["habitacion", "bano"]
 

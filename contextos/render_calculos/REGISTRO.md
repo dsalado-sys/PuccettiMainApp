@@ -352,7 +352,28 @@ señalaba antes (ya alineado con `viabilidad`, `test_viabilidad_rutas.py`).
 
 ## 5. Bitácora
 
-- **2026-07-08** — **Útil mínimo editable por tipología (vivienda) + máximo derivado
+- **2026-07-08 (2)** — **Parametrización en m² (en vez de %) de circulación común,
+  reservas de PB y circulación interior por tipología.** (a) Panel: `pct_circulacion_pb/
+  tipo` → `circulacion_pb_m2`/`circulacion_tipo_m2` (m² por planta, acotados a la huella,
+  patrón del núcleo); `pct_local_pb`/`pct_otros_pb`/`pct_usos_comunes_pb` → `local_pb_m2`/
+  `otros_pb_m2`/`usos_comunes_pb_m2` (m² en PB, descuento secuencial acotado). **`% muros`
+  se mantiene en %.** (b) La circulación interior sale del panel (`pct_circulacion_interior`
+  eliminado) y pasa a un **m² mínimo por tipología** editable en «Ver / editar mínimos»
+  (estancia `circulacion_interior`) en los **3 usos**. El útil objetivo/mínimo de la unidad
+  pasa de `×(1+%)` a `+ circ_m2` (aditivo). Se implementó `util_objetivo_vivienda` ya en la
+  sesión previa; ahora las tres tablas Anexo I siembran `circulacion_interior` por tipología
+  y `consolidadas_*` emiten `CIRC_INTERIOR_M2`. Cambios: `parametros.py`, `geometria/config.py`,
+  `geometria/capacidad.py` (`DisenoPlanta.circulacion_m2`, aplicación m², KPIs renombrados),
+  `geometria/programa*.py` (config `circ_interior_m2`, sizing aditivo, quitado
+  `pct_circulacion_interior`), `geometria/serializacion.py` (circulación turística por m²),
+  `casos_uso.py` (`_disenos_por_categoria`, `_sincronizar_minimos` sin el %), los 3 adapters +
+  `seed_normativa.py` + `etiquetas_anexo.py`. Seeds turístico/hotelero ahora **idempotentes
+  add-missing** (las filas nuevas aparecen sin reset). Defaults orientativos: circulación
+  común 10 m²/planta; circ. interior vivienda 3/9/10/13/16/19, apt 5–8, hotel 4–8. Tests
+  nuevos: `test_parametros_m2.py`, `test_circ_interior_tipologia.py`, `test_circ_interior_editor.py`.
+  ⚠️ Escenarios guardados con los `pct_*` viejos NO son convertibles a m² (arrancan en los
+  defaults nuevos).
+- **2026-07-08 (1)** — **Útil mínimo editable por tipología (vivienda) + máximo derivado
   = mínimo + 5.** Nueva fila **«Útil mínimo de la unidad»** por tipología en «Ver /
   editar mínimos» (default 40/60/70/90/110/130); suelo duro en el cálculo (ninguna
   vivienda baja de él; las estancias se reparten hasta completarlo). El útil máximo se

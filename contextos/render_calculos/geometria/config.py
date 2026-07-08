@@ -38,8 +38,8 @@ class ParametrosDiseno:
     # Tabiquería interior de las unidades (cálculo de unidad): se descuenta del útil
     # destinado a viviendas, no de la huella. Default 0 = sin tabiquería reservada.
     pct_muros_interior: float = 0.0
-    pct_circulacion_pb: float = 8.0      # % circulación en planta baja
-    pct_circulacion_tipo: float = 8.0    # % circulación en planta tipo / ático
+    circulacion_pb_m2: float = 10.0      # m² circulación en planta baja (absoluto)
+    circulacion_tipo_m2: float = 10.0    # m² circulación en planta tipo / ático (absoluto)
     pct_muros_normativo: float = 20.0    # referencia normativa para "Muros estimado"
 
 
@@ -75,9 +75,9 @@ class ParametrosPrograma:
     salon_cocina_open: bool = False
     n_plantas: int = 3
     tipologias_extra: list[int] = field(default_factory=list)  # nº dormitorios adicionales
-    pct_local_pb: float = 0.0                 # % útil PB destinado a local no residencial
-    pct_otros_pb: float = 0.0                 # % útil PB destinado a otros usos
-    pct_usos_comunes_pb: float = 0.0          # % útil PB destinado a usos comunes (AT / hoteles)
+    local_pb_m2: float = 0.0                  # m² PB destinados a local no residencial (absoluto)
+    otros_pb_m2: float = 0.0                  # m² PB destinados a otros usos (absoluto)
+    usos_comunes_pb_m2: float = 0.0           # m² PB destinados a usos comunes (AT / hoteles)
     # Núcleo de comunicación vertical (escalera + ascensor): área FIJA en m² que se
     # reserva en CADA planta (el núcleo es vertical y único para todo el edificio).
     nucleo_m2: float = 15.0

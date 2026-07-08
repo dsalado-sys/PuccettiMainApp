@@ -15,9 +15,9 @@ from app.contextos.render_calculos.geometria.programa import MARGEN_UTIL_MAXIMO_
 from .sqlalchemy_base import Base
 
 
-# Estancias que no son "habitaciones" editables (circulación es un derivado del
-# útil, no una superficie mínima de estancia): se excluyen del editor de la UI.
-_ESTANCIAS_NO_EDITABLES = {"circulacion_interior"}
+# Estancias que no se muestran como fila editable en el modal (hoy ninguna: la
+# circulación interior SÍ es editable por tipología, en m²).
+_ESTANCIAS_NO_EDITABLES: set[str] = set()
 
 # Clave sintética para editar el ÚTIL MÁXIMO de una tipología (no es una
 # estancia; es el techo de la unidad, columna `max_m2_util`). El editor la envía
@@ -85,6 +85,7 @@ def _etiqueta_estancia(estancia: str) -> str:
         "dormitorio_1": "Dormitorio principal",
         "bano": "Baño",
         "aseo": "Aseo",
+        "circulacion_interior": "Circulación interior (m²)",
     }
     if estancia in base:
         return base[estancia]
@@ -99,6 +100,8 @@ def _orden_estancia(estancia: str) -> tuple[int, int]:
     """Orden de presentación de las estancias dentro de una tipología."""
     if estancia == _UTIL_MINIMO_ESTANCIA:
         return (-1, 0)  # útil mínimo de la unidad: arriba de la sección
+    if estancia == "circulacion_interior":
+        return (-1, 1)  # circulación interior: justo debajo del útil mínimo
     fijo = {"salon": 0, "salon_cocina": 1, "espacio_principal": 2, "cocina": 3, "aseo": 4}
     if estancia in fijo:
         return (fijo[estancia], 0)
@@ -281,11 +284,14 @@ class CatalogoSuperficiesSQLAlchemy:
         salon_mas_cocina_min: dict[int, float] = {}
         util_max: dict[int, float] = {}
         util_min: dict[int, float] = {}
+        circ_interior: dict[int, float] = {}
         valores: dict[str, float] = {}
         area_target: dict[int, dict[str, float | None]] = {}
         for f in filas:
             n = f.n_dormitorios
             est = f.estancia
+            if est == "circulacion_interior":
+                circ_interior[n] = f.min_m2
             if est == "salon":
                 salon_min[n] = f.min_m2
             elif est == "salon_cocina":
@@ -313,12 +319,13 @@ class CatalogoSuperficiesSQLAlchemy:
         if salon_mas_cocina_min: out["SALON_MAS_COCINA_MIN"] = salon_mas_cocina_min
         if util_min: out["UTIL_MIN"] = util_min
         if util_max: out["UTIL_MAX"] = util_max
+        if circ_interior: out["CIRC_INTERIOR_M2"] = circ_interior
         if area_target: out["AREA_TARGET_VIVIENDA"] = area_target
 
-        # Parámetros globales del motor (singleton).
+        # Parámetros globales del motor (singleton). `pct_circulacion_interior_pct`
+        # quedó obsoleto (la circulación interior es ahora m² por tipología).
         motor = self._session.get(ParametrosMotorViviendaORM, 1)
         if motor is not None:
-            out["PCT_CIRCULACION_INTERIOR_VIVIENDA"] = motor.pct_circulacion_interior_pct
             out["UMBRAL_MINIMO_ESTUDIO_M2"] = motor.umbral_minimo_estudio_m2
         return out
 

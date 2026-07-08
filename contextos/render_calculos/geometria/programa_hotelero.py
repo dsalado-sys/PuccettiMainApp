@@ -71,8 +71,13 @@ TIPOLOGIA_HABITACION_A_PLAZAS = {
 }
 
 
-# % de circulación interior de la unidad, editable y compartido con los demás usos.
-PCT_CIRCULACION_INTERIOR = 15.0
+# Circulación interior de la habitación en m² por tipología. Antes era un % del
+# útil compartido por el panel; ahora es un m² mínimo por tipología editable en
+# «Ver / editar mínimos» (estancia `circulacion_interior`).
+CIRC_INTERIOR_M2_HOTELERO: dict[str, float] = {
+    "individual": 4.0, "doble": 5.0, "triple": 6.0, "cuadruple": 7.0, "multiple": 8.0,
+}
+_CIRC_INTERIOR_DEFAULT_HOT = 5.0
 
 
 # ─── Configuración inmutable del programa (§3.8 — sin globals mutables) ──────
@@ -84,19 +89,20 @@ PCT_CIRCULACION_INTERIOR = 15.0
 class ProgramaHoteleroConfig:
     min_habitacion: dict[tuple[str, str], float] = field(default_factory=lambda: dict(MIN_HABITACION))
     min_bano: dict[str, float] = field(default_factory=lambda: dict(MIN_BANO_HOTELERO))
-    pct_circulacion_interior: float = PCT_CIRCULACION_INTERIOR
+    # Circulación interior en m² por tipología de habitación (reserva fija).
+    circ_interior_m2: dict[str, float] = field(
+        default_factory=lambda: dict(CIRC_INTERIOR_M2_HOTELERO))
 
 
 CONFIG_DEFAULT = ProgramaHoteleroConfig()
 
 
-def config_desde_repo(
-    catalogo=None, pct_circulacion_interior: float | None = None,
-) -> ProgramaHoteleroConfig:
+def config_desde_repo(catalogo=None) -> ProgramaHoteleroConfig:
     """Construye un `ProgramaHoteleroConfig` desde la BBDD (Anexo I.1).
 
     Sustituye a `cargar_desde_repo` (que mutaba globals). Claves ausentes conservan
-    el default; `pct_circulacion_interior`, si se indica (panel), prevalece.
+    el default; la circulación interior por tipología (`CIRC_INTERIOR_M2`) llega
+    desde BBDD.
     """
     base = CONFIG_DEFAULT
     obtener = getattr(catalogo, "consolidadas_hotelero", None) if catalogo is not None else None
@@ -116,8 +122,11 @@ def config_desde_repo(
         nuevo = dict(base.min_bano)
         nuevo.update({str(k): float(v) for k, v in banos.items()})
         campos["min_bano"] = nuevo
-    if pct_circulacion_interior is not None:
-        campos["pct_circulacion_interior"] = max(0.0, float(pct_circulacion_interior))
+    circ = datos.get("CIRC_INTERIOR_M2")
+    if isinstance(circ, dict):
+        nuevo = dict(base.circ_interior_m2)
+        nuevo.update({str(k): float(v) for k, v in circ.items()})
+        campos["circ_interior_m2"] = nuevo
     return replace(base, **campos) if campos else base
 
 
@@ -157,8 +166,11 @@ def programa_habitacion(
     return estancias
 
 
-def _factor_circulacion(cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT) -> float:
-    return 1.0 + cfg.pct_circulacion_interior / 100.0
+def circ_interior_habitacion(
+    tipo: str, cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT,
+) -> float:
+    """Circulación interior de la habitación en m² (reserva fija por tipología)."""
+    return max(0.0, cfg.circ_interior_m2.get(tipo, _CIRC_INTERIOR_DEFAULT_HOT))
 
 
 def util_minimo_habitacion(
@@ -171,8 +183,8 @@ def util_minimo_habitacion(
 def util_objetivo_habitacion(
     categoria: str, tipo: str, cfg: ProgramaHoteleroConfig = CONFIG_DEFAULT,
 ) -> float:
-    """Objetivo de m² útil por unidad: mínimo + % circulación interior."""
-    return round(util_minimo_habitacion(categoria, tipo, cfg) * _factor_circulacion(cfg), 2)
+    """Objetivo de m² útil por unidad: mínimo + circulación interior (m²)."""
+    return round(util_minimo_habitacion(categoria, tipo, cfg) + circ_interior_habitacion(tipo, cfg), 2)
 
 
 def areas_sociales_obligatorias_hotel(

@@ -53,9 +53,13 @@ PLAZAS: dict[str, int] = {"estudio": 2, "individual": 1, "doble": 2, "triple": 3
 PLAZAS_SALON = 2
 
 
-# % de circulación interior de la unidad (pasillos + vestíbulo). Editable desde
-# el panel de diseño y COMPARTIDO con los demás usos; antes era un 1.15 fijo.
-PCT_CIRCULACION_INTERIOR = 15.0
+# Circulación interior de la unidad en m² por tipología (pasillos + vestíbulo).
+# Antes era un % del útil compartido por el panel; ahora es un m² mínimo por
+# tipología editable en «Ver / editar mínimos» (estancia `circulacion_interior`).
+CIRC_INTERIOR_M2_APARTAMENTOS: dict[str, float] = {
+    "estudio": 5.0, "individual": 5.0, "doble": 6.0, "triple": 7.0, "cuadruple": 8.0,
+}
+_CIRC_INTERIOR_DEFAULT_APT = 6.0
 
 
 # ─── Configuración inmutable del programa (§3.8 — sin globals mutables) ──────
@@ -72,7 +76,9 @@ class ProgramaApartamentosConfig:
     min_salon_comedor: dict[str, float] = field(default_factory=lambda: dict(MIN_SALON_COMEDOR))
     min_cocina: dict[str, float] = field(default_factory=lambda: dict(MIN_COCINA))
     min_bano: dict[str, float] = field(default_factory=lambda: dict(MIN_BANO))
-    pct_circulacion_interior: float = PCT_CIRCULACION_INTERIOR
+    # Circulación interior en m² por tipología (reserva fija, antes % del útil).
+    circ_interior_m2: dict[str, float] = field(
+        default_factory=lambda: dict(CIRC_INTERIOR_M2_APARTAMENTOS))
 
 
 CONFIG_DEFAULT = ProgramaApartamentosConfig()
@@ -97,13 +103,13 @@ def _fusionar_minimos(destino: dict, origen: dict) -> dict:
 
 
 def config_desde_repo(
-    catalogo=None, grupo: str = "edificios", pct_circulacion_interior: float | None = None,
+    catalogo=None, grupo: str = "edificios",
 ) -> ProgramaApartamentosConfig:
     """Construye un `ProgramaApartamentosConfig` desde el catálogo de BBDD (Anexo I.3/I.4).
 
     Sustituye al antiguo `cargar_desde_repo`, que mutaba globals de módulo. Cualquier
-    clave ausente conserva el default del Anexo. `pct_circulacion_interior`, si se
-    indica (panel de diseño), prevalece. Las constantes no distinguen grupo (1L/2L
+    clave ausente conserva el default del Anexo. La circulación interior por tipología
+    (`CIRC_INTERIOR_M2`) llega desde BBDD. Las constantes no distinguen grupo (1L/2L
     coinciden); se cargan los valores del `grupo` del cálculo en curso.
     """
     base = CONFIG_DEFAULT
@@ -120,8 +126,11 @@ def config_desde_repo(
     ):
         if clave in datos and isinstance(datos[clave], dict):
             campos[campo] = _fusionar_minimos(getattr(base, campo), datos[clave])
-    if pct_circulacion_interior is not None:
-        campos["pct_circulacion_interior"] = max(0.0, float(pct_circulacion_interior))
+    circ = datos.get("CIRC_INTERIOR_M2")
+    if isinstance(circ, dict):
+        nuevo = dict(base.circ_interior_m2)
+        nuevo.update({str(k): float(v) for k, v in circ.items()})
+        campos["circ_interior_m2"] = nuevo
     return replace(base, **campos) if campos else base
 
 
@@ -260,9 +269,11 @@ def programa_apartamentos(
     return estancias
 
 
-def _factor_circulacion(cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT) -> float:
-    """Factor multiplicativo `1 + %circ/100` sobre los mínimos del Anexo."""
-    return 1.0 + cfg.pct_circulacion_interior / 100.0
+def circ_interior_apartamento(
+    tipologia: str, cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
+) -> float:
+    """Circulación interior de la unidad en m² (reserva fija por tipología)."""
+    return max(0.0, cfg.circ_interior_m2.get(tipologia, _CIRC_INTERIOR_DEFAULT_APT))
 
 
 def _base_util(
@@ -277,8 +288,8 @@ def util_objetivo_apartamento(
     categoria: str, tipologia: str, grupo: str = "edificios",
     cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
 ) -> float:
-    """Objetivo de m² útil por unidad: mínimos + % circulación interior."""
-    return round(_base_util(categoria, tipologia, grupo, cfg) * _factor_circulacion(cfg), 2)
+    """Objetivo de m² útil por unidad: mínimos + circulación interior (m²)."""
+    return round(_base_util(categoria, tipologia, grupo, cfg) + circ_interior_apartamento(tipologia, cfg), 2)
 
 
 def util_minimo_apartamento(
@@ -328,8 +339,19 @@ def util_objetivo_combo(
     combo: ComboDormitorios, categoria: str, grupo: str = "edificios",
     cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
 ) -> float:
-    """Objetivo de m² útil de la combinación: mínimos + % circulación interior."""
-    return round(util_minimo_combo(combo, categoria, grupo, cfg) * _factor_circulacion(cfg), 2)
+    """Objetivo de m² útil de la combinación: mínimos + circulación interior (m²)."""
+    return round(util_minimo_combo(combo, categoria, grupo, cfg) + _circ_interior_combo(combo, cfg), 2)
+
+
+def _circ_interior_combo(
+    combo: ComboDormitorios, cfg: ProgramaApartamentosConfig = CONFIG_DEFAULT,
+) -> float:
+    """Circulación interior (m²) de una combinación: tipología representativa por plazas."""
+    if combo.es_estudio:
+        return circ_interior_apartamento("estudio", cfg)
+    plazas = _plazas_combo(combo)
+    tip = {1: "individual", 2: "doble", 3: "triple"}.get(plazas, "cuadruple")
+    return circ_interior_apartamento(tip, cfg)
 
 
 def descriptor_tipologia_combo(

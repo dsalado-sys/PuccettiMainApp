@@ -62,8 +62,10 @@ class CatalogoHoteleroSQLAlchemy:
         ).all()
         if not filas:
             return None
+        # La suma de estancias incluye ya la circulación interior (m² por tipología);
+        # el útil objetivo = habitación + baño + circulación (antes era × 1.15).
         base = sum(float(f.min_m2) for f in filas)
-        return round(base * 1.15, 2)
+        return round(base, 2)
 
     def consolidadas_hotelero(self) -> dict:
         """Mínimos editables de BBDD en la forma de las constantes del motor (A1.1).
@@ -77,6 +79,7 @@ class CatalogoHoteleroSQLAlchemy:
             return {}
         habitacion: dict[tuple[str, str], float] = {}
         bano: dict[str, float] = {}
+        circ: dict[str, float] = {}
         for f in filas:
             if str(f.categoria).startswith("comunes"):
                 continue
@@ -85,11 +88,15 @@ class CatalogoHoteleroSQLAlchemy:
                 habitacion[(cat, tip)] = float(f.min_m2)
             elif est == "bano":
                 bano[cat] = float(f.min_m2)
+            elif est == "circulacion_interior":
+                circ[tip] = float(f.min_m2)
         out: dict = {}
         if habitacion:
             out["MIN_HABITACION"] = habitacion
         if bano:
             out["MIN_BANO_HOTELERO"] = bano
+        if circ:
+            out["CIRC_INTERIOR_M2"] = circ
         return out
 
     def areas_sociales(self, categoria: str) -> dict[str, float]:
@@ -121,6 +128,23 @@ class CatalogoHoteleroSQLAlchemy:
         valor: float,
         usuario: str | None = None,
     ) -> None:
+        # La circulación interior es por TIPOLOGÍA (no por categoría): editarla se
+        # propaga a todas las categorías con esa tipología (el motor la consolida
+        # por tipología; evita el last-write-wins entre categorías).
+        if estancia == "circulacion_interior":
+            ahora = datetime.now(timezone.utc)
+            filas = self._session.scalars(
+                select(AnexoIHoteleroORM)
+                .where(AnexoIHoteleroORM.tipologia == tipologia)
+                .where(AnexoIHoteleroORM.estancia == "circulacion_interior")
+            ).all()
+            for f in filas:
+                f.min_m2 = valor
+                f.editable_por_usuario = 1
+                f.actualizado_en = ahora
+            self._session.commit()
+            return
+
         orm = self._session.get(AnexoIHoteleroORM, (categoria, tipologia, estancia))
         if orm is None:
             orm = AnexoIHoteleroORM(

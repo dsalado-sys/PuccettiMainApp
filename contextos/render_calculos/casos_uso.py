@@ -95,11 +95,11 @@ def _lado_a_utm(
 
 
 def _disenos_por_categoria(params: ParametrosRender) -> dict[str, DisenoPlanta]:
-    """% muros/circulación por categoría de planta (pb/tipo/atico/sotano).
+    """% muros + m² de circulación común por categoría de planta (pb/tipo/atico/sotano).
 
-    PB lee `pct_circulacion_pb`; el resto de categorías `pct_circulacion_tipo` de su
+    PB lee `circulacion_pb_m2`; el resto de categorías `circulacion_tipo_m2` de su
     propio bucket. Permite que PB sea independiente de las plantas tipo y que ático y
-    sótano tengan su propio % muros y % circulación. El núcleo (m² fijos) es de
+    sótano tengan su propio % muros y su circulación. El núcleo (m² fijos) es de
     edificio y lo lee el motor del programa, no de estos buckets por planta.
     """
     # El % muros interior es GLOBAL del edificio: se lee solo del bloque PB y aplica
@@ -109,15 +109,15 @@ def _disenos_por_categoria(params: ParametrosRender) -> dict[str, DisenoPlanta]:
     def dp(diseno, circ_field: str) -> DisenoPlanta:
         return DisenoPlanta(
             max(0.0, min(80.0, float(diseno.pct_muros))),
-            max(0.0, min(50.0, float(getattr(diseno, circ_field)))),
+            max(0.0, float(getattr(diseno, circ_field))),
             _pmi,
         )
 
     return {
-        "pb": dp(params.diseno, "pct_circulacion_pb"),
-        "tipo": dp(params.diseno_tipo, "pct_circulacion_tipo"),
-        "atico": dp(params.diseno_atico, "pct_circulacion_tipo"),
-        "sotano": dp(params.diseno_sotano, "pct_circulacion_tipo"),
+        "pb": dp(params.diseno, "circulacion_pb_m2"),
+        "tipo": dp(params.diseno_tipo, "circulacion_tipo_m2"),
+        "atico": dp(params.diseno_atico, "circulacion_tipo_m2"),
+        "sotano": dp(params.diseno_sotano, "circulacion_tipo_m2"),
     }
 
 
@@ -520,30 +520,27 @@ class CalcularLayout:
     def _sincronizar_minimos(self, params: ParametrosRender):
         """BBDD → config INMUTABLE del motor para el uso activo (Anexo I.1–I.5, §3.8).
 
-        Devuelve un `Programa*Config` (vivienda/apartamentos/hotelero) con
-        los mínimos editados desde el editor y el % de circulación interior del panel.
-        Antes esto se volcaba a constantes de módulo (`cargar_desde_repo` /
-        `set_pct_circulacion_interior`), lo que cruzaba ediciones entre requests
-        concurrentes y entre tests (Pendiente 3.8). Ahora la config se pasa como
-        argumento por toda la cadena de cálculo: sin estado compartido.
+        Devuelve un `Programa*Config` (vivienda/apartamentos/hotelero) con los mínimos
+        editados desde el editor, incluida la circulación interior en m² por tipología
+        (estancia `circulacion_interior`). Antes esto se volcaba a constantes de módulo
+        (`cargar_desde_repo` / `set_pct_circulacion_interior`), lo que cruzaba ediciones
+        entre requests concurrentes y entre tests (Pendiente 3.8). Ahora la config se
+        pasa como argumento por toda la cadena de cálculo: sin estado compartido.
 
         Si no hay catálogo inyectado (p. ej. tests), `config_desde_repo` cae a los
-        defaults del Anexo (igual que antes), pero respetando el % del panel.
+        defaults del Anexo (igual que antes).
         """
         uso = params.programa.uso
-        # % circulación interior de la unidad (panel de diseño, bloque PB). Único y
-        # compartido por todos los usos; prevalece sobre el persistido (R4).
-        pct_circ = float(params.diseno.pct_circulacion_interior)
         if uso == UsoEdificio.VIVIENDA:
             from .geometria import programa
-            return programa.config_desde_repo(self.catalogo_vivienda, pct_circ)
+            return programa.config_desde_repo(self.catalogo_vivienda)
         if uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             from .geometria import programa_apartamentos
             grupo = params.programa.grupo_apartamentos.value
-            return programa_apartamentos.config_desde_repo(self.catalogo_apartamentos, grupo, pct_circ)
+            return programa_apartamentos.config_desde_repo(self.catalogo_apartamentos, grupo)
         if uso == UsoEdificio.HOTELERO:
             from .geometria import programa_hotelero
-            return programa_hotelero.config_desde_repo(self.catalogo_hotelero, pct_circ)
+            return programa_hotelero.config_desde_repo(self.catalogo_hotelero)
         return None
 
     def _validar_util_maximo_vivienda(self, params: ParametrosRender, combo_override=None, cfg=None) -> str | None:
