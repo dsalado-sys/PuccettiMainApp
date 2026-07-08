@@ -348,7 +348,7 @@
     iniciarMensajesCarga();
     fetch(url, { method: "POST", body: formData })
       .then(parseRespuesta)
-      .then(pintarParcela)
+      .then(function (p) { pintarParcela(p, true); })
       .catch(mostrarError)
       .finally(function () { ocultarSpinner(); detenerMensajesCarga(); });
   }
@@ -364,7 +364,7 @@
       body: JSON.stringify({ lon: lon, lat: lat }),
     })
       .then(parseRespuesta)
-      .then(pintarParcela)
+      .then(function (p) { pintarParcela(p, true); })
       .catch(mostrarError)
       .finally(function () { ocultarSpinner(); detenerMensajesCarga(); });
   }
@@ -378,20 +378,31 @@
     fd.append("rc", rc);
     fetch("/modulos/localizacion/buscar/rc", { method: "POST", body: fd })
       .then(parseRespuesta)
-      .then(pintarParcela)
+      .then(function (p) { pintarParcela(p, true); })
       .catch(mostrarError)
       .finally(function () { ocultarSpinner(); detenerMensajesCarga(); });
   }
 
-  // Elegir un inmueble de la metaparcela SIN volver a llamar al Catastro: la
-  // subreferencia (escalera·planta·puerta + construida) ya está cargada.
+  // Normaliza una RC igual que el backend (mayúsculas, sin espacios) para
+  // poder comparar la clicada con la ya elegida.
+  function normalizarRc(rc) {
+    return (rc || "").trim().toUpperCase().replace(/\s+/g, "");
+  }
+
+  // Elegir/deseleccionar un inmueble de la metaparcela SIN volver a llamar al
+  // Catastro: la subreferencia (escalera·planta·puerta + construida) ya está
+  // cargada. Re-clicar el inmueble ya elegido lo deselecciona (rc vacío → el
+  // backend pone inmueble_seleccionado = None).
   function seleccionarInmueble(rc) {
     if (!puedeEditar) return;
     limpiarMensaje();
+    const elegidoActual = parcelaActual && parcelaActual.inmueble_seleccionado
+      ? normalizarRc(parcelaActual.inmueble_seleccionado.rc) : "";
+    const rcEnviar = normalizarRc(rc) === elegidoActual ? "" : rc;
     fetch("/modulos/localizacion/seleccionar-inmueble", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rc: rc }),
+      body: JSON.stringify({ rc: rcEnviar }),
     })
       .then(parseRespuesta)
       .then(pintarParcela)
@@ -429,10 +440,13 @@
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
-  function pintarParcela(parcela) {
+  // `reencuadrar` = true solo al cargar una parcela NUEVA (búsqueda); en los
+  // re-render por edición (muro, orientaciones, simplificar, inmueble) se omite
+  // el fitBounds para conservar el zoom/paneo del usuario.
+  function pintarParcela(parcela, reencuadrar) {
     parcelaActual = parcela;
     pintarFicha(parcela);
-    pintarMapa(parcela);
+    pintarMapa(parcela, reencuadrar);
     pintarTablaLados(parcela);
     actualizarBotonOrientaciones(parcela);
     pintarCardsSubref(parcela);
@@ -517,9 +531,11 @@
 
     p.subreferencias.forEach(function (s) {
       const card = document.createElement("article");
-      card.className = "loc-card" + (s.rc === rcElegido ? " loc-card-elegida" : "");
+      const esElegida = s.rc === rcElegido;
+      card.className = "loc-card" + (esElegida ? " loc-card-elegida" : "");
       card.title =
-        "Click para elegir este inmueble · RC: " + s.rc +
+        (esElegida ? "Click para deseleccionar este inmueble" : "Click para elegir este inmueble") +
+        " · RC: " + s.rc +
         (s.localizacion ? "  ·  Localización: " + s.localizacion : "") +
         (s.uso ? "  ·  Uso: " + s.uso : "");
       card.tabIndex = 0;
@@ -571,7 +587,7 @@
     return sp;
   }
 
-  function pintarMapa(p) {
+  function pintarMapa(p, reencuadrar) {
     if (capaContorno) { mapa.removeLayer(capaContorno); capaContorno = null; }
     capaLados.forEach(function (cl) { mapa.removeLayer(cl.polyline); });
     capaLados = [];
@@ -625,7 +641,9 @@
       capaLados.push({ lado: lado, polyline: pl });
     });
 
-    mapa.fitBounds(capaContorno.getBounds(), { padding: [40, 40], maxZoom: 19 });
+    if (reencuadrar) {
+      mapa.fitBounds(capaContorno.getBounds(), { padding: [40, 40], maxZoom: 19 });
+    }
   }
 
   function pintarTablaLados(p) {
@@ -869,6 +887,6 @@
 
   // ── Estado inicial ───────────────────────────────────────────────────────
   if (cfg.parcelaInicial) {
-    pintarParcela(cfg.parcelaInicial);
+    pintarParcela(cfg.parcelaInicial, true);   // primera pintada: encuadrar
   }
 })();
