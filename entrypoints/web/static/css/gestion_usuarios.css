@@ -1,0 +1,43 @@
+/* Gestión de usuarios (módulo superadmin). Layout sobre las primitivas y tokens
+   de puccetti.css; sin literales de color nuevos. */
+
+.gu-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  gap: var(--space-xl);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .gu-layout { grid-template-columns: 1fr; }
+}
+
+.gu-alta { position: sticky; top: var(--space-xl); }
+
+.gu-aviso { border-color: var(--outline); }
+.gu-aviso--ok { border-color: var(--dorado); color: var(--on-surface); background: var(--tint-primary-8); }
+.gu-aviso--error { border-color: var(--error); color: var(--error); background: var(--surface); }
+
+.gu-tabla table { table-layout: auto; }
+.gu-nombre { font-weight: 600; }
+.gu-fila-super { background: var(--tint-primary-8); }
+.gu-nota { color: var(--on-surface-muted); font-style: italic; font-size: var(--text-base); }
+
+.gu-col-acciones { text-align: right; }
+
+.gu-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.gu-inline { display: inline-flex; gap: var(--space-xs); align-items: center; margin: 0; }
+.gu-reset { gap: var(--space-xs); }
+.gu-input-pass { width: 150px; }
+.gu-select-rol { min-width: 130px; }
+
+.gu-tabla .boton-primario,
+.gu-tabla .boton-secundario,
+.gu-tabla .boton-peligro { padding: 4px 10px; font-size: var(--text-base); }

@@ -75,13 +75,13 @@ def test_umbrales_get_y_edicion(cliente_autenticado):
     assert c.get("/modulos/viabilidad/umbrales").json()["tir_min_hotelero"] == 0.20
 
 
-def test_inversor_no_puede_calcular_dcf_ni_editar_umbrales(cliente_autenticado):
-    c = cliente_autenticado(Rol.INVERSOR)
+def test_cliente_sin_acceso_a_viabilidad(cliente_autenticado):
+    # Nueva política: el cliente NO tiene acceso a viabilidad (ni VER ni EDITAR).
+    c = cliente_autenticado(Rol.CLIENTE)
     c.cookies.set(*_COOKIE)
     assert c.post("/modulos/viabilidad/calcular-dcf", json=_PAYLOAD_VENTA).status_code == 403
     assert c.post("/modulos/viabilidad/umbrales", json={"tir_min_hotelero": 0.9}).status_code == 403
-    # Pero sí puede consultarlos (VER).
-    assert c.get("/modulos/viabilidad/umbrales").status_code == 200
+    assert c.get("/modulos/viabilidad/umbrales").status_code == 403
 
 
 def test_guardar_dcf_sin_proyecto_da_409(cliente_autenticado):

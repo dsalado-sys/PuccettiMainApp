@@ -19,6 +19,7 @@ from .dependencias import (
 )
 from .rutas import (
     autenticacion,
+    gestion_usuarios,
     informe,
     localizacion,
     menu,
@@ -123,6 +124,7 @@ def crear_app(engine=None, session_factory=None) -> FastAPI:
     app.include_router(render_calculos.router)
     app.include_router(normativa_municipal.router)
     app.include_router(informe.router)
+    app.include_router(gestion_usuarios.router)
     app.include_router(modulos.router)
 
     # En modo test, las rutas deben usar el sessionmaker en memoria, no el de

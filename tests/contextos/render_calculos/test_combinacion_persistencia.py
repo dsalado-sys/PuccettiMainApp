@@ -50,3 +50,79 @@ def test_combinacion_round_trip_idempotente():
 
 def test_combinacion_ausente_es_vacia():
     assert parametros_desde_dict({"programa": {"uso": "hotelero"}}).programa.combinacion == ""
+
+
+# ─── tipos_unidad + mezcla_planta (vivienda / apartamentos) ──────────────────
+def _pu(uso, tipos=None, mezcla=None):
+    node = {"uso": uso}
+    if tipos is not None:
+        node["tipos_unidad"] = tipos
+    if mezcla is not None:
+        node["mezcla_planta"] = mezcla
+    return parametros_desde_dict({"programa": node}).programa
+
+
+def test_tipos_unidad_vivienda_canonicaliza_y_valida():
+    # "individual*2+doble*1" se recanonicaliza alfabéticamente; "triple*1" no es un
+    # tamaño válido en vivienda (solo individual/doble) → se descarta.
+    p = _pu("vivienda", tipos=["doble*1", "individual*2+doble*1", "triple*1"])
+    assert p.tipos_unidad == ["doble*1", "doble*1+individual*2"]
+
+
+def test_tipos_unidad_apartamentos_admite_triple_cuadruple():
+    p = _pu("apartamentos_turisticos", tipos=["estudio", "triple*1", "cuadruple*2"])
+    assert p.tipos_unidad == ["estudio", "triple*1", "cuadruple*2"]
+
+
+def test_hotel_fuerza_tipos_y_mezcla_vacios():
+    p = _pu("hotelero", tipos=["doble*1"], mezcla=["doble*1"])
+    assert p.tipos_unidad == []
+    assert p.mezcla_planta == []
+
+
+def test_mezcla_se_autosanea_al_alfabeto_de_tipos():
+    # La mezcla añade un combo-slug al alfabeto (integridad: tipos ⊇ mezcla) y
+    # solo conserva referencias válidas.
+    p = _pu("vivienda", tipos=["doble*1"], mezcla=["doble*1", "individual*1", "doble*1"])
+    assert set(p.tipos_unidad) == {"doble*1", "individual*1"}
+    assert p.mezcla_planta == ["doble*1", "individual*1", "doble*1"]
+
+
+def test_mezcla_descarta_combos_invalidos():
+    # "triple*1" inválido en vivienda → fuera de tipos y de mezcla.
+    p = _pu("vivienda", tipos=["doble*1"], mezcla=["doble*1", "triple*1"])
+    assert "triple*1" not in p.tipos_unidad
+    assert p.mezcla_planta == ["doble*1"]
+
+
+def test_tipos_mezcla_ausentes_son_listas_vacias():
+    p = _pu("vivienda")
+    assert p.tipos_unidad == []
+    assert p.mezcla_planta == []
+
+
+def test_tipos_mezcla_round_trip():
+    params = parametros_desde_dict({"programa": {
+        "uso": "apartamentos_turisticos", "tipos_unidad": ["estudio", "doble*2"],
+        "mezcla_planta": ["estudio", "doble*2", "doble*2"]}})
+    d = parametros_a_dict(params)
+    assert d["programa"]["tipos_unidad"] == ["estudio", "doble*2"]
+    assert d["programa"]["mezcla_planta"] == ["estudio", "doble*2", "doble*2"]
+    p2 = parametros_desde_dict(d).programa
+    assert p2.tipos_unidad == params.programa.tipos_unidad
+    assert p2.mezcla_planta == params.programa.mezcla_planta
+
+
+def test_string_suelto_se_acepta_como_lista():
+    p = _pu("vivienda", tipos="doble*1")
+    assert p.tipos_unidad == ["doble*1"]
+
+
+def test_no_se_propagan_a_programa_tipo():
+    # tipos_unidad/mezcla_planta son concepto de EDIFICIO: no van a programa_tipo.
+    params = parametros_desde_dict({
+        "programa": {"uso": "vivienda", "tipos_unidad": ["doble*1"],
+                     "mezcla_planta": ["doble*1"]},
+    })
+    assert params.programa_tipo.tipos_unidad == []
+    assert params.programa_tipo.mezcla_planta == []

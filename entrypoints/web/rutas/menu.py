@@ -24,6 +24,10 @@ def menu_principal(
     rol: Rol = Depends(rol_activo),
     proyecto: Proyecto | None = Depends(proyecto_activo),
 ):
+    # El superadmin es una cuenta administrativa sin módulos de negocio ni
+    # proyectos: aterriza directamente en la gestión de usuarios.
+    if rol is Rol.SUPERADMIN:
+        return RedirectResponse(url="/modulos/gestion-usuarios", status_code=303)
     # Sin proyecto activo, la primera vista es Proyectos (el hub de tarjetas solo se
     # muestra una vez hay proyecto seleccionado). Cubre también el post-login (→ "/").
     if proyecto is None:

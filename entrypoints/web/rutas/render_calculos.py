@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from app.contextos.proyectos.puertos import ProyectoRepositorio
 from app.contextos.render_calculos.casos_uso import (
     CalcularCombinacionesHotel,
+    CalcularCombinacionesPorPlanta,
     CalcularEnvolvente,
     CalcularEstanciasInmueble,
     CalcularLayout,
@@ -602,6 +603,37 @@ def combinaciones_hotel(
 
     params = parametros_desde_dict(payload)
     resultado = CalcularCombinacionesHotel(
+        catalogo_vivienda=catalogo_viv,
+        catalogo_apartamentos=catalogo_apt,
+        catalogo_hotelero=catalogo_hot,
+    ).ejecutar(parcela, params)
+    return JSONResponse(resultado)
+
+
+# ─── Combinaciones de tipologías de unidad POR PLANTA (vivienda / apartamentos) ──
+@router.post("/combinaciones-por-planta")
+def combinaciones_por_planta(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Enumera las combinaciones de tipos de unidad (por dormitorios) que caben en una
+    planta representativa, sobre las tipologías definidas en `programa.tipos_unidad`.
+    El cliente muestra el modal; la elección viaja como `programa.mezcla_planta` (que
+    el escenario persiste) y el motor la replica en cada planta habitable. Despacho por
+    uso en el caso de uso (vivienda/apartamentos; hotel usa `/combinaciones-hotel`)."""
+    _exige_permiso(rol, PermisoModulo.VER)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    parcela = construir_parcela_metrica(proyecto)
+    if parcela is None:
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
+
+    params = parametros_desde_dict(payload)
+    resultado = CalcularCombinacionesPorPlanta(
         catalogo_vivienda=catalogo_viv,
         catalogo_apartamentos=catalogo_apt,
         catalogo_hotelero=catalogo_hot,

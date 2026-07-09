@@ -118,6 +118,22 @@ def _asegurar_columna_min_util(eng: Engine) -> None:
         ), {"margen": float(MARGEN_UTIL_MAXIMO_VIVIENDA)})
 
 
+def _migrar_rol_inversor_a_cliente(eng: Engine) -> None:
+    """Renombra el rol legado `inversor` → `cliente` en filas existentes.
+
+    El enum `Rol` ya no define `inversor`; una fila persistida con ese valor
+    rompería al reconstruir `Rol(...)`. Idempotente y barato (no-op si no hay
+    filas afectadas o la tabla aún no existe).
+    """
+    from sqlalchemy import inspect, text
+    if "usuarios" not in inspect(eng).get_table_names():
+        return
+    with eng.begin() as conn:
+        conn.execute(
+            text("UPDATE usuarios SET rol = 'cliente' WHERE rol = 'inversor'")
+        )
+
+
 def init_db(
     engine: Engine | None = None,
     session_factory: sessionmaker | None = None,
@@ -137,6 +153,7 @@ def init_db(
     Base.metadata.create_all(bind=eng)
     # Migración manual (sin Alembic) del esquema evolucionado sobre BBDD existente.
     _asegurar_columna_min_util(eng)
+    _migrar_rol_inversor_a_cliente(eng)
 
     from .callejero_seed import sembrar_callejero
     from .seed_normativa import sembrar_todo

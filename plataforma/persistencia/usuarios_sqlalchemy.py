@@ -78,3 +78,9 @@ class UsuariosSQLAlchemy(UsuarioRepositorio):
     def listar(self) -> list[Usuario]:
         ormas = self._session.scalars(select(UsuarioORM)).all()
         return [_a_dominio(o) for o in ormas]
+
+    def eliminar(self, usuario_id: str) -> None:
+        orm = self._session.get(UsuarioORM, usuario_id)
+        if orm is not None:
+            self._session.delete(orm)
+            self._session.commit()

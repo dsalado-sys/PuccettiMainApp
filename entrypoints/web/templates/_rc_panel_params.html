@@ -242,6 +242,14 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
       payload, así round-trippea por `/escenarios`. #}
       <input type="hidden" name="combinacion" data-bloque="programa"
         value="{{ prog.combinacion }}" id="rc-combinacion-hidden">
+      {# Tipos de unidad (alfabeto de combo-slugs) + mezcla POR PLANTA elegida
+      (vivienda / apartamentos). Uso-agnósticos (sin `data-cuando-uso`) → siempre en
+      el payload, así round-trippean por `/escenarios`; el backend fuerza [] en hotel.
+      Valor = JSON (precedente de los patios). El JS los lee/escribe como arrays. #}
+      <input type="hidden" name="tipos_unidad" data-bloque="programa"
+        value="{{ prog.tipos_unidad | tojson }}" id="rc-tipos-unidad-hidden">
+      <input type="hidden" name="mezcla_planta" data-bloque="programa"
+        value="{{ prog.mezcla_planta | tojson }}" id="rc-mezcla-planta-hidden">
 
       {# Editor de superficies mínimas de estancias (vivienda · Anexo I.5).
       Recoge los mínimos por estancia y tipología (incluido estudio), los
@@ -303,32 +311,40 @@ unidad) no se añaden más tipologías, así que se pasa False. #}
           data-uso="apartamentos_turisticos">Ver / editar mínimos</button>
         <small class="rc-hint">Mínimo por estancia y tipología de la categoría/grupo elegidos, según Normativa.</small>
       </div>
-      {# §2.5 — Vivienda y apartamento turístico se definen por su Nº DE
-      DORMITORIOS. El sistema enumera todas las combinaciones de tamaños por
-      dormitorio (vivienda: individual/doble; apartamento: +triple/cuádruple),
-      calcula cuántas unidades caben de cada una y el técnico elige una en el
-      modal. La elección es temporal. #}
+      {# §2.5 — Vivienda y apartamento turístico. #}
+      {% if es_inmueble %}
+      {# Modo inmueble: UNA unidad → nº de dormitorios directo (a /estancias). #}
       <div class="rc-campo" data-cuando-uso="vivienda apartamentos_turisticos" data-visible-en-planta="pb">
-        <span class="rc-campo-label">Nº de dormitorios{% if not es_inmueble %} por unidad{% endif %}</span>
+        <span class="rc-campo-label">Nº de dormitorios</span>
         <div class="rc-ndorms">
           <input type="number" id="rc-apt-ndorms" min="0" step="1" value="0" aria-label="Número de dormitorios">
-          {% if not es_inmueble %}
-          <button type="button" class="boton-secundario rc-btn-pequeno" id="rc-btn-combinaciones">
-            Ver combinaciones
-          </button>
-          {% endif %}
         </div>
-        <small class="rc-hint">0 = estudio.{% if es_inmueble %} Distribuye las estancias de este inmueble.{% endif
-          %}</small>
-        {% if not es_inmueble %}
-        <div id="rc-combo-elegido" class="rc-combo-elegido" hidden>
+        <small class="rc-hint">0 = estudio. Distribuye las estancias de este inmueble.</small>
+      </div>
+      {% else %}
+      {# Obra nueva / rehabilitación: el arquitecto define VARIOS tipos de unidad (cada
+      uno una combinación de dormitorios) y el sistema enumera las mezclas de unidades
+      enteras que caben por planta. Elige una y se replica en cada planta habitable.
+      Las filas de tipo y el modal los construye el JS desde los inputs ocultos. #}
+      <div class="rc-campo" data-cuando-uso="vivienda apartamentos_turisticos" data-visible-en-planta="pb">
+        <span class="rc-campo-label">Tipos de unidad</span>
+        <div class="rc-tipos-unidad" id="rc-tipos-unidad"></div>
+        <div class="rc-ndorms">
+          <button type="button" class="boton-secundario rc-btn-pequeno" id="rc-btn-add-tipo">+ Tipología</button>
+          <button type="button" class="boton-secundario rc-btn-pequeno" id="rc-btn-combinaciones-planta">
+            Ver combinaciones por planta
+          </button>
+        </div>
+        <small class="rc-hint">Define uno o varios tipos de unidad (por dormitorios) y elige cuántos caben por
+          planta.</small>
+        <div id="rc-combo-planta-elegido" class="rc-combo-elegido" hidden>
           <span class="rc-combo-elegido-pre">Combinación aplicada:</span>
-          <span class="rc-badge rc-badge-dorado" id="rc-combo-elegido-txt"></span>
-          <button type="button" class="rc-tip-quitar" id="rc-combo-limpiar"
+          <span class="rc-badge rc-badge-dorado" id="rc-combo-planta-elegido-txt"></span>
+          <button type="button" class="rc-tip-quitar" id="rc-combo-planta-limpiar"
             aria-label="Quitar combinación elegida">−</button>
         </div>
-        {% endif %}
       </div>
+      {% endif %}
 
       {# ── HOTELERO: hotel / hostal / pensión / albergue (Anexo I.1) — categoría global (PB) ── #}
       <label class="rc-campo" data-cuando-uso="hotelero" data-visible-en-planta="pb">

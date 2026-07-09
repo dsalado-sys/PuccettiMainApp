@@ -293,20 +293,13 @@
     sel.value = carpetaActual == null ? "" : String(carpetaActual);
   }
 
-  // Habilita/inhabilita EN VIVO los módulos del rail que exigen proyecto activo,
-  // sin recargar. El rail se pinta en servidor, pero refleja el cambio al vuelo
-  // al activar/desactivar/eliminar (así no hay que cambiar de módulo).
+  // Muestra/oculta EN VIVO los módulos del rail que exigen proyecto activo, sin
+  // recargar. El rail se pinta en servidor, pero refleja el cambio al vuelo al
+  // activar/desactivar/eliminar (así no hay que cambiar de módulo). Los módulos
+  // sin proyecto se OCULTAN por completo (no se muestran bloqueados).
   function actualizarRail(hayProyecto) {
     document.querySelectorAll(".rail-item[data-requiere-proyecto]").forEach((a) => {
-      const bloqueado = !hayProyecto;
-      a.classList.toggle("rail-item--bloqueado", bloqueado);
-      if (bloqueado) {
-        a.setAttribute("aria-disabled", "true");
-        a.setAttribute("tabindex", "-1");
-      } else {
-        a.removeAttribute("aria-disabled");
-        a.removeAttribute("tabindex");
-      }
+      a.hidden = !hayProyecto;
     });
   }
 

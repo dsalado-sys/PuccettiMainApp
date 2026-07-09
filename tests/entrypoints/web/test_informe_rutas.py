@@ -132,9 +132,9 @@ def test_aprobar_proyecto_inexistente_da_404(cliente_autenticado):
     assert c.post("/modulos/informe/no-existe/aprobar?modo=obra-nueva&escenario=e1").status_code == 404
 
 
-def test_aprobar_inversor_da_403(cliente_autenticado, engine_memoria):
+def test_aprobar_cliente_da_403(cliente_autenticado, engine_memoria):
     _engine, session_factory = engine_memoria
     pid = _sembrar_proyecto(session_factory, RENDER_CALCULOS=_rc_con_escenario("e1"))
-    c = cliente_autenticado(Rol.INVERSOR)
+    c = cliente_autenticado(Rol.CLIENTE)
     c.cookies.set(*_COOKIE)
     assert c.post(f"/modulos/informe/{pid}/aprobar?modo=obra-nueva&escenario=e1").status_code == 403

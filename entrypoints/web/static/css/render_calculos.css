@@ -126,6 +126,18 @@
 .rc-tip-quitar:hover { background: var(--tint-error-8); }
 .rc-btn-pequeno { font-size: var(--text-sm); padding: var(--space-xs) 10px; }
 
+/* ─── Tipos de unidad (vivienda / apartamentos): numberbox + «Ver combinaciones» ── */
+.rc-tipos-unidad { display: flex; flex-direction: column; gap: var(--space-sm); margin-bottom: 6px; }
+.rc-tipo-fila { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rc-tipo-ndorms-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.rc-tipo-ndorms-lbl { font-size: var(--text-eyebrow); color: var(--on-surface-muted); }
+.rc-tipo-ndorms { width: 64px; }
+.rc-tipo-vercomb { white-space: nowrap; }
+.rc-tipo-combo-chip {
+  flex: 1; min-width: 8ch; font-size: var(--text-sm); color: var(--dorado);
+}
+.rc-tipo-combo-chip.rc-tipo-combo-vacio { color: var(--on-surface-muted); font-style: italic; }
+
 /* ─── Patios del edificio (lista editable) ───────────────────────── */
 .rc-patios { border: 1px solid var(--outline); border-radius: var(--radio); padding: 10px 12px; }
 .rc-patios legend { font-size: var(--text-eyebrow); color: var(--on-surface-secondary); padding: 0 6px; text-transform: uppercase; letter-spacing: 0.1em; }

@@ -1,0 +1,37 @@
+{# Modal de combinaciones de tipos de unidad POR PLANTA (vivienda / apartamentos) —
+   al pulsar «Ver combinaciones por planta». Lista las mezclas de unidades enteras que
+   caben en una planta representativa (con las tipologías definidas) y el técnico elige
+   una; esa mezcla se replica en cada planta habitable. #}
+<dialog id="rc-modal-comb-planta" class="rc-modal" aria-labelledby="rc-modal-cp-titulo">
+  <article class="rc-modal-card rc-modal-tip-card">
+    <header class="rc-modal-header">
+      <h2 id="rc-modal-cp-titulo">Combinaciones de unidades por planta</h2>
+      <button type="button" class="rc-modal-cerrar" id="rc-modal-cp-cerrar" aria-label="Cerrar">×</button>
+    </header>
+
+    <div class="rc-modal-cuerpo">
+      <p class="rc-modal-tip-sub" id="rc-modal-cp-sub">—</p>
+
+      <table class="rc-mu-est-tabla rc-modal-tip-tabla">
+        <thead>
+          <tr>
+            <th>Combinación (por planta)</th>
+            <th class="rc-num">Unidades</th>
+            <th class="rc-num">Plazas</th>
+            <th class="rc-num">Útil usado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rc-modal-cp-body">
+          <tr><td colspan="5" class="rc-vacio">—</td></tr>
+        </tbody>
+      </table>
+
+      <p class="rc-vacio rc-modal-tip-vacio" id="rc-modal-cp-vacio" hidden>
+        Ninguna combinación de unidades cabe en una planta con los parámetros actuales.
+        Revisa los tipos de unidad elegidos o los parámetros urbanísticos.
+      </p>
+      <p class="rc-mu-nota" id="rc-modal-cp-nocaben" hidden></p>
+    </div>
+  </article>
+</dialog>

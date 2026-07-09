@@ -62,6 +62,15 @@ CATALOGO: tuple[TarjetaModulo, ...] = (
         ruta="/modulos/informe",
         icono="icono-documento",
     ),
+    # Solo visible para el superadmin (la matriz de permisos oculta la tarjeta al
+    # resto de roles vía `acceso(...).puede_ver == False`).
+    TarjetaModulo(
+        id=ModuloPuccetti.GESTION_USUARIOS.value,
+        titulo="Gestión de usuarios",
+        descripcion=" ",
+        ruta="/modulos/gestion-usuarios",
+        icono="icono-usuarios",
+    ),
 )
 
 
@@ -73,6 +82,7 @@ MODULOS_SIN_PROYECTO: frozenset[str] = frozenset({
     ModuloPuccetti.PROYECTOS.value,
     ModuloPuccetti.NORMATIVA_MUNICIPAL.value,
     ModuloPuccetti.LOCALIZACION.value,
+    ModuloPuccetti.GESTION_USUARIOS.value,
 })
 
 

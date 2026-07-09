@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block titulo %}Puccetti · Gestión de usuarios{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/gestion_usuarios.css?v={{ estaticos_version }}" />
+{% endblock %}
+
+{% block contenido %}
+
+<section class="hero">
+  <div class="hero-titulo">
+    <span class="eyebrow eyebrow--oro">Administración</span>
+    <h1>Gestión de usuarios</h1>
+  </div>
+</section>
+
+{% if ok %}
+<div class="aviso gu-aviso gu-aviso--ok" role="status">{{ ok }}</div>
+{% endif %}
+{% if error %}
+<div class="aviso gu-aviso gu-aviso--error" role="alert">{{ error }}</div>
+{% endif %}
+
+<div class="gu-layout">
+  <!-- ─── Alta de usuario ─── -->
+  <section class="formulario-bloque gu-alta" aria-label="Crear usuario">
+    <h2>Nuevo usuario</h2>
+    <form method="post" action="/modulos/gestion-usuarios/crear" class="form-vertical" autocomplete="off">
+      <label>Usuario
+        <input type="text" name="usuario" required maxlength="80" autocomplete="off">
+      </label>
+      <label>Contraseña
+        <input type="password" name="contraseña" required minlength="4" autocomplete="new-password">
+      </label>
+      <label>Rol
+        <select name="rol_nuevo" class="select">
+          {% for r in roles_asignables %}
+          <option value="{{ r.value }}">{{ r.value | capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="boton-primario">Crear usuario</button>
+    </form>
+  </section>
+
+  <!-- ─── Listado ─── -->
+  <section class="tabla-proyectos gu-tabla" aria-label="Usuarios">
+    <h2>Usuarios ({{ usuarios | length }})</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Usuario</th>
+          <th>Rol</th>
+          <th>Estado</th>
+          <th class="gu-col-acciones">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in usuarios %}
+        {% set es_super = u.rol.value == 'superadmin' %}
+        <tr {% if es_super %}class="gu-fila-super"{% endif %}>
+          <td>
+            <span class="gu-nombre">{{ u.usuario }}</span>
+          </td>
+          <td>
+            {% if es_super %}
+            <span class="badge badge--oro">Superadmin</span>
+            {% else %}
+            <form method="post" action="/modulos/gestion-usuarios/{{ u.id }}/rol" class="gu-inline">
+              <select name="rol_nuevo" class="select gu-select-rol" onchange="this.form.submit()" aria-label="Rol de {{ u.usuario }}">
+                {% for r in roles_asignables %}
+                <option value="{{ r.value }}" {% if r.value == u.rol.value %}selected{% endif %}>{{ r.value | capitalize }}</option>
+                {% endfor %}
+              </select>
+              <noscript><button type="submit" class="boton-secundario">Guardar</button></noscript>
+            </form>
+            {% endif %}
+          </td>
+          <td>
+            {% if u.activo %}
+            <span class="badge badge--fuente">Activo</span>
+            {% else %}
+            <span class="badge badge--gris">Inactivo</span>
+            {% endif %}
+          </td>
+          <td class="gu-col-acciones">
+            {% if not es_super %}
+            <div class="gu-acciones">
+              <form method="post" action="/modulos/gestion-usuarios/{{ u.id }}/activo" class="gu-inline">
+                <input type="hidden" name="activo" value="{{ '0' if u.activo else '1' }}">
+                <button type="submit" class="boton-secundario">
+                  {{ 'Desactivar' if u.activo else 'Activar' }}
+                </button>
+              </form>
+              <form method="post" action="/modulos/gestion-usuarios/{{ u.id }}/contrasena" class="gu-inline gu-reset">
+                <input type="password" name="contraseña" placeholder="Nueva contraseña" minlength="4" required
+                       class="campo-input gu-input-pass" autocomplete="new-password" aria-label="Nueva contraseña de {{ u.usuario }}">
+                <button type="submit" class="boton-secundario">Restablecer</button>
+              </form>
+              <form method="post" action="/modulos/gestion-usuarios/{{ u.id }}/eliminar" class="gu-inline"
+                    onsubmit="return confirm('¿Eliminar al usuario «{{ u.usuario }}»? Esta acción no se puede deshacer.');">
+                <button type="submit" class="boton-peligro">Eliminar</button>
+              </form>
+            </div>
+            {% else %}
+            <span class="gu-nota">Cuenta protegida</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+
+{% endblock %}

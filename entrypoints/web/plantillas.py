@@ -31,9 +31,9 @@ def _contexto_shell(request) -> dict:
     except (AssertionError, AttributeError):
         slug_rol = None
     try:
-        rol = Rol(slug_rol) if slug_rol else Rol.INVERSOR
+        rol = Rol(slug_rol) if slug_rol else Rol.CLIENTE
     except ValueError:
-        rol = Rol.INVERSOR
+        rol = Rol.CLIENTE
 
     # Sin proyecto activo (cookie ausente) solo son navegables Proyectos, Normativa
     # y Buscar parcela; el resto se oculta del rail (coherente con el gate central).

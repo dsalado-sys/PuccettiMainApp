@@ -67,13 +67,14 @@ Todo esto existe y es correcto; es la materia prima del dibujo:
 - **`programa_vivienda/_apartamentos/programa_habitacion(...)` → `list[Estancia]`** — el
   reparto de m² de estancias de UNA unidad (área objetivo por estancia). Es lo que habría
   que **posicionar** dentro del polígono de cada unidad.
-- **`Capacidad.composicion_planta_forzada` (hotel, opcional, 2026-07-08)** — segundo
-  camino de reparto: el arquitecto elige una combinación de tipologías POR PLANTA («Ver
-  combinaciones») y esa mezcla se replica idéntica en cada planta habitable (en vez del
-  reparto automático). **Mismo contrato de salida** (`unidades_por_planta`/
-  `tipologias_unidad_por_planta`, invariante de cardinalidad intacto) — el futuro motor de
-  disposición no necesita rama especial. Detalle: `REGISTRO.md` §5 (2026-07-08) y memoria
-  `project_combinaciones_hotel`.
+- **`Capacidad.composicion_planta_forzada` (cross-uso, 2026-07-08/09)** — segundo
+  camino de reparto: el arquitecto elige una combinación de tipologías POR PLANTA y esa
+  mezcla se replica idéntica en cada planta habitable (en vez del reparto automático).
+  Hotel (§1.9) usa `combinacion` (habitaciones); vivienda/apartamentos (§1.10, 2026-07-09)
+  usan `tipos_unidad` + `mezcla_planta` (combo-slugs de dormitorios). **Mismo contrato de
+  salida** (`unidades_por_planta`/`tipologias_unidad_por_planta`, invariante de cardinalidad
+  intacto) — el futuro motor de disposición lee lo mismo en los tres usos, sin rama
+  especial. Detalle: `REGISTRO.md` §1.9/§1.10 y memoria `project_combinaciones_hotel`.
 
 ---
 

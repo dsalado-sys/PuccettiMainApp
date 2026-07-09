@@ -87,6 +87,10 @@
     // § hotel — combinación de habitaciones POR PLANTA elegida. Mismo canal de
     // persistencia (input oculto `combinacion`), semántica distinta (mezcla por planta).
     comboHotel: null,         // { slug, etiqueta } | null
+    // §2.5 — mezcla de tipos de unidad POR PLANTA (vivienda / apartamentos). Se
+    // persiste en el input oculto `mezcla_planta` (lista plana de combo-slugs), el
+    // alfabeto de tipos en `tipos_unidad`. Análogo a `comboHotel` pero de dormitorios.
+    mezclaPlanta: null,       // { mezcla: [...combo_slug], etiqueta } | null
     // Aviso de exceso de construida (rehabilitación): el modal salta una vez al
     // superar; tras aceptarlo, solo queda el aviso inferior. `interaccionUsuario`
     // evita que el modal salte en la carga inicial automática.
@@ -141,6 +145,40 @@
     return inp ? (inp.value || "") : "";
   }
 
+  // ─── Tipos de unidad + mezcla POR PLANTA (vivienda / apartamentos) ─────
+  // Inputs ocultos con valor JSON (array). Getters/setters análogos al de patios.
+  function _getJsonArrayHidden(id) {
+    const inp = document.getElementById(id);
+    if (!inp) return [];
+    try { const a = JSON.parse(inp.value || "[]"); return Array.isArray(a) ? a : []; }
+    catch (e) { return []; }
+  }
+  function _setJsonArrayHidden(id, arr) {
+    const inp = document.getElementById(id);
+    if (inp) inp.value = JSON.stringify(Array.isArray(arr) ? arr : []);
+  }
+  const getTiposUnidadHidden = () => _getJsonArrayHidden("rc-tipos-unidad-hidden");
+  const setTiposUnidadHidden = (arr) => _setJsonArrayHidden("rc-tipos-unidad-hidden", arr);
+  const getMezclaHidden = () => _getJsonArrayHidden("rc-mezcla-planta-hidden");
+  const setMezclaHidden = (arr) => _setJsonArrayHidden("rc-mezcla-planta-hidden", arr);
+
+  // Etiqueta de una mezcla plana (un combo-slug por unidad): agrupa por slug y
+  // compone "n × (etiqueta)" (espejo de `_etiqueta_mezcla_dorms`).
+  function etiquetaMezcla(mezclaPlana) {
+    const counts = {};
+    (mezclaPlana || []).forEach(s => { counts[s] = (counts[s] || 0) + 1; });
+    return Object.keys(counts).sort().map(slug => {
+      const etq = etiquetaDesdeSlug(slug);
+      const n = counts[slug];
+      return n === 1 ? etq : `${n} × (${etq})`;
+    }).join(" + ");
+  }
+  // nº de dormitorios de un combo-slug (suma de cuentas; estudio → 0).
+  function nDormsDeSlug(slug) {
+    if (!slug || slug === "estudio") return 0;
+    return slug.split("+").reduce((acc, tok) => acc + (parseInt(tok.split("*")[1] || "1", 10) || 1), 0);
+  }
+
   // ─── Lectura del formulario → payload backend ─────────────────────────
   function leerFormulario() {
     const bloques = {
@@ -177,6 +215,13 @@
         } else {
           bloques[bloque][nombre] = inp.value;
         }
+      } else if (nombre === "tipos_unidad" || nombre === "mezcla_planta") {
+        // Inputs ocultos con valor JSON (array de combo-slugs). Se parsean como
+        // arrays (precedente de `patios`); corruptos → []. El backend fuerza [] en hotel.
+        let arr = [];
+        try { const p = JSON.parse(inp.value || "[]"); if (Array.isArray(p)) arr = p; }
+        catch (e) { /* JSON corrupto → sin tipos */ }
+        bloques[bloque][nombre] = arr;
       } else if (nombre === "patios") {
         // Patios: un objeto por fila { id, area_m2, vertices? }. La geometría
         // (polígono UTM) viaja en data-vertices de la fila; las filas nuevas sin
@@ -426,8 +471,10 @@
   }
 
   // Etiqueta legible de una tipología (busca en todos los conjuntos de opciones).
+  // Un combo-slug (con "*") es una combinación de dormitorios → etiqueta compuesta.
   function _labelTipologia(slug) {
     if (!slug) return null;
+    if (slug.includes("*")) return etiquetaDesdeSlug(slug);
     for (const set of Object.values(OPCIONES_TIPOLOGIA)) {
       if (set[slug]) return set[slug];
     }
@@ -872,20 +919,30 @@
     return Number.isFinite(n) && n > 0 ? n : 0;
   }
   // Nombre reactivo de la pestaña, derivado del programa elegido en el formulario.
+  // Cola reactiva de vivienda/apartamento: en modo inmueble, el nº de dormitorios;
+  // en obra nueva/rehab, el nº de unidades de la mezcla elegida (o «sin mezcla»).
+  function _colaProgramaDorms() {
+    if (esInmueble) {
+      const n = _nDorms();
+      return n <= 0 ? "Estudio" : (n + " dorm.");
+    }
+    if (ESTADO.mezclaPlanta && ESTADO.mezclaPlanta.mezcla && ESTADO.mezclaPlanta.mezcla.length) {
+      const n = ESTADO.mezclaPlanta.mezcla.length;
+      return n + (n === 1 ? " unidad" : " uds/planta");
+    }
+    const tipos = getTiposUnidadHidden();
+    return tipos.length ? (tipos.length + (tipos.length === 1 ? " tipo" : " tipos")) : "Sin definir";
+  }
   function nombreEscenario() {
     const uso = usoActivoForm();
     if (uso === "vivienda") {
-      const n = _nDorms();
-      if (n <= 0) return "Vivienda · Estudio";
-      return "Vivienda · " + n + (n === 1 ? " habitación" : " habitaciones");
+      return "Vivienda · " + _colaProgramaDorms();
     }
     if (uso === "apartamentos_turisticos") {
       const llaves = (form.querySelector('select[name="categoria_apartamentos"]')?.value || "").trim();
       const grupoVal = form.querySelector('select[name="grupo_apartamentos"]')?.value || "";
       const grupo = grupoVal === "conjuntos" ? "Conjunto" : "Edificio";
-      const n = _nDorms();
-      const cola = n <= 0 ? "Estudio" : (n + " dorm.");
-      return "Apartamento " + (llaves ? llaves + " · " : "") + grupo + " · " + cola;
+      return "Apartamento " + (llaves ? llaves + " · " : "") + grupo + " · " + _colaProgramaDorms();
     }
     if (uso === "hotelero") {
       const cat = _textoOpcion(form.querySelector('select[name="categoria_hotelero"]'));
@@ -1380,10 +1437,16 @@
     refrescarChipCombo();
   }
 
+  // Fila de tipología que abrió el modal (paradigma «por tipo»); null = uso legado.
+  let filaTipoActiva = null;
+
   async function abrirModalCombinaciones() {
     if (!modalTip) return;
     if (estado !== "ok") { mostrarToast("Localiza primero la parcela", true); return; }
-    const nDorms = Math.max(0, parseInt(inpNdorms && inpNdorms.value, 10) || 0);
+    // El nº de dormitorios sale del numberbox de la fila que abrió el modal (por tipo);
+    // en modo inmueble/legado cae a `#rc-apt-ndorms`.
+    const nInput = (filaTipoActiva && filaTipoActiva.querySelector(".rc-tipo-ndorms")) || inpNdorms;
+    const nDorms = Math.max(0, parseInt(nInput && nInput.value, 10) || 0);
     const bloques = leerFormulario();
     const sub = document.getElementById("rc-modal-tip-sub");
     const body = document.getElementById("rc-modal-tip-body");
@@ -1444,7 +1507,9 @@
       }
       for (const c of combos) {
         const tr = document.createElement("tr");
-        const elegida = ESTADO.comboDormitorios && ESTADO.comboDormitorios.slug === c.slug;
+        const elegida = filaTipoActiva
+          ? filaTipoActiva.dataset.combo === c.slug
+          : (ESTADO.comboDormitorios && ESTADO.comboDormitorios.slug === c.slug);
         tr.className = "rc-modal-tip-fila" + (elegida ? " rc-modal-tip-elegida" : "");
         tr.innerHTML =
           `<td>${c.etiqueta}</td>` +
@@ -1453,10 +1518,19 @@
           `<td class="rc-num"><strong>${fmt.int.format(c.n_unidades)}</strong></td>` +
           `<td><button type="button" class="boton-secundario rc-btn-pequeno rc-modal-tip-elegir">Elegir</button></td>`;
         tr.querySelector(".rc-modal-tip-elegir").addEventListener("click", () => {
-          fijarCombo({ slug: c.slug, etiqueta: c.etiqueta });
-          modalTip.close();
-          mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
-          pedirCalculo();
+          if (filaTipoActiva) {
+            // Paradigma «por tipo»: fija la ocupación de ESA tipología (no la global).
+            filaTipoActiva.dataset.combo = c.slug;
+            _pintarChipTipo(filaTipoActiva);
+            modalTip.close();
+            mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
+            sincronizarTiposDesdeFilas(true);
+          } else {
+            fijarCombo({ slug: c.slug, etiqueta: c.etiqueta });
+            modalTip.close();
+            mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
+            pedirCalculo();
+          }
         });
         body.appendChild(tr);
       }
@@ -1593,7 +1667,210 @@
     pedirCalculo();
   });
 
-  // Restaurar la combinación persistida del escenario (input oculto) al chip correcto.
+  // ─── Tipos de unidad + "Combinaciones por planta" (vivienda / apartamentos) ──
+  const contTipos = document.getElementById("rc-tipos-unidad");
+  const modalCP = document.getElementById("rc-modal-comb-planta");
+  const btnCombPlanta = document.getElementById("rc-btn-combinaciones-planta");
+  const btnAddTipo = document.getElementById("rc-btn-add-tipo");
+  const btnComboPlantaLimpiar = document.getElementById("rc-combo-planta-limpiar");
+
+  function refrescarChipMezcla() {
+    const box = document.getElementById("rc-combo-planta-elegido");
+    const txt = document.getElementById("rc-combo-planta-elegido-txt");
+    if (!box) return;
+    if (ESTADO.mezclaPlanta) { box.hidden = false; txt.textContent = ESTADO.mezclaPlanta.etiqueta; }
+    else { box.hidden = true; txt.textContent = ""; }
+  }
+
+  function fijarMezcla(m) {
+    ESTADO.mezclaPlanta = m;   // { mezcla:[...combo_slug], etiqueta } | null
+    setMezclaHidden(m ? m.mezcla : []);
+    if (m) {
+      // Al elegir mezcla, invalida la combinación homogénea legada para que no
+      // interfiera (el backend da prioridad a `mezcla_planta`; no debe llegar
+      // `combo_dormitorios` de una restauración antigua).
+      ESTADO.comboDormitorios = null;
+      setCombinacionHidden("");
+    }
+    refrescarChipMezcla();
+    actualizarNombreActivo();   // nombre reactivo de la pestaña (elegir/limpiar no pasan por el debounce)
+  }
+
+  // Pinta el chip de ocupación de una fila desde su `data-combo` (o placeholder).
+  function _pintarChipTipo(fila) {
+    const chip = fila.querySelector(".rc-tipo-combo-chip");
+    if (!chip) return;
+    const slug = fila.dataset.combo || "";
+    if (slug) {
+      chip.textContent = etiquetaDesdeSlug(slug);
+      chip.classList.remove("rc-tipo-combo-vacio");
+    } else {
+      chip.textContent = "— elige combinación";
+      chip.classList.add("rc-tipo-combo-vacio");
+    }
+  }
+
+  // Fila de tipo: numberbox (nº dormitorios) + botón «Ver combinaciones» (abre el modal
+  // de ocupaciones acotado a esta fila) + chip de la ocupación elegida + botón −. La
+  // ocupación elegida (combo-slug) se guarda en `data-combo`.
+  function crearFilaTipo(comboSlug) {
+    const n = nDormsDeSlug(comboSlug);
+    const fila = document.createElement("div");
+    fila.className = "rc-tipo-fila";
+    if (comboSlug) fila.dataset.combo = comboSlug;
+    fila.innerHTML =
+      `<label class="rc-tipo-ndorms-wrap"><span class="rc-tipo-ndorms-lbl">Dorms.</span>` +
+      `<input type="number" class="rc-tipo-ndorms" min="0" step="1" value="${n}" aria-label="Nº de dormitorios del tipo"></label>` +
+      `<button type="button" class="boton-secundario rc-btn-pequeno rc-tipo-vercomb">Ver combinaciones</button>` +
+      `<span class="rc-tipo-combo-chip"></span>` +
+      `<button type="button" class="rc-tip-quitar" aria-label="Eliminar tipo">−</button>`;
+    _pintarChipTipo(fila);
+    return fila;
+  }
+
+  // Reconstruye las filas desde el hidden (al menos una). Uso-dependiente.
+  function construirTiposDesdeHidden() {
+    if (!contTipos) return;
+    contTipos.innerHTML = "";
+    let tipos = getTiposUnidadHidden();
+    if (!tipos.length) tipos = ["doble*1"];   // un tipo por defecto para el uso activo
+    tipos.forEach(s => contTipos.appendChild(crearFilaTipo(s)));
+  }
+
+  // Filas → alfabeto distinto de combo-slugs (solo filas con ocupación elegida) → hidden.
+  // Si el alfabeto cambió, la mezcla elegida deja de ser válida y se limpia.
+  function sincronizarTiposDesdeFilas(recalc) {
+    if (!contTipos) return;
+    const slugs = [];
+    contTipos.querySelectorAll(".rc-tipo-fila").forEach(fila => {
+      const s = fila.dataset.combo;
+      if (s && !slugs.includes(s)) slugs.push(s);
+    });
+    const antes = JSON.stringify(getTiposUnidadHidden());
+    setTiposUnidadHidden(slugs);
+    if (JSON.stringify(slugs) !== antes && ESTADO.mezclaPlanta) fijarMezcla(null);
+    if (recalc) calcularConDebounce();
+  }
+
+  if (contTipos) {
+    // Cambiar el nº de dormitorios de una fila: estudio (0) tiene ocupación única y se
+    // autofija; N≥1 invalida la ocupación anterior (era de otro N) hasta elegir en el modal.
+    contTipos.addEventListener("change", ev => {
+      const fila = ev.target.closest(".rc-tipo-fila");
+      if (!fila || !ev.target.classList.contains("rc-tipo-ndorms")) return;
+      const n = Math.max(0, parseInt(ev.target.value, 10) || 0);
+      ev.target.value = n;
+      if (n === 0) fila.dataset.combo = "estudio";
+      else delete fila.dataset.combo;
+      _pintarChipTipo(fila);
+      sincronizarTiposDesdeFilas(true);
+    });
+    contTipos.addEventListener("click", ev => {
+      const verBtn = ev.target.closest(".rc-tipo-vercomb");
+      if (verBtn) {
+        filaTipoActiva = ev.target.closest(".rc-tipo-fila");
+        abrirModalCombinaciones();
+        return;
+      }
+      const quitar = ev.target.closest(".rc-tip-quitar");
+      if (quitar) {
+        // No dejar el edificio sin ningún tipo.
+        if (contTipos.querySelectorAll(".rc-tipo-fila").length <= 1) return;
+        const fila = quitar.closest(".rc-tipo-fila");
+        if (fila) fila.remove();
+        sincronizarTiposDesdeFilas(true);
+      }
+    });
+  }
+  if (btnAddTipo) btnAddTipo.addEventListener("click", () => {
+    if (!contTipos) return;
+    contTipos.appendChild(crearFilaTipo("doble*1"));
+    sincronizarTiposDesdeFilas(true);
+  });
+
+  async function abrirModalCombinacionesPorPlanta() {
+    if (!modalCP) return;
+    if (estado !== "ok") { mostrarToast("Localiza primero la parcela", true); return; }
+    sincronizarTiposDesdeFilas(false);   // hidden fresco antes del POST
+    const bloques = leerFormulario();
+    const sub = document.getElementById("rc-modal-cp-sub");
+    const body = document.getElementById("rc-modal-cp-body");
+    const vacio = document.getElementById("rc-modal-cp-vacio");
+    const nocaben = document.getElementById("rc-modal-cp-nocaben");
+    body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Calculando…</td></tr>';
+    vacio.hidden = true;
+    if (nocaben) nocaben.hidden = true;
+    if (typeof modalCP.showModal === "function") modalCP.showModal();
+    else modalCP.setAttribute("open", "");
+    try {
+      const resp = await fetch("/modulos/render-calculos/combinaciones-por-planta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bloques),
+      });
+      if (resp.status === 409) {
+        body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Localiza primero la parcela.</td></tr>';
+        return;
+      }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(err.detail || "Error")}</td></tr>`;
+        return;
+      }
+      const data = await resp.json();
+      if (data.error) {
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(data.error)}</td></tr>`;
+        return;
+      }
+      sub.textContent = `Mezclas de unidades que caben en una planta de ${fmt.m2.format(data.util_planta_m2)} m² útiles.`;
+      const combos = data.combinaciones || [];
+      const noCabenTipos = data.no_caben_tipos || [];
+      const noMostradas = data.no_mostradas || 0;
+      if (nocaben && (noCabenTipos.length || noMostradas)) {
+        const partes = [];
+        if (noCabenTipos.length) {
+          partes.push(`No caben ni una vez en la planta: ${noCabenTipos.map(s => etiquetaDesdeSlug(s)).join(", ")}`);
+        }
+        if (noMostradas) partes.push(`${noMostradas} combinación(es) adicionales no mostradas`);
+        nocaben.hidden = false;
+        nocaben.textContent = partes.join(". ") + ".";
+      }
+      body.innerHTML = "";
+      if (!combos.length) { vacio.hidden = false; return; }
+      const mezclaves = ESTADO.mezclaPlanta
+        ? JSON.stringify([...ESTADO.mezclaPlanta.mezcla].sort()) : null;
+      for (const c of combos) {
+        const tr = document.createElement("tr");
+        const elegida = mezclaves && JSON.stringify([...(c.mezcla || [])].sort()) === mezclaves;
+        tr.className = "rc-modal-tip-fila" + (elegida ? " rc-modal-tip-elegida" : "");
+        tr.innerHTML =
+          `<td>${escapeHtml(c.etiqueta)}</td>` +
+          `<td class="rc-num"><strong>${fmt.int.format(c.unidades_por_planta)}</strong></td>` +
+          `<td class="rc-num">${fmt.int.format(c.plazas_por_planta)}</td>` +
+          `<td class="rc-num">${fmt.m2.format(c.util_usado_m2)} m²</td>` +
+          `<td><button type="button" class="boton-secundario rc-btn-pequeno rc-modal-tip-elegir">Elegir</button></td>`;
+        tr.querySelector(".rc-modal-tip-elegir").addEventListener("click", () => {
+          fijarMezcla({ mezcla: c.mezcla, etiqueta: c.etiqueta });
+          modalCP.close();
+          mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
+          pedirCalculo();
+        });
+        body.appendChild(tr);
+      }
+    } catch (e) {
+      body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Error de red</td></tr>';
+    }
+  }
+
+  if (btnCombPlanta) btnCombPlanta.addEventListener("click", abrirModalCombinacionesPorPlanta);
+  const btnModalCPCerrar = document.getElementById("rc-modal-cp-cerrar");
+  if (btnModalCPCerrar && modalCP) btnModalCPCerrar.addEventListener("click", () => modalCP.close());
+  if (btnComboPlantaLimpiar) btnComboPlantaLimpiar.addEventListener("click", () => {
+    fijarMezcla(null);
+    pedirCalculo();
+  });
+
+  // Restaurar la combinación persistida del escenario (inputs ocultos) al chip correcto.
   (function restaurarCombinacion() {
     const slug = getCombinacionHidden();
     if (slug) {
@@ -1601,18 +1878,38 @@
       if (usoActivoForm() === "hotelero") ESTADO.comboHotel = combo;
       else ESTADO.comboDormitorios = combo;
     }
+    // Mezcla POR PLANTA (vivienda / apartamentos): restaura estado + reconstruye filas.
+    const uso = usoActivoForm();
+    if (uso === "vivienda" || uso === "apartamentos_turisticos") {
+      const mezcla = getMezclaHidden();
+      if (mezcla.length) ESTADO.mezclaPlanta = { mezcla, etiqueta: etiquetaMezcla(mezcla) };
+    }
+    construirTiposDesdeHidden();
+    if (!esInmueble && (uso === "vivienda" || uso === "apartamentos_turisticos")) {
+      sincronizarTiposDesdeFilas(false);   // fija el hidden si venía vacío (fila por defecto)
+    }
     refrescarChipCombo();
     refrescarChipComboHotel();
+    refrescarChipMezcla();
   })();
 
-  // Cambiar el USO invalida la combinación (era de otro uso): limpia ambos chips.
+  // Cambiar el USO invalida la combinación (era de otro uso): limpia chips + hidden.
   const selUsoCombo = form.querySelector('select[name="uso"]');
   if (selUsoCombo) selUsoCombo.addEventListener("change", () => {
     ESTADO.comboDormitorios = null;
     ESTADO.comboHotel = null;
+    ESTADO.mezclaPlanta = null;
     setCombinacionHidden("");
+    setMezclaHidden([]);
+    setTiposUnidadHidden([]);
+    construirTiposDesdeHidden();   // rearma una fila por defecto para el nuevo uso
+    const uso = usoActivoForm();
+    if (!esInmueble && (uso === "vivienda" || uso === "apartamentos_turisticos")) {
+      sincronizarTiposDesdeFilas(false);
+    }
     refrescarChipCombo();
     refrescarChipComboHotel();
+    refrescarChipMezcla();
   });
 
   // ─── Modal "Superficies mínimas de estancias" (vivienda · Normativa) ──

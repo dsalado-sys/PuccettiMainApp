@@ -225,6 +225,17 @@ class ParametrosPrograma:
     #     en cada planta), p. ej. "doble*2+individual*1".
     # Vacía ("") = reparto automático. Persistida por escenario.
     combinacion: str = ""
+    # Tipos de unidad para la mezcla POR PLANTA (vivienda / apartamentos turísticos):
+    # ALFABETO de combo-slugs distintos, cada uno una combinación de dormitorios
+    # ("doble*1", "doble*1+individual*1", "estudio"). Análogo a las tipologías de
+    # habitación de hotel, pero de dormitorios. Necesario para enumerar y para pintar
+    # la UI antes de elegir mezcla. Hotel siempre lo deja vacío.
+    tipos_unidad: list[str] = field(default_factory=list)
+    # Mezcla elegida por el arquitecto: UN combo-slug POR UNIDAD (lista plana). Mapea
+    # 1:1 a `composicion_planta_forzada`. Es el análogo vivienda/apt del `combinacion`
+    # de hotel (que no puede codificar este multiconjunto por la colisión de los
+    # separadores del slug). Vacía = reparto homogéneo (compat) o sin elegir.
+    mezcla_planta: list[str] = field(default_factory=list)
     # Reservas de planta baja en m² ABSOLUTOS (antes eran % del útil de PB). Se
     # descuentan del útil de la PB, acotadas a lo disponible.
     local_pb_m2: float = 0.0                        # m² PB destinados a local no residencial
@@ -423,6 +434,8 @@ def _programa_a_dict(prog: ParametrosPrograma) -> dict[str, Any]:
         "salon_cocina_open": prog.salon_cocina_open,
         "tipologias_extra": list(prog.tipologias_extra),
         "combinacion": prog.combinacion,
+        "tipos_unidad": list(prog.tipos_unidad),
+        "mezcla_planta": list(prog.mezcla_planta),
         "local_pb_m2": prog.local_pb_m2,
         "otros_pb_m2": prog.otros_pb_m2,
         "usos_comunes_pb_m2": prog.usos_comunes_pb_m2,
@@ -572,6 +585,44 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             if not combo.composicion or all(k in slugs_validos for k in combo.composicion):
                 combinacion = combo.slug
 
+        # Tipos de unidad + mezcla POR PLANTA (vivienda / apartamentos). Se validan
+        # contra los TAMAÑOS de dormitorio del uso (no el alfabeto de `tipologias_extra`,
+        # que son nº de dormitorios): vivienda {individual, doble}; apartamentos
+        # {individual, doble, triple, cuadruple}; estudio (composición vacía) siempre.
+        # Hotel fuerza ambos a []. Invariante autosanante: `tipos_unidad =
+        # distinct(canon(tipos) ∪ canon(mezcla))`; `mezcla_planta` referencia solo
+        # tipos existentes. Acepta lista JSON o string suelto; claves ausentes → [].
+        if uso == UsoEdificio.VIVIENDA:
+            tam_validos = {"individual", "doble"}
+        elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+            tam_validos = {"individual", "doble", "triple", "cuadruple"}
+        else:
+            tam_validos = set()
+
+        def _canon_combo(s: Any) -> str | None:
+            if not isinstance(s, str) or not s:
+                return None
+            combo = slug_a_combo(s)
+            if combo.composicion and not all(k in tam_validos for k in combo.composicion):
+                return None
+            return combo.slug
+
+        def _lista(raw: Any) -> list[str]:
+            if isinstance(raw, list):
+                return [x for x in raw if isinstance(x, str)]
+            if isinstance(raw, str) and raw:
+                return [raw]
+            return []
+
+        if uso == UsoEdificio.HOTELERO or not tam_validos:
+            tipos_unidad: list[str] = []
+            mezcla_planta: list[str] = []
+        else:
+            tipos_canon = [c for c in (_canon_combo(s) for s in _lista(node.get("tipos_unidad"))) if c]
+            mezcla_canon = [c for c in (_canon_combo(s) for s in _lista(node.get("mezcla_planta"))) if c]
+            tipos_unidad = list(dict.fromkeys(tipos_canon + mezcla_canon))
+            mezcla_planta = [c for c in mezcla_canon if c in tipos_unidad]
+
         return ParametrosPrograma(
             uso=uso,
             categoria_vivienda=cat,
@@ -583,6 +634,8 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             salon_cocina_open=_b(node, "salon_cocina_open", base_prog.salon_cocina_open),
             tipologias_extra=tip_extra,
             combinacion=combinacion,
+            tipos_unidad=tipos_unidad,
+            mezcla_planta=mezcla_planta,
             local_pb_m2=max(0.0, _f(node, "local_pb_m2", base_prog.local_pb_m2)),
             otros_pb_m2=max(0.0, _f(node, "otros_pb_m2", base_prog.otros_pb_m2)),
             usos_comunes_pb_m2=max(0.0, _f(node, "usos_comunes_pb_m2", base_prog.usos_comunes_pb_m2)),

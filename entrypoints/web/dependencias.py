@@ -37,7 +37,15 @@ from app.contextos.proyectos.casos_uso import (
     ObtenerProyecto,
 )
 from app.contextos.proyectos.puertos import ProyectoRepositorio
-from app.contextos.usuarios.casos_uso import AutenticarUsuario
+from app.contextos.usuarios.casos_uso import (
+    AutenticarUsuario,
+    CambiarActivo,
+    CambiarContraseña,
+    CambiarRol,
+    CrearUsuario,
+    EliminarUsuario,
+    ListarUsuarios,
+)
 from app.contextos.usuarios.dominio import Usuario
 from app.contextos.usuarios.puertos import UsuarioRepositorio
 from app.nucleo.modelo import Proyecto, Rol
@@ -53,7 +61,7 @@ COOKIE_PARCELA = "puccetti_parcela_temp"
 # Defensa en profundidad: si por algún camino se llegara sin usuario en sesión
 # (el middleware `seguridad_http` ya lo evita), se asume el rol de MENOR
 # privilegio, no el máximo.
-ROL_POR_DEFECTO = Rol.INVERSOR
+ROL_POR_DEFECTO = Rol.CLIENTE
 
 def _en_produccion() -> bool:
     """True si la app corre en modo producción (PUCCETTI_ENV=prod)."""
@@ -180,6 +188,43 @@ def autenticar_usuario_uc(
     repo: UsuarioRepositorio = Depends(repositorio_usuarios),
 ) -> AutenticarUsuario:
     return AutenticarUsuario(repo=repo)
+
+
+# ── Gestión de usuarios (módulo superadmin) ────────────────────────────────
+def listar_usuarios_uc(
+    repo: UsuarioRepositorio = Depends(repositorio_usuarios),
+) -> ListarUsuarios:
+    return ListarUsuarios(repo=repo)
+
+
+def crear_usuario_uc(
+    repo: UsuarioRepositorio = Depends(repositorio_usuarios),
+) -> CrearUsuario:
+    return CrearUsuario(repo=repo)
+
+
+def cambiar_rol_uc(
+    repo: UsuarioRepositorio = Depends(repositorio_usuarios),
+) -> CambiarRol:
+    return CambiarRol(repo=repo)
+
+
+def cambiar_activo_uc(
+    repo: UsuarioRepositorio = Depends(repositorio_usuarios),
+) -> CambiarActivo:
+    return CambiarActivo(repo=repo)
+
+
+def cambiar_contraseña_uc(
+    repo: UsuarioRepositorio = Depends(repositorio_usuarios),
+) -> CambiarContraseña:
+    return CambiarContraseña(repo=repo)
+
+
+def eliminar_usuario_uc(
+    repo: UsuarioRepositorio = Depends(repositorio_usuarios),
+) -> EliminarUsuario:
+    return EliminarUsuario(repo=repo)
 
 
 def usuario_actual(

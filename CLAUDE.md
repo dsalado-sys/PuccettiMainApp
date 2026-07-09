@@ -70,12 +70,14 @@ ModuloPuccetti, Rol, PermisoModulo, MATRIZ_PERMISOS, puede_acceder`. `acceso`,
 
 ## Roles y permisos
 `nucleo/modelo/rol.py` es la **única fuente de verdad de autorización**:
-- `Rol(str,Enum)`: `arquitecto, financiero, inversor`. `PermisoModulo`: `ver, editar`.
+- `Rol(str,Enum)`: `arquitecto, financiero, cliente` (roles de negocio) + `superadmin`
+  (rol **técnico**: cuenta administrativa, no de negocio). `PermisoModulo`: `ver, editar`.
 - `MATRIZ_PERMISOS: dict[Rol, dict[slug_str, frozenset[PermisoModulo]]]` — **la clave
   de módulo es un slug `str` (= `ModuloPuccetti.value`), NO el enum**; por eso los
-  llamantes pasan `ModuloPuccetti.X.value`. ARQUITECTO: VER+EDITAR en los 7.
-  FINANCIERO: VER+EDITAR en viabilidad/informe, VER en otros, sin acceso a modelos_planos.
-  INVERSOR: VER en todos salvo modelos_planos; nunca EDITAR.
+  llamantes pasan `ModuloPuccetti.X.value`. ARQUITECTO: VER+EDITAR en los de negocio.
+  FINANCIERO: **solo** proyectos (VER) e informe (VER+EDITAR). CLIENTE: **solo**
+  informe (VER, lectura). SUPERADMIN: **solo** `gestion_usuarios` (VER+EDITAR). El
+  fail-closed oculta el resto → el rail/hub muestran únicamente lo permitido por rol.
 - `puede_acceder(rol, slug, permiso=VER)->bool` (lo usan las rutas). `acceso(rol,
   slug)->AccesoModulo(modulo, puede_ver, puede_editar)` (lo llama `rutas/menu.py`
   para pintar tarjetas; la plantilla recibe el objeto, no importa la función).
@@ -215,6 +217,9 @@ subreferencia; usa ESCatastroLib + REST.
   `/minimos/{uso}[/reset]`, `POST /export.csv`. `POST /escenarios` (antes `/guardar`) persiste
   la LISTA de escenarios/pestañas del modo activo (ver §Persistencia render).
 - **normativa_municipal** `/modulos/normativa-municipal`: CRUD carpetas + normativas archivadas.
+- **gestion_usuarios** `/modulos/gestion-usuarios` (solo SUPERADMIN): `GET ''` (pantalla),
+  `POST /crear`, `POST /{id}/{rol|activo|contrasena|eliminar}`. Server-rendered (forms
+  POST + redirect con flash). El superadmin aterriza aquí desde `/` (redirect en `menu.py`).
 - **modulos** `/modulos`: solo `GET /modulos/informe` (stub). `modelos_planos` no tiene ruta.
 
 ## Tests

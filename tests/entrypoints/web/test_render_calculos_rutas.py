@@ -89,7 +89,7 @@ def test_escenarios_roundtrip_persiste_y_refleja_activo(cliente_autenticado, eng
 def test_escenarios_requiere_edicion(cliente_autenticado, engine_memoria):
     _engine, session_factory = engine_memoria
     pid = _sembrar_proyecto_con_parcela(session_factory)
-    c = cliente_autenticado(Rol.INVERSOR)   # solo VER
+    c = cliente_autenticado(Rol.CLIENTE)   # sin acceso a render → 403
     c.cookies.set("puccetti_proyecto", pid)
 
     body = {"modo": "obra-nueva", "activo": "e1",
@@ -133,6 +133,78 @@ def test_combinaciones_hotel_sin_proyecto_no_sirve(cliente_autenticado, engine_m
     r = c.post("/modulos/render-calculos/combinaciones-hotel",
                json=_params_uso("hotelero"), follow_redirects=False)
     assert r.status_code in (303, 307, 409)
+
+
+def test_combinaciones_por_planta_vivienda(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto_con_contorno(session_factory)
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set("puccetti_proyecto", pid)
+
+    payload = _params_uso("vivienda")
+    payload["programa"] = {"uso": "vivienda", "tipos_unidad": ["doble*1", "doble*1+individual*1"]}
+    payload["urbanisticos"] = {"coeficiente_edificabilidad": 3.0, "n_plantas_max": 4,
+                               "ocupacion_maxima_pct": 100.0}
+    r = c.post("/modulos/render-calculos/combinaciones-por-planta", json=payload)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["util_planta_m2"] > 0
+    assert data["combinaciones"]
+    for combo in data["combinaciones"]:
+        assert combo["unidades_por_planta"] == len(combo["mezcla"])
+        assert set(combo["composicion"]) == {"doble*1", "doble*1+individual*1"}
+
+
+def test_combinaciones_por_planta_apartamentos(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto_con_contorno(session_factory)
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set("puccetti_proyecto", pid)
+
+    payload = _params_uso("apartamentos_turisticos")
+    payload["programa"] = {"uso": "apartamentos_turisticos", "categoria_apartamentos": "2L",
+                           "grupo_apartamentos": "edificios", "tipos_unidad": ["estudio", "doble*2"]}
+    payload["urbanisticos"] = {"coeficiente_edificabilidad": 3.0, "n_plantas_max": 4,
+                               "ocupacion_maxima_pct": 100.0}
+    r = c.post("/modulos/render-calculos/combinaciones-por-planta", json=payload)
+    assert r.status_code == 200, r.text
+    assert r.json()["combinaciones"]
+
+
+def test_combinaciones_por_planta_sin_tipos_error(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto_con_contorno(session_factory)
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set("puccetti_proyecto", pid)
+    payload = _params_uso("vivienda")
+    payload["programa"] = {"uso": "vivienda", "tipos_unidad": []}
+    payload["urbanisticos"] = {"coeficiente_edificabilidad": 3.0, "n_plantas_max": 4,
+                               "ocupacion_maxima_pct": 100.0}
+    r = c.post("/modulos/render-calculos/combinaciones-por-planta", json=payload)
+    assert r.status_code == 200, r.text
+    assert r.json().get("error")
+    assert r.json()["combinaciones"] == []
+
+
+def test_mezcla_planta_persiste_por_escenario(cliente_autenticado, engine_memoria):
+    _engine, session_factory = engine_memoria
+    pid = _sembrar_proyecto_con_parcela(session_factory)
+    c = cliente_autenticado(Rol.ARQUITECTO)
+    c.cookies.set("puccetti_proyecto", pid)
+
+    params = _params_uso("vivienda")
+    params["programa"]["tipos_unidad"] = ["doble*1", "doble*1+individual*1"]
+    params["programa"]["mezcla_planta"] = ["doble*1", "doble*1+individual*1"]
+    body = {"modo": "obra-nueva", "activo": "e1",
+            "escenarios": [{"id": "e1", "nombre": "V", "parametros": params, "resumen": {}}]}
+    assert c.post("/modulos/render-calculos/escenarios", json=body).status_code == 200
+
+    # El GET del escenario renderiza los inputs ocultos con la mezcla persistida.
+    resp = c.get("/modulos/render-calculos?modo=obra-nueva&escenario=e1")
+    assert resp.status_code == 200
+    assert 'id="rc-tipos-unidad-hidden"' in resp.text
+    assert 'id="rc-mezcla-planta-hidden"' in resp.text
+    assert "doble*1+individual*1" in resp.text
 
 
 def test_combinacion_persiste_por_escenario(cliente_autenticado, engine_memoria):

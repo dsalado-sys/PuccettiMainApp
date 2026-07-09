@@ -59,6 +59,11 @@
           <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/>
           <path d="M10 17l5-5-5-5M15 12H3"/>
         </symbol>
+        <symbol id="icono-usuarios" viewBox="0 0 24 24">
+          <circle cx="9" cy="8" r="3.2"/>
+          <path d="M3.5 20a5.5 5.5 0 0 1 11 0"/>
+          <path d="M16 5.2a3.2 3.2 0 0 1 0 6M17.5 14.6A5.5 5.5 0 0 1 20.5 20"/>
+        </symbol>
       </g>
     </defs>
   </svg>
@@ -93,12 +98,12 @@
     <nav class="rail-nav">
       {% for item in shell.nav_items %}
         {% if item.acceso.puede_ver %}
-          <a class="rail-item {% if item.activo %}rail-item--activo{% endif %}{% if not item.disponible %} rail-item--bloqueado{% endif %}"
+          <a class="rail-item {% if item.activo %}rail-item--activo{% endif %}"
              href="{{ item.modulo.ruta }}"
              title="{{ item.modulo.titulo }}"
              {% if item.requiere_proyecto %}data-requiere-proyecto="1"{% endif %}
              {% if item.activo %}aria-current="page"{% endif %}
-             {% if not item.disponible %}aria-disabled="true" tabindex="-1"{% endif %}>
+             {% if not item.disponible %}hidden{% endif %}>
             <svg class="rail-icono" aria-hidden="true"><use href="#{{ item.modulo.icono }}"></use></svg>
             <span class="rail-label">{{ item.modulo.titulo }}</span>
           </a>

@@ -264,6 +264,46 @@ pero de **unidades enteras por planta**, no de dormitorios dentro de una unidad)
 - Endpoint `POST /modulos/render-calculos/combinaciones-hotel`; caso de uso
   `CalcularCombinacionesHotel`. Detalle de decisiones en memoria `project_combinaciones_hotel`.
 
+### 1.10 Tipos de unidad + combinaciones POR PLANTA (vivienda / apartamentos)
+
+Desde 2026-07-09 vivienda y apartamento turístico usan el MISMO paradigma que hotel
+(§1.9), pero con tipos de unidad = **combinaciones de dormitorios** en vez de
+habitaciones. **Reemplaza** el flujo homogéneo anterior (un nº de dormitorios + una
+combinación → edificio homogéneo); el caso homogéneo pasa a ser «1 solo tipo».
+
+- **Dos campos nuevos** en `ParametrosPrograma` (`parametros.py`): `tipos_unidad`
+  (alfabeto de combo-slugs distintos: `"doble*1"`, `"doble*1+individual*1"`,
+  `"estudio"`) y `mezcla_planta` (lista PLANA, un combo-slug POR UNIDAD, mapeo 1:1 a
+  `composicion_planta_forzada`). Se validan contra los TAMAÑOS de dormitorio del uso
+  (vivienda {individual, doble}; apartamentos {+triple, cuadruple}; estudio siempre);
+  **hotel los fuerza a []**. Invariante autosanante: `tipos_unidad =
+  distinct(canon(tipos) ∪ canon(mezcla))` y `mezcla_planta` referencia solo tipos
+  existentes. NO se propagan a `programa_tipo` (concepto de edificio). Round-trippean
+  por `/escenarios` vía dos `<input hidden … | tojson>` en el panel.
+- **Sin cambios de motor** (`geometria/`): el hallazgo clave es que
+  `_colocar_composicion_forzada`, `tabla_unidad_desde_capacidad` +
+  `_estancias_por_unidad_dorms` (`es_slug_combo` → `programa_vivienda_combo` /
+  `programa_apartamentos_combo`) y la adaptación DB-SUA ya tratan combo-slugs de punta
+  a punta. Alimentar `composicion_planta_forzada` con combo-slugs basta.
+- `CalcularCombinacionesHotel` → **`CalcularCombinacionesPorPlanta`** con despacho por
+  uso (hotel = alias/subclase fina, esquema de salida idéntico). En vivienda/apt la
+  fila NO lleva `slug` (colisiona con los separadores del combo-slug al llamar `.slug`
+  sobre `ComboDormitorios({combo_slug: count})`): se identifica por `mezcla` (lista
+  plana) + `composicion` + `etiqueta` (`_etiqueta_mezcla_dorms`). Sizer del enumerador
+  = sizer de la colocación (`_composicion_planta_dorms`) para evitar drift.
+- Ruta nueva `POST /combinaciones-por-planta` (BC: `/combinaciones-hotel` sigue).
+- **Preview antes de elegir mezcla**: pendiente (§2.5 del plan, «paridad de
+  descriptores»); hasta elegir una mezcla el layout cae al homogéneo por defecto (2d
+  vivienda / doble apt). No bloquea el flujo.
+- Frontend: bloque «Tipos de unidad» — **cada fila = numberbox (nº dormitorios) + botón
+  «Ver combinaciones»** que abre el modal existente `_rc_modal_tipologias`
+  (`abrirModalCombinaciones` + `POST /tipologias-dormitorios`) **acotado a esa fila** (fija su
+  ocupación en `data-combo`, no la combinación global) + chip. Decisión del arquitecto
+  (2026-07-09): mantener el patrón numberbox+modal por tipología, no un desplegable de
+  ocupación. La mezcla por planta: botón «Ver combinaciones por planta» + modal
+  `_rc_modal_combinaciones_planta.html`. `render_calculos.js` con estado `mezclaPlanta`,
+  `filaTipoActiva`, restauración y limpieza por uso.
+
 ---
 
 ## 2. Reglas vigentes (transversales — no romper sin decisión del arquitecto)
@@ -327,6 +367,7 @@ pero de **unidades enteras por planta**, no de dormitorios dentro de una unidad)
 | Patios: N editables, base/efectiva, prioridad, bloqueo, fusión, zoom, edición en sitio | **COMPLETO** (trabajo de `render-dev`, ya integrado en `dev`→`pre`→esta rama) |
 | Escenarios (pestañas): alta/baja/conmutación, nombre reactivo, persistencia por modo (§1.8) | **COMPLETO** (2026-07-06) |
 | Combinaciones de tipologías POR PLANTA (hotel) + persistencia de la combinación elegida (todos los usos) | **COMPLETO** (2026-07-08, §1.9) |
+| Tipos de unidad + combinaciones POR PLANTA (vivienda / apartamentos) — reemplaza el flujo homogéneo | **COMPLETO** (2026-07-09, §1.10; preview pre-mezcla pendiente) |
 | **Disposición geométrica de UNIDADES en planta** (rebanadas, núcleo, pasillos) | **NO EXISTE** — `"edificio": None` explícito en `CalcularLayout`/`CalcularEnvolvente` (`casos_uso.py`, comentario "render geométrico en backlog") |
 | **Geometría de estancias dentro de la unidad** (polígonos por estancia) | **NO EXISTE** |
 | Canvas: dibujo de unidades/núcleo/pasillos | Código YA escrito en `rc_canvas.js` (`_dibujarNucleo`, `_etiquetaUnidad`), **inerte** a la espera del contrato `edificio` |
@@ -380,6 +421,17 @@ pero de **unidades enteras por planta**, no de dormitorios dentro de una unidad)
 > en `git log`; aquí solo el resumen operativo. El "cómo funciona hoy" de cada pieza está
 > en §1 (con su propia subsección) y §2 (reglas), no hace falta repetirlo aquí.
 
+- **2026-07-09** — **Tipos de unidad + combinaciones POR PLANTA para vivienda y
+  apartamento turístico** (reemplaza el flujo homogéneo). Ver §1.10. Piezas:
+  `ParametrosPrograma.tipos_unidad`/`mezcla_planta` (`parametros.py`),
+  `CalcularLayout._composicion_planta_dorms` + rama en `ejecutar`,
+  `CalcularCombinacionesHotel`→`CalcularCombinacionesPorPlanta` (despacho por uso, hotel
+  = alias), `_etiqueta_mezcla_dorms`, ruta `POST /combinaciones-por-planta`, panel «Tipos
+  de unidad» + `_rc_modal_combinaciones_planta.html` + `render_calculos.js`. **Sin cambios
+  de motor** (`geometria/` ya trata combo-slugs). Tests nuevos:
+  `test_combinaciones_por_planta.py`, ampliación de `test_combinacion_persistencia.py` y
+  rutas. **390 tests** (antes 370). Pendiente: paridad del preview antes de elegir mezcla
+  (§2.5 del plan).
 - **2026-07-08** — **Combinaciones de tipologías POR PLANTA (hotel) + persistencia de la
   combinación (todos los usos).** Ver §1.9 para el funcionamiento vigente. Piezas:
   `enumerar_combinaciones_por_area` (`combinador_tipologias.py`),

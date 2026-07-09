@@ -131,9 +131,9 @@ def test_documento_proyecto_inexistente_da_404(cliente_autenticado):
     assert c.get("/modulos/informe/no-existe/documento").status_code == 404
 
 
-def test_documento_inversor_puede_ver(cliente_autenticado, engine_memoria):
+def test_documento_cliente_puede_ver(cliente_autenticado, engine_memoria):
     _engine, sf = engine_memoria
     pid = _sembrar(sf, rc="RC-INV", LOCALIZACION=_LOC)
-    c = cliente_autenticado(Rol.INVERSOR)  # INVERSOR tiene VER en informe
+    c = cliente_autenticado(Rol.CLIENTE)  # CLIENTE tiene VER en informe
     c.cookies.set(*_COOKIE)
     assert c.get(f"/modulos/informe/{pid}/documento").status_code == 200
