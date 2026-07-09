@@ -82,6 +82,7 @@ MODULOS_SIN_PROYECTO: frozenset[str] = frozenset({
     ModuloPuccetti.PROYECTOS.value,
     ModuloPuccetti.NORMATIVA_MUNICIPAL.value,
     ModuloPuccetti.LOCALIZACION.value,
+    ModuloPuccetti.INFORME.value,
     ModuloPuccetti.GESTION_USUARIOS.value,
 })
 

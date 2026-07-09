@@ -84,3 +84,16 @@
 .pr-campo-label { font-size: var(--text-eyebrow); color: var(--on-surface-secondary); }
 
 .pr-aviso-rol { margin-top: 20px; }
+
+/* ─── Modal «Eliminar carpeta»: las dos opciones explicadas ───────────── */
+.pr-borrar-opciones {
+  list-style: none; margin: 14px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.pr-borrar-opciones li {
+  border: 1px solid var(--outline-subtle); border-radius: var(--radius-sm);
+  padding: 10px 12px; font-size: var(--text-base); color: var(--on-surface-body); line-height: 1.45;
+}
+.pr-borrar-opciones strong { color: var(--on-surface); }
+.pr-borrar-opcion-tit { display: block; font-weight: 600; color: var(--on-surface); margin-bottom: 2px; }
+.pr-borrar-opcion-tit--peligro { color: var(--error); }

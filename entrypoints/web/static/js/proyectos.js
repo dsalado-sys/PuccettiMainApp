@@ -175,10 +175,7 @@
     const btnDel = sum.querySelector(".pr-btn-borrar-carpeta");
     if (btnDel) btnDel.addEventListener("click", ev => {
       ev.preventDefault(); ev.stopPropagation();
-      pedirConfirmacion(
-        `¿Eliminar la carpeta "${g.nombre}"? Sus proyectos no se borran: pasan a «Sin carpeta».`,
-        () => eliminarCarpeta(g.key),
-      );
+      abrirModalBorrarCarpeta(g.key, g.nombre, proyectosDeCarpeta(g.key).length);
     });
 
     const ul = document.createElement("ul");
@@ -380,12 +377,64 @@
     await cargarDatos();
   }
 
+  // Abre el modal de eliminar carpeta con sus dos opciones. «Solo la carpeta»
+  // desvincula los proyectos (a «Sin carpeta»); «carpeta y proyectos» pide una
+  // segunda confirmación antes del borrado en cascada (irreversible).
+  function abrirModalBorrarCarpeta(carpetaId, nombre, nProyectos) {
+    const nomEl = document.getElementById("pr-borrar-carpeta-nombre");
+    const cuentaEl = document.getElementById("pr-borrar-carpeta-cuenta");
+    if (nomEl) nomEl.textContent = nombre;
+    if (cuentaEl) {
+      cuentaEl.textContent = nProyectos
+        ? ` (contiene ${nProyectos} ${nProyectos === 1 ? "proyecto" : "proyectos"})`
+        : " (está vacía)";
+    }
+    const soloBtn = document.getElementById("pr-borrar-carpeta-solo");
+    const conBtn = document.getElementById("pr-borrar-carpeta-con");
+    if (!soloBtn || !conBtn) return;
+    // Clonar para reiniciar los listeners en cada apertura (misma técnica que
+    // pedirConfirmacion): evita acumular handlers de carpetas anteriores.
+    const solo2 = soloBtn.cloneNode(true);
+    soloBtn.parentNode.replaceChild(solo2, soloBtn);
+    solo2.addEventListener("click", () => {
+      cerrar("pr-submodal-borrar-carpeta");
+      eliminarCarpeta(carpetaId);
+    });
+    const con2 = conBtn.cloneNode(true);
+    conBtn.parentNode.replaceChild(con2, conBtn);
+    // Si la carpeta está vacía, «carpeta y proyectos» no aporta nada: se desactiva.
+    con2.disabled = !nProyectos;
+    con2.addEventListener("click", () => {
+      cerrar("pr-submodal-borrar-carpeta");
+      const detalle = nProyectos === 1
+        ? `Se borrarán la carpeta "${nombre}" y su único proyecto.`
+        : `Se borrarán la carpeta "${nombre}" y sus ${nProyectos} proyectos.`;
+      pedirConfirmacion(
+        `${detalle} Esta acción no se puede deshacer.`,
+        () => eliminarCarpetaConProyectos(carpetaId),
+      );
+    });
+    abrir("pr-submodal-borrar-carpeta");
+  }
+
   async function eliminarCarpeta(carpetaId) {
     const resp = await fetchSeguro(`${API}/carpetas/${carpetaId}`, { method: "DELETE" });
     if (!resp.ok) { mostrarToast("No se pudo eliminar la carpeta", true); return; }
     STATE.abiertas.delete(carpetaId);
     mostrarToast("Carpeta eliminada");
     await cargarDatos();
+  }
+
+  async function eliminarCarpetaConProyectos(carpetaId) {
+    const resp = await fetchSeguro(
+      `${API}/carpetas/${carpetaId}?con_proyectos=true`, { method: "DELETE" }
+    );
+    if (!resp.ok) { mostrarToast("No se pudieron eliminar la carpeta y sus proyectos", true); return; }
+    STATE.abiertas.delete(carpetaId);
+    mostrarToast("Carpeta y proyectos eliminados");
+    await cargarDatos();
+    // El backend pudo borrar el proyecto activo (y su cookie): sincronizar el rail.
+    actualizarRail(!!STATE.activoId);
   }
 
   // ─── Acciones: crear proyecto ────────────────────────────────────────
