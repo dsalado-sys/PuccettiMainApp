@@ -13,7 +13,10 @@ from enum import Enum
 class Rol(str, Enum):
     ARQUITECTO = "arquitecto"
     FINANCIERO = "financiero"
-    INVERSOR = "inversor"
+    CLIENTE = "cliente"
+    # Rol técnico: cuenta administrativa que solo gestiona usuarios. No es un rol
+    # de negocio y no debe asignarse a cuentas normales (ver contexto usuarios).
+    SUPERADMIN = "superadmin"
 
 
 class PermisoModulo(str, Enum):
@@ -32,6 +35,7 @@ MODULOS = (
     "informe",              # §2.10 — informe PDF / DXF
     "proyectos",            # §2.11 — gestión de proyectos
     "normativa_municipal",  # PGOU + carpetas y normativas archivadas
+    "gestion_usuarios",     # administración de usuarios (solo superadmin)
 )
 
 
@@ -40,30 +44,40 @@ MODULOS = (
 MATRIZ_PERMISOS: dict[Rol, dict[str, frozenset[PermisoModulo]]] = {
     Rol.ARQUITECTO: {
         "localizacion":        frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
-        "viabilidad":          frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "viabilidad":          frozenset(),# frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
         "render_calculos":     frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
         "modelos_planos":      frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
         "informe":             frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
         "proyectos":           frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
         "normativa_municipal": frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
+        "gestion_usuarios":    frozenset(),
     },
+    # Financiero: SOLO Proyectos (lectura) e Informe del activo.
     Rol.FINANCIERO: {
-        "localizacion":        frozenset({PermisoModulo.VER}),
-        "viabilidad":          frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
-        "render_calculos":     frozenset({PermisoModulo.VER}),
+        "localizacion":        frozenset(),
+        "viabilidad":          frozenset(),
+        "render_calculos":     frozenset(),
         "modelos_planos":      frozenset(),
         "informe":             frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
         "proyectos":           frozenset({PermisoModulo.VER}),
-        "normativa_municipal": frozenset({PermisoModulo.VER}),
+        "normativa_municipal": frozenset(),
+        "gestion_usuarios":    frozenset(),
     },
-    Rol.INVERSOR: {
-        "localizacion":        frozenset({PermisoModulo.VER}),
-        "viabilidad":          frozenset({PermisoModulo.VER}),
-        "render_calculos":     frozenset({PermisoModulo.VER}),
+    # Cliente: SOLO Informe del activo, en lectura.
+    Rol.CLIENTE: {
+        "localizacion":        frozenset(),
+        "viabilidad":          frozenset(),
+        "render_calculos":     frozenset(),
         "modelos_planos":      frozenset(),
         "informe":             frozenset({PermisoModulo.VER}),
-        "proyectos":           frozenset({PermisoModulo.VER}),
-        "normativa_municipal": frozenset({PermisoModulo.VER}),
+        "proyectos":           frozenset(),
+        "normativa_municipal": frozenset(),
+        "gestion_usuarios":    frozenset(),
+    },
+    # Cuenta administrativa: SOLO gestión de usuarios. Al no listar los demás
+    # módulos, el fail-closed los oculta → el superadmin no ve nada de negocio.
+    Rol.SUPERADMIN: {
+        "gestion_usuarios":    frozenset({PermisoModulo.VER, PermisoModulo.EDITAR}),
     },
 }
 

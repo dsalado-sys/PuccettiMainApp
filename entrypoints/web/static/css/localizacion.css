@@ -418,6 +418,18 @@ body:has(.loc-layout) { height: 100vh; overflow: hidden; }
   border-color: var(--negro);
 }
 
+/* Cabecera de la tabla de lados: título + botón «Calcular orientaciones». */
+.loc-lados-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* Orientación no marcada (muros no de fachada, hasta "calcularlas"). */
+.loc-ori-oculta {
+  color: var(--on-surface-muted);
+}
+
 /* ── Spinner global ───────────────────────────────────────────────────── */
 .loc-spinner {
   position: absolute;
@@ -448,6 +460,7 @@ body:has(.loc-layout) { height: 100vh; overflow: hidden; }
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  transition: opacity 120ms ease;
   color: var(--negro);
   background: var(--blanco);
   padding: 6px 14px;

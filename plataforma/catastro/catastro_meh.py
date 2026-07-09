@@ -10,13 +10,16 @@ URLs canónicas — NUNCA usar `.meta.minhap.es` (no resuelve) ni `minhap.es`
 from __future__ import annotations
 
 import logging
+import math
 import re
 import socket
 import unicodedata
+from dataclasses import dataclass
 from typing import Any
 from xml.etree import ElementTree as ET
 
 import requests
+from pyproj import Transformer
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 from ESCatastroLib import MetaParcela, ParcelaCatastral
@@ -25,6 +28,7 @@ from ESCatastroLib.utils.exceptions import ErrorServidorCatastro
 
 from app.contextos.localizacion.dominio import (
     ParcelaNoEncontrada,
+    PatioCatastral,
     RateLimitCatastro,
     SinParcelaEnPunto,
     Subreferencia,
@@ -390,8 +394,15 @@ def _parcela_a_raw(
     # Patios del edificio: anillos interiores de la huella catastral (WFS BU). Una
     # llamada extra best-effort; se persiste con la parcela y se muestra en el modo
     # Rehabilitación ("Patios del edificio"). Nunca bloquea la localización.
-    res_patios = _patios_por_rc(rc14)
-    n_patios, patios_m2 = res_patios if res_patios is not None else (None, ())
+    res_patios = _patios_por_rc(rc14, contorno)
+    if res_patios is None:
+        n_patios: int | None = None
+        patios_m2: tuple[float, ...] = ()
+        patios_geom: tuple[PatioCatastral, ...] = ()
+    else:
+        patios_geom = tuple(res_patios)
+        n_patios = len(patios_geom)
+        patios_m2 = tuple(round(p.area_m2, 1) for p in patios_geom)
 
     return ParcelaRaw(
         referencia_catastral=rc14,
@@ -409,6 +420,7 @@ def _parcela_a_raw(
         plantas_bajo_rasante=plantas_inf,
         n_patios=n_patios,
         patios_m2=patios_m2,
+        patios_geom=patios_geom,
     )
 
 
@@ -451,12 +463,54 @@ def _parsear_polygons_gml(xml_text: str) -> list[list[tuple[float, float]]]:
 
 
 # ── Patios del edificio (WFS BU)  ────────────────────────────────────────────
-# Detección de patios ABIERTOS (entrantes del contorno, no huecos) por cierre
-# morfológico de la huella: `buffer(+r).buffer(-r)` rellena las bocas de hasta
-# ~2·r. Con r=2.5 m se captan patios de luces abiertos (boca ≤ ~5 m) y se dejan
-# fuera las concavidades anchas (esquinas en L, retranqueos), que NO son patio.
-_PATIO_ABIERTO_RADIO_M = 2.5
-_PATIO_AREA_MIN_M2 = 4.0  # área mínima de un patio abierto (descarta slivers)
+# Patios ABIERTOS = patinejos/entrantes que el Catastro NO marca como `gml:interior`.
+# Con la PARCELA conocida se toman como las zonas del HUECO (parcela − edificio) que:
+#   1. sobreviven a una APERTURA morfológica (se descartan las franjas finas de
+#      retranqueo, más estrechas que ~2·`_PATIO_APERTURA_M`), y
+#   2. están muy RODEADAS por el edificio (≥ `_PATIO_FRAC_EDIF_MIN` de su perímetro
+#      coincide con muros del edificio). Así un patio de luces cuenta ENTERO —aunque
+#      parte cierre contra el lindero, no contra el propio edificio— pero un
+#      retranqueo/jardín abierto a fachada (poco rodeado por el edificio) NO se
+#      confunde con patio. (Patios reales medidos: 0.45–0.79; retranqueos ~0.25.)
+# Sin parcela (fallback) se usa solo el cierre morfológico del edificio (capta menos:
+# únicamente la parte del patio cerrada por muros del propio edificio).
+_PATIO_ABIERTO_RADIO_M = 2.5    # radio de "boca estrecha" del entrante (fallback sin parcela)
+_PATIO_APERTURA_M = 0.75        # apertura del hueco: descarta franjas más finas que ~2·este valor
+_PATIO_FRAC_EDIF_MIN = 0.35     # mínimo del perímetro del hueco rodeado por el edificio para ser patio
+_PATIO_AREA_MIN_M2 = 4.0        # área mínima de un patio abierto (descarta slivers)
+
+# El WFS BU se pide en EPSG:25830 (ver `_patios_por_rc`): el anillo de cada patio
+# llega en metros UTM30N. Se reproyecta a WGS84 para guardarlo en el MISMO sistema
+# que el contorno de la parcela; el render lo vuelve a UTM con el huso de la parcela.
+_T_BU_A_WGS84 = Transformer.from_crs("EPSG:25830", "EPSG:4326", always_xy=True)
+# Inverso: el contorno de la parcela (WGS84, de ESCatastroLib) al CRS del edificio
+# (EPSG:25830, del WFS BU) para restar el edificio del hueco en el mismo plano.
+_T_WGS84_A_BU = Transformer.from_crs("EPSG:4326", "EPSG:25830", always_xy=True)
+
+
+@dataclass(frozen=True)
+class _PatioGml:
+    """Patio crudo parseado del GML del WFS BU: anillos aún en EPSG:25830."""
+    tipo: str                              # "cerrado" | "abierto"
+    area_m2: float
+    anillo_25830: list[tuple[float, float]]              # contorno exterior
+    huecos_25830: tuple = ()               # anillos interiores (edificio(s) dentro del patio)
+
+
+def _anillo_25830_a_wgs84(
+    anillo: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Reproyecta un anillo de EPSG:25830 (m) a WGS84 (lon, lat). Descarta vértices
+    no finitos para no envenenar la geometría aguas abajo."""
+    out: list[tuple[float, float]] = []
+    for x, y in anillo:
+        try:
+            lon, lat = _T_BU_A_WGS84.transform(float(x), float(y))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(lon) and math.isfinite(lat):
+            out.append((float(lon), float(lat)))
+    return out
 
 
 def _area_anillo_m2(coords: list[tuple[float, float]]) -> float:
@@ -503,44 +557,109 @@ def _poslist_en(elem: ET.Element) -> ET.Element | None:
     return None
 
 
-def _patios_abiertos_m2(exteriores: list[list[tuple[float, float]]]) -> list[float]:
-    """Patios ABIERTOS: entrantes de boca estrecha en la huella (recortes del
-    contorno, no huecos). El Catastro no los marca como ``gml:interior``, así que
-    se detectan por cierre morfológico (ver constantes arriba). Devuelve el área
-    (m²) de cada uno por encima del mínimo."""
-    poligonos = []
-    for coords in exteriores:
-        if len(coords) >= 4:
-            poly = Polygon(coords)
-            if poly.is_valid and not poly.is_empty:
-                poligonos.append(poly)
-    if not poligonos:
-        return []
+def _comps_poligonales(geom) -> list[Polygon]:
+    """Componentes Polygon no vacías de una geometría (Polygon o Multi*/colección)."""
+    return [g for g in getattr(geom, "geoms", [geom])
+            if getattr(g, "geom_type", "") == "Polygon" and not g.is_empty]
+
+
+def _frac_borde_edificio(comp: Polygon, building: Polygon) -> float:
+    """Fracción del perímetro EXTERIOR de ``comp`` que coincide con el borde del
+    edificio.
+
+    ~1 = hueco muy rodeado por el edificio (patio); bajo = abierto al lindero
+    (retranqueo/jardín). Solo se aplica a huecos MACIZOS (sin anillo interior): un
+    patio en ANILLO —el edificio dentro— se acepta directamente por tener hueco, aunque
+    su contorno exterior sea el lindero de la parcela. Tolerancia 0,15 m para el solape
+    de bordes reproyectados.
+    """
+    borde = comp.exterior
+    if borde.length <= 0:
+        return 0.0
     try:
-        huella = unary_union(poligonos)
+        compartido = borde.intersection(building.boundary.buffer(0.15))
+    except Exception:  # noqa: BLE001
+        return 0.0
+    return float(getattr(compartido, "length", 0.0)) / float(borde.length)
+
+
+def _patios_abiertos(
+    building: Polygon | None,
+    parcela: Polygon | None,
+) -> list[tuple[float, list[tuple[float, float]], list[list[tuple[float, float]]]]]:
+    """Patios ABIERTOS (patinejos/entrantes no marcados como ``gml:interior``).
+
+    Con la parcela conocida: el patio es la zona del HUECO (``parcela − edificio``)
+    que (1) sobrevive a una APERTURA morfológica —se descartan las franjas finas de
+    retranqueo— y (2) está muy rodeada por el edificio (``_frac_borde_edificio`` ≥
+    ``_PATIO_FRAC_EDIF_MIN``), lo que excluye retranqueos/jardines abiertos a fachada.
+    Capta el patio ENTERO, aunque parte cierre contra el lindero (que el cierre del
+    edificio dejaba fuera) y aunque no tenga un entrante marcado del edificio.
+
+    Si el edificio queda DENTRO del patio (parcela ocupada por patio con la
+    construcción en medio), la zona es un ANILLO: se conservan sus HUECOS.
+
+    Sin parcela (fallback): solo el cierre morfológico del edificio.
+
+    Devuelve, por cada patio ≥ mínimo, ``(area_m2, exterior_25830, huecos_25830)``.
+    """
+    if building is None or building.is_empty:
+        return []
+
+    def _como_salida(polis):
+        salida = []
+        for g in polis:
+            if g.area < _PATIO_AREA_MIN_M2:
+                continue
+            ext = [(float(x), float(y)) for x, y in g.exterior.coords]
+            huecos = [[(float(x), float(y)) for x, y in h.coords] for h in g.interiors]
+            salida.append((float(g.area), ext, huecos))
+        return salida
+
+    if parcela is None or parcela.is_empty:
+        # Fallback histórico: entrantes de boca estrecha del propio edificio.
         r = _PATIO_ABIERTO_RADIO_M
-        cierre = huella.buffer(r, join_style=2).buffer(-r, join_style=2)
-        dif = cierre.difference(huella)
+        try:
+            cierre = building.buffer(r, join_style=2).buffer(-r, join_style=2)
+            semillas = _comps_poligonales(cierre.difference(building))
+        except Exception:  # noqa: BLE001 — geometría degenerada → sin patios abiertos
+            return []
+        return _como_salida(semillas)
+
+    # Con parcela: zonas compactas del hueco. Un hueco en ANILLO (edificio dentro) es
+    # patio por definición; uno MACIZO solo si está muy rodeado por el edificio.
+    try:
+        void = parcela.difference(building)
+        w = _PATIO_APERTURA_M
+        abierto = void.buffer(-w, join_style=2).buffer(w, join_style=2)
     except Exception:  # noqa: BLE001 — geometría degenerada → sin patios abiertos
         return []
-    geoms = getattr(dif, "geoms", [dif])
-    return [
-        g.area for g in geoms
-        if getattr(g, "geom_type", "") == "Polygon" and g.area >= _PATIO_AREA_MIN_M2
-    ]
+    patios = []
+    for g in _comps_poligonales(abierto):
+        if g.area < _PATIO_AREA_MIN_M2:
+            continue
+        if len(g.interiors) > 0 or _frac_borde_edificio(g, building) >= _PATIO_FRAC_EDIF_MIN:
+            patios.append(g)
+    return _como_salida(patios)
 
 
-def _parsear_patios_gml(xml_text: str) -> tuple[int, tuple[float, ...]] | None:
+def _parsear_patios_gml(
+    xml_text: str, parcela_25830: Polygon | None = None,
+) -> list[_PatioGml] | None:
     """Patios del edificio en la huella catastral (WFS BU), de dos tipos:
 
     - **Cerrados**: anillos interiores (``gml:interior``) = huecos de la huella.
-    - **Abiertos**: entrantes de boca estrecha en el contorno (patios de luces
-      abiertos a lindero/fachada). El Catastro NO los marca como hueco, así que se
-      detectan por cierre morfológico de la huella.
+      Geometría exacta.
+    - **Abiertos**: patinejos/entrantes que el Catastro NO marca como hueco. Si se
+      pasa ``parcela_25830`` (contorno de la parcela ya en EPSG:25830) se toman como
+      la zona compacta del hueco ``parcela − edificio`` con entrante del edificio
+      (geometría aproximada, pero ENTERA aunque cierre contra el lindero). Sin
+      parcela, solo el cierre morfológico del edificio (capta menos).
 
-    Con la respuesta en EPSG:25830 (metros) las áreas salen en m². Devuelve
-    ``(n_patios, areas)`` (cerrados seguidos de abiertos) o ``None`` si el XML no
-    es parseable o es un ``ExceptionReport`` del servidor.
+    Con la respuesta en EPSG:25830 (metros) las áreas salen en m² y los anillos se
+    conservan en ese mismo CRS. Devuelve la lista de patios (cerrados seguidos de
+    abiertos) —lista vacía si la huella no tiene patios— o ``None`` si el XML no es
+    parseable o es un ``ExceptionReport`` del servidor.
     """
     try:
         root = ET.fromstring(xml_text)
@@ -557,22 +676,42 @@ def _parsear_patios_gml(xml_text: str) -> tuple[int, tuple[float, ...]] | None:
         for inter in root.findall(f".//{{{ns_uri}}}interior"):
             interiores.append(_coords_de_poslist(_poslist_en(inter)))
 
-    areas: list[float] = []
-    # Patios cerrados (huecos): área por shoelace, cualquier tamaño > 0.
+    # Huella del edificio = unión de los exteriores (rellenos; los huecos interiores
+    # se tratan aparte como patios cerrados, así no se cuentan dos veces).
+    poligonos = []
+    for coords in exteriores:
+        if len(coords) >= 4:
+            p = Polygon(coords)
+            if not p.is_valid:
+                p = p.buffer(0)
+            if not p.is_empty and p.area > 0.5:
+                poligonos.append(p)
+    building = unary_union(poligonos) if poligonos else None
+
+    patios: list[_PatioGml] = []
+    # Patios cerrados (huecos): área por shoelace, cualquier tamaño > 0; anillo exacto.
     for coords in interiores:
         area = _area_anillo_m2(coords)
-        if area > 0:
-            areas.append(area)
-    # Patios abiertos (entrantes de boca estrecha).
-    areas.extend(_patios_abiertos_m2(exteriores))
+        if area > 0 and len(coords) >= 4:
+            patios.append(_PatioGml("cerrado", area, [(float(x), float(y)) for x, y in coords]))
+    # Patios abiertos (patinejos/entrantes): geometría aproximada, con huecos si el
+    # edificio queda dentro del patio (anillo).
+    for area, anillo, huecos in _patios_abiertos(building, parcela_25830):
+        patios.append(_PatioGml("abierto", area, anillo, tuple(huecos)))
 
-    return len(areas), tuple(round(a, 1) for a in areas)
+    return patios
 
 
-def _patios_por_rc(rc14: str) -> tuple[int, tuple[float, ...]] | None:
-    """Nº de patios del edificio de la parcela y su superficie (m²), vía WFS BU
+def _patios_por_rc(
+    rc14: str, contorno_wgs84: list[tuple[float, float]] | None = None,
+) -> list[PatioCatastral] | None:
+    """Patios del edificio de la parcela (con su anillo en WGS84), vía WFS BU
     INSPIRE (stored query ``GetBuildingByParcel``). UNA sola petición, en EPSG:25830
-    para que las áreas salgan ya en metros.
+    para que las áreas salgan en metros; el anillo se reproyecta a WGS84.
+
+    ``contorno_wgs84`` (contorno de la parcela de §2.1) acota los patios abiertos al
+    hueco real ``parcela − edificio`` para captarlos enteros; si falta, se cae al
+    cierre del propio edificio.
 
     *Best-effort*: devuelve ``None`` ante cualquier fallo (red, rate limit, parseo).
     Los patios NO son críticos para localizar la parcela —el caller sigue sin
@@ -582,6 +721,18 @@ def _patios_por_rc(rc14: str) -> tuple[int, tuple[float, ...]] | None:
     rc14 = (rc14 or "")[:14]
     if len(rc14) != 14:
         return None
+    # Parcela (contorno WGS84 de §2.1) reproyectada al CRS del edificio (25830).
+    parcela_25830: Polygon | None = None
+    if contorno_wgs84 and len(contorno_wgs84) >= 3:
+        try:
+            pts = [_T_WGS84_A_BU.transform(float(x), float(y)) for x, y in contorno_wgs84]
+            pp = Polygon(pts)
+            if not pp.is_valid:
+                pp = pp.buffer(0)
+            if not pp.is_empty:
+                parcela_25830 = pp
+        except Exception:  # noqa: BLE001 — sin parcela usable → fallback al edificio
+            parcela_25830 = None
     # URL cruda: el Catastro acepta `STOREDQUERIE_ID` (la usa él mismo) y NO debe
     # encodearse el ':' del srsName (el WFS de stored queries lo trata literal, igual
     # que `fetch_parcela_por_rc` del módulo). Por eso no se pasa por `params=`.
@@ -598,9 +749,28 @@ def _patios_por_rc(rc14: str) -> tuple[int, tuple[float, ...]] | None:
     except Exception as exc:  # noqa: BLE001 — patios opcionales, nunca bloqueantes
         log.warning("WFS BU patios falló para %s: %s", rc14, exc)
         return None
-    patios = _parsear_patios_gml(resp.text)
-    if patios is not None:
-        log.info("Patios catastrales de %s: %s", rc14, patios)
+    crudos = _parsear_patios_gml(resp.text, parcela_25830)
+    if crudos is None:
+        return None
+    patios: list[PatioCatastral] = []
+    for pg in crudos:
+        anillo_wgs = _anillo_25830_a_wgs84(pg.anillo_25830)
+        if len(anillo_wgs) < 3:
+            continue
+        huecos_wgs: list[list[tuple[float, float]]] = []
+        for h in pg.huecos_25830:
+            hw = _anillo_25830_a_wgs84(h)
+            if len(hw) >= 3:
+                huecos_wgs.append(hw)
+        patios.append(PatioCatastral(
+            tipo=pg.tipo, area_m2=round(pg.area_m2, 1),
+            contorno_wgs84=anillo_wgs, huecos_wgs84=huecos_wgs,
+        ))
+    if patios:
+        log.info(
+            "Patios catastrales de %s: %s",
+            rc14, [(p.tipo, round(p.area_m2, 1)) for p in patios],
+        )
     return patios
 
 

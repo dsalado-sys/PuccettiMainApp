@@ -76,15 +76,16 @@ def test_techo_holgado_reparte_igual_sin_factor_edificabilidad():
     assert cap.factor_limitante != "edificabilidad"
 
 
-def test_edificabilidad_consumida_descuenta_patios():
-    """La edificabilidad consumida = superficie CONSTRUIDA (huella − patios), no la
-    huella completa: el patio interior a cielo abierto no es techo y no computa."""
+def test_edificabilidad_consumida_no_descuenta_patios():
+    """Los patios ya NO restan a la superficie construida: las unidades se construyen
+    sobre la construida completa y el patio se contabiliza aparte, contra la superficie
+    libre. Por tanto construida == huella y la edificabilidad consumida = suma de huellas."""
     p = _params(coef=2.5, n_plantas=3)
     p.urbanisticos.patios = [20.0]            # un patio de 20 m² (el helper deja [])
     env = _envolvente(p)
     computa = [pl for pl in env.plantas if pl.computa_edif]
     suma_construida = sum(pl.area_construida_m2 for pl in computa)
     suma_huella = sum(pl.footprint.area for pl in computa)
-    assert suma_huella - suma_construida > 1.0               # el patio resta de verdad
+    assert abs(suma_huella - suma_construida) < 1e-6         # el patio ya no resta
     assert abs(env.edificabilidad_consumida - suma_construida) < 1e-6
-    assert env.edificabilidad_consumida < suma_huella
+    assert abs(env.edificabilidad_consumida - suma_huella) < 1e-6

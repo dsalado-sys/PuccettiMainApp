@@ -35,6 +35,12 @@
   </div>
 </section>
 
+{% if estado == "ok" %}
+<nav class="rc-escenarios" id="rc-escenarios" role="tablist" aria-label="Escenarios del activo">
+  <!-- Las pestañas (+ botón «+») se pintan desde JS a partir de window.__RC_ESCENARIOS__. -->
+</nav>
+{% endif %}
+
 {% if catastro %}
 <section class="rc-catastro-bar" aria-label="Datos catastrales de la parcela">
   <span class="rc-cat-item">
@@ -131,6 +137,28 @@
     <div class="rc-canvas-wrap">
       <canvas id="rc-canvas" width="800" height="600" role="img"
               aria-label="Plano de planta en 2D con la distribución de unidades y las orientaciones de fachada"></canvas>
+
+      <details class="rc-capas" id="rc-capas">
+        <summary class="rc-capas-btn" title="Capas" aria-label="Capas">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+            <path d="M12 3 3 8l9 5 9-5-9-5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+            <path d="M3 13l9 5 9-5M3 17l9 5 9-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+          </svg>
+        </summary>
+        <div class="rc-capas-panel">
+          <label class="rc-capas-opcion">
+            <input type="radio" name="rc-capa" value="plano" checked> Plano
+          </label>
+          <label class="rc-capas-opcion">
+            <input type="radio" name="rc-capa" value="catastro"> Catastro
+          </label>
+          <div class="rc-capas-transp" id="rc-capas-transp" hidden>
+            <label for="rc-capas-slider">Transparencia</label>
+            <input type="range" id="rc-capas-slider" min="0" max="100" step="1" value="0">
+          </div>
+        </div>
+      </details>
+
       <div class="rc-brujula" id="rc-brujula" aria-label="Brújula y orientaciones cardinales"></div>
       <div class="rc-spinner" id="rc-spinner" hidden>
         <span class="rc-spinner-circ"></span>
@@ -190,9 +218,9 @@
         <span class="rc-kpi-label eyebrow">Superficie del polígono</span>
         <span class="rc-kpi-valor" data-kpi="superficie_poligono_m2">—</span>
       </article>
-      <article class="rc-kpi rc-kpi-destacada">
-        <span class="rc-kpi-label eyebrow">Unidades calculadas</span>
-        <span class="rc-kpi-valor" data-kpi="n_viviendas">—</span>
+      <article class="rc-kpi rc-kpi">
+        <span class="rc-kpi-label eyebrow">Superficie libre</span>
+        <span class="rc-kpi-valor" data-kpi="superficie_libre_m2">—</span>
       </article>
             <article class="rc-kpi">
         <span class="rc-kpi-label eyebrow">Edificabilidad</span>
@@ -252,10 +280,19 @@
 {% include "_rc_modal_exceso.html" %}
 {% include "_rc_modal_unidad.html" %}
 {% include "_rc_modal_tipologias.html" %}
+{% include "_rc_modal_combinaciones_hotel.html" %}
+{% include "_rc_modal_combinaciones_planta.html" %}
 {% include "_rc_modal_superficies.html" %}
 {% include "_rc_modal_minimos.html" %}
 
 <script>window.__RC_NORMATIVA_APLICADA__ = {{ normativa_aplicada | tojson if normativa_aplicada else 'null' }};</script>
+<script>
+  // Escenarios (pestañas) del modo activo: lista con parámetros+resumen y cuál está activo.
+  window.__RC_ESCENARIOS__ = {{ escenarios | tojson if escenarios else '[]' }};
+  window.__RC_ESCENARIO_ACTIVO__ = {{ escenario_activo | tojson if escenario_activo else 'null' }};
+  // Id del proyecto activo: clave del aviso de exceso «una vez por proyecto».
+  window.__RC_PROYECTO_ID__ = {{ proyecto_activo.id | tojson if proyecto_activo else 'null' }};
+</script>
 <script src="/static/js/rc_brujula.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_canvas.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_patios.js?v={{ estaticos_version }}" defer></script>

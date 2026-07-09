@@ -24,11 +24,28 @@ from app.contextos.render_calculos.parametros import (
 
 # ── A1.1 Hotelero (modelo de habitación) ────────────────────────────────────
 def test_hotelero_util_objetivo_y_estancias():
-    # hotel_3 doble: habitación 17 + baño objetivo (3.5 + 0.5) = 21.0; objetivo ×1.15.
+    # hotel_3 doble: habitación 17 + baño objetivo (3.5 + 0.5) = 21.0; objetivo = mín + circ (m²).
     assert ph.util_minimo_habitacion("hotel_3", "doble") == pytest.approx(21.0, abs=0.01)
-    assert ph.util_objetivo_habitacion("hotel_3", "doble") == pytest.approx(21.0 * 1.15, abs=0.01)
+    assert ph.util_objetivo_habitacion("hotel_3", "doble") == pytest.approx(
+        21.0 + ph.circ_interior_habitacion("doble"), abs=0.01)
     estancias = ph.programa_habitacion("doble", "hotel_3", 24.0)
     assert [e.nombre for e in estancias] == ["habitacion", "bano"]
+
+
+def test_hotelero_junior_suite_y_suite_desglosan_salon():
+    # Junior Suite = doble + salón; Suite = 2·doble + salón. El salón se ve como
+    # estancia propia (el m² ya está en el total de la unidad, aquí se separa).
+    js = ph.programa_habitacion("junior_suite", "hotel_5", 40.0)
+    assert [e.nombre for e in js] == ["habitacion", "salon", "bano"]
+    assert next(e for e in js if e.nombre == "salon").area_min_m2 == pytest.approx(12.0)
+    # habitación = total (32) − salón (12) = 20 (una doble).
+    assert next(e for e in js if e.nombre == "habitacion").area_min_m2 == pytest.approx(20.0)
+
+    su = ph.programa_habitacion("suite", "hotel_5", 60.0)
+    assert [e.nombre for e in su] == ["habitacion", "salon", "bano"]
+    # habitación = total (52) − salón (12) = 40 (dos dobles).
+    assert next(e for e in su if e.nombre == "habitacion").area_min_m2 == pytest.approx(40.0)
+    assert next(e for e in su if e.nombre == "salon").area_min_m2 == pytest.approx(12.0)
 
 
 def test_hotelero_pension_y_albergue_sin_bano_interior():
@@ -91,11 +108,11 @@ def test_edificios_areas_comunes_exactas_del_doc():
 def test_reparto_generico_mezcla_dos_tipologias():
     desc = [
         ph.descriptor_tipologia_hotelero("hotel_3", "doble"),
-        ph.descriptor_tipologia_hotelero("hotel_3", "triple"),
+        ph.descriptor_tipologia_hotelero("hotel_3", "junior_suite"),
     ]
     seleccion = reparto_multi_tipologia_generico(200.0, desc)
     slugs = {d.slug for d, _ in seleccion}
-    assert slugs == {"doble", "triple"}          # al menos una de cada
+    assert slugs == {"doble", "junior_suite"}    # al menos una de cada
     assert len(seleccion) >= 2
 
 
@@ -135,9 +152,9 @@ def test_grupo_apartamentos_default_edificios_en_json_antiguo():
 def test_tipologias_extra_se_filtran_por_uso():
     # Slugs de vivienda no son válidos en hotelero → se descartan.
     p = parametros_desde_dict({
-        "programa": {"uso": "hotelero", "tipologias_extra": ["doble", "2d", "triple"]},
+        "programa": {"uso": "hotelero", "tipologias_extra": ["doble", "2d", "junior_suite"]},
     })
-    assert p.programa.tipologias_extra == ["doble", "triple"]
+    assert p.programa.tipologias_extra == ["doble", "junior_suite"]
 
 
 # ── End-to-end matemático (sin BBDD: usa constantes del motor) ───────────────
@@ -171,7 +188,7 @@ def _calcular(payload: dict) -> dict:
 def test_e2e_hotelero_mezcla_produce_dos_tipologias():
     r = _calcular({
         "uso": "hotelero", "categoria_hotelero": "hotel_3",
-        "tipologia_habitacion": "doble", "tipologias_extra": ["triple"],
+        "tipologia_habitacion": "doble", "tipologias_extra": ["junior_suite"],
     })
     assert r["capacidad"]["n_viviendas_objetivo"] > 0
     filas = [f for f in r["tabla_unidad"] if f["tipo"] == "habitacion"]
@@ -182,7 +199,7 @@ def test_e2e_hotelero_mezcla_produce_dos_tipologias():
         assert "habitacion" in nombres
     # la mezcla genera ambas tipologías en la planta.
     slugs = {s for fila in r["capacidad"]["tipologias_unidad_por_planta"] for s in fila}
-    assert {"doble", "triple"} <= slugs
+    assert {"doble", "junior_suite"} <= slugs
 
 
 def test_e2e_apartamentos_conjuntos_reserva_vestibulo_si_muchas_unidades():

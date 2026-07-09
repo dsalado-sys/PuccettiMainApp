@@ -121,10 +121,11 @@ su perfil de tipología (PB vs plantas tipo) de `params` / `params_tipo`.
 | **Ático** | `diseno_atico` | `programa_tipo` (como tipo) | No | No | `% muros` y `% circulación` propios; `computa_edif` opcional |
 | **Sótano** | `diseno_sotano` | — | 0 | 0 | `% muros` y `% circulación` propios; `viv = 0` |
 
-Cada categoría descuenta `muros = pct_muros × construida`,
-`circ = pct_circulacion × construida` y `núcleo = pct_nucleo × construida`
-con los `pct_*` de **su** bucket (antes de iter. 6, muros/núcleo eran únicos
-para todo el edificio y el sótano forzaba circulación 0).
+Cada categoría descuenta `muros = pct_muros × construida` y
+`circ = pct_circulacion × construida` con los `pct_*` de **su** bucket. El
+`núcleo = min(nucleo_m2, construida)` es un **área fija en m²** (bloque
+`programa.nucleo_m2`), igual en todas las plantas (antes de iter. 6,
+muros/núcleo eran únicos para todo el edificio y el sótano forzaba circulación 0).
 
 **Herencia por defecto** de los buckets (parser tolerante): `diseno_tipo`←
 `diseno`, `diseno_atico`←`diseno_tipo`, `diseno_sotano`←`diseno`,
@@ -208,7 +209,7 @@ el preview rápido.
 |-----|-------|---------------------|---------------------------|
 | Vivienda | I.5 — VPO Junta Andalucía | nº de dormitorios (0..4) | rama directa con `programa_uso=None` (estancias vía `programa.programa_vivienda`) |
 | Apartamentos turísticos | I.3 (edificios) / I.4 (conjuntos) — Decreto 194/2010 | categoría 1L–4L × tipología estudio/1d/2d/3d | `programa_apartamentos.programa_uso_apartamento(cat, tip)` |
-| Hotelero | I.1 — Hotel 1–5★, Hostal 1–2★, Pensión, Albergue | individual / doble / triple / cuádruple / múltiple (sólo albergue) | `programa_hotelero.programa_uso_hotelero(cat, tip)` |
+| Hotelero | I.1 — Hotel 1–5★, Hostal 1–2★, Pensión, Albergue | individual / doble / junior suite / suite / múltiple (sólo albergue) | `programa_hotelero.programa_uso_hotelero(cat, tip)` |
 
 Para los usos NO-vivienda, cada uso descuenta del techo de planta las
 **áreas comunes obligatorias** (recepción, áreas sociales, segundo
@@ -330,7 +331,7 @@ filas no editadas por el usuario se resincronizan en cada seed.
 |----------|------------------|-------------------|
 | Muros (`pct_muros`) | Sí (m² total) | Sí (prorrateados por util) |
 | Circulación común (`pct_circ_pb/tipo`) | Sí (común planta) | **No** (no es de la unidad) |
-| Núcleo (`pct_nucleo`) | Sí (común edificio) | **No** |
+| Núcleo (`nucleo_m2`) | Sí (m² fijos, común edificio) | **No** |
 | Patio | Sí (descuento planta) | **No** |
 | Local PB | Sí (m² destinados) | Fila "Local" sin estancias |
 | Útil | Suma del útil consumido | Útil real por unidad |

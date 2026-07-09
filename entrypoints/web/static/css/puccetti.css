@@ -90,6 +90,14 @@
   --state-warning-strong-border: #E8730C;
   --state-warning-strong-text: #7A3B00;
 
+  /* ── Semáforo (verde/ámbar/rojo): señales funcionales, no marca. Ámbar =
+     dorado corporativo; rojo = --error; verde = tono contenido. Compartido por
+     el DCF de viabilidad y el flujo de estados del Informe. ───────────────── */
+  --sem-verde: #2f7d54;
+  --sem-ambar: var(--dorado);
+  --sem-rojo: var(--error);
+  --sem-gris: var(--gris-medio);
+
   /* ── Radios ───────────────────────────────────────────────────────────── */
   --radio: 6px;                   /* tarjetas (alias histórico) */
   --radio-card: 6px;
@@ -200,6 +208,10 @@
      que los fondos de fila/aviso de error se perciban en oscuro. */
   --error: #F1705C;
   --error-rgb: 241, 112, 92;
+
+  /* Verde de semáforo: el #2f7d54 se percibe apagado sobre fondo oscuro; se
+     aclara a un tono legible (ámbar/rojo ya adaptan vía --dorado/--error). */
+  --sem-verde: #4FAE7B;
 }
 
 /* ════════════════════════ Base ════════════════════════ */
@@ -388,6 +400,9 @@ summary:focus-visible,
 
 .rail-item:hover, .rail-accion:hover { background: var(--tint-primary-12); color: var(--on-inverse); }
 .rail-item--activo { color: var(--dorado); background: var(--tint-primary-16); box-shadow: inset 3px 0 0 var(--dorado); }
+/* Módulo inhabilitado (sin proyecto activo): visible pero atenuado y no clicable.
+   proyectos.js alterna esta clase en vivo al activar/desactivar un proyecto. */
+.rail-item--bloqueado { opacity: 0.4; pointer-events: none; cursor: not-allowed; }
 
 .rail-usuario { font-size: var(--text-sm); color: var(--on-inverse-accent); padding: 2px 24px 6px; white-space: nowrap; }
 
@@ -512,7 +527,7 @@ body.vista-modulo { padding-left: var(--rail-ancho); }
 .boton-primario:hover { background: var(--primary-hover); box-shadow: var(--shadow-glow); }
 .boton-secundario { background: var(--surface); color: var(--on-surface); border-color: var(--on-surface); }
 .boton-secundario:hover { background: var(--on-surface); color: var(--dorado); }
-.boton-peligro { background: var(--surface); color: var(--error); border-color: var(--error); }
+.boton-peligro { background: var(--on-surface); color: var(--dorado); }
 .boton-peligro:hover { background: var(--error); color: var(--blanco); }
 /* Variante sólida del botón de peligro (usada en pies de modal). */
 .boton-peligro--solido { background: var(--error); color: var(--blanco); border-color: var(--error); }

@@ -48,7 +48,7 @@ class NormativaMunicipalORM(Base):
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-USOS_PGOU_VALIDOS = {"residencial", "hotelero", "terciario", "mixto"}
+USOS_PGOU_VALIDOS = {"residencial", "hotelero", "apartamento"}
 
 
 def _orm_a_params(orm: NormativaMunicipalORM) -> ParametrosUrbanisticos:

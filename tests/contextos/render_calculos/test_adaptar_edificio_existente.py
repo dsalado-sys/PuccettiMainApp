@@ -164,3 +164,76 @@ def test_sin_dato_de_patios_respeta_el_default():
     params = ParametrosRender()
     adaptar_params_a_edificio_existente(params, proyecto)
     assert [pd.area_m2 for pd in params.urbanisticos.patios] == [12.0]
+
+
+# ── Patios catastrales CON geometría → posicionados y bloqueados ─────────────
+# Parcela pequeña en Sevilla (lon<0, lat>30 → huso UTM 25830).
+_SEVILLA_CONTORNO = [
+    [-5.9930, 37.3825], [-5.9928, 37.3825],
+    [-5.9928, 37.3827], [-5.9930, 37.3827], [-5.9930, 37.3825],
+]
+
+
+def _anillo_wgs84(cx, cy, d=0.00005):
+    """Anillo cuadrado pequeño (cerrado) en WGS84 alrededor de (cx, cy)."""
+    return [[cx - d, cy - d], [cx + d, cy - d], [cx + d, cy + d], [cx - d, cy + d], [cx - d, cy - d]]
+
+
+def _proyecto_con_patios_geom(patios_geom, *, patios_m2=None):
+    proyecto = Proyecto(nombre="test")
+    loc = {
+        "plantas_sobre_rasante": 4,
+        "contorno_wgs84": _SEVILLA_CONTORNO,
+        "patios_geom": patios_geom,
+    }
+    if patios_m2 is not None:
+        loc["patios_m2"] = patios_m2
+        loc["n_patios"] = len(patios_m2)
+    proyecto.fijar_datos(ModuloPuccetti.LOCALIZACION, loc)
+    return proyecto
+
+
+def test_patios_geom_siembra_posicionados_y_bloqueados():
+    geom = [
+        {"tipo": "cerrado", "area_m2": 16.0, "contorno_wgs84": _anillo_wgs84(-5.99290, 37.38258)},
+        {"tipo": "abierto", "area_m2": 12.0, "contorno_wgs84": _anillo_wgs84(-5.99285, 37.38264)},
+    ]
+    proyecto = _proyecto_con_patios_geom(geom)
+    params = ParametrosRender()
+    adaptar_params_a_edificio_existente(params, proyecto)
+
+    patios = params.urbanisticos.patios
+    assert len(patios) == 2
+    for pd in patios:
+        assert pd.bloqueado is True
+        assert pd.vertices and len(pd.vertices) >= 3
+        # Vértices en UTM (metros: ~2e5 E, ~4e6 N), no en lon/lat (< 100).
+        assert all(abs(x) > 1000 and abs(y) > 1000 for x, y in pd.vertices), pd.vertices
+    assert [pd.area_m2 for pd in patios] == [16.0, 12.0]   # área catastral preservada
+    assert [pd.origen for pd in patios] == ["catastral", "catastral_aprox"]
+
+
+def test_patios_geom_tiene_prioridad_sobre_patios_m2():
+    # Con geometría disponible NO se cae al respaldo por áreas (patios_m2).
+    geom = [{"tipo": "cerrado", "area_m2": 20.0, "contorno_wgs84": _anillo_wgs84(-5.99290, 37.38258)}]
+    proyecto = _proyecto_con_patios_geom(geom, patios_m2=[5.0, 5.0])
+    params = ParametrosRender()
+    adaptar_params_a_edificio_existente(params, proyecto)
+
+    patios = params.urbanisticos.patios
+    assert len(patios) == 1
+    assert patios[0].area_m2 == 20.0
+    assert patios[0].vertices is not None
+    assert patios[0].bloqueado is True
+
+
+def test_patios_geom_corruptos_caen_al_respaldo_por_areas():
+    # Anillos sin vértices válidos → no se siembra geometría; usa patios_m2.
+    geom = [{"tipo": "cerrado", "area_m2": 16.0, "contorno_wgs84": [[1.0]]}]  # punto inválido
+    proyecto = _proyecto_con_patios_geom(geom, patios_m2=[7.5])
+    params = ParametrosRender()
+    adaptar_params_a_edificio_existente(params, proyecto)
+
+    patios = params.urbanisticos.patios
+    assert [pd.area_m2 for pd in patios] == [7.5]
+    assert all(pd.vertices is None for pd in patios)

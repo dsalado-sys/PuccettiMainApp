@@ -65,6 +65,31 @@
     onMerge: (idA, idB) => fusionarPatios(idA, idB),
   }) : null;
   if (renderer && patioEditor) renderer.setOverlay(() => patioEditor.dibujarOverlay());
+  // Paneo del plano (arrastrar sobre vacío). Se habilita DESPUÉS del editor de
+  // patios para que su listener de mousedown quede registrado detrás y respete el
+  // preventDefault del editor cuando este agarra un tirador/patio.
+  if (renderer) renderer.habilitarPaneo();
+
+  // ── Control de capas (Plano / Catastro + transparencia) ──────────────────
+  // Estado de UI efímero: no se persiste en el escenario. La transparencia se
+  // invierte a opacidad del raster (100% transparencia → alpha 0 = Plano).
+  (function cablearCapas() {
+    if (!renderer) return;
+    const transpBox = document.getElementById("rc-capas-transp");
+    const slider = document.getElementById("rc-capas-slider");
+    const radios = document.querySelectorAll('input[name="rc-capa"]');
+    if (!radios.length || !slider) return;
+    const aplicar = () => {
+      const esCatastro = document.querySelector('input[name="rc-capa"]:checked')?.value === "catastro";
+      if (transpBox) transpBox.hidden = !esCatastro;
+      renderer.setCapaCatastro({
+        activa: esCatastro,
+        alpha: 1 - (Number(slider.value) || 0) / 100,
+      });
+    };
+    radios.forEach(r => r.addEventListener("change", aplicar));
+    slider.addEventListener("input", aplicar);
+  })();
 
   let _patioSeq = 0;   // contador para ids temporales de patios nuevos
 
@@ -80,15 +105,26 @@
     plantaActiva: 0,
     abortCalcular: null,
     debounceId: null,
-    // §2.5 — combinación de dormitorios elegida en el modal (apartamentos
-    // turísticos). Temporal: se inyecta en /calcular como `combo_dormitorios`
-    // pero NO se persiste en el formulario ni en /guardar.
+    // §2.5 — combinación de dormitorios elegida en el modal (vivienda /
+    // apartamentos turísticos). Persistida: se sincroniza con el input oculto
+    // `name="combinacion"`, que viaja en el payload y round-trippea por /escenarios.
     comboDormitorios: null,   // { slug, etiqueta } | null
+    // § hotel — combinación de habitaciones POR PLANTA elegida. Mismo canal de
+    // persistencia (input oculto `combinacion`), semántica distinta (mezcla por planta).
+    comboHotel: null,         // { slug, etiqueta } | null
+    // §2.5 — mezcla de tipos de unidad POR PLANTA (vivienda / apartamentos). Se
+    // persiste en el input oculto `mezcla_planta` (lista plana de combo-slugs), el
+    // alfabeto de tipos en `tipos_unidad`. Análogo a `comboHotel` pero de dormitorios.
+    mezclaPlanta: null,       // { mezcla: [...combo_slug], etiqueta } | null
     // Aviso de exceso de construida (rehabilitación): el modal salta una vez al
     // superar; tras aceptarlo, solo queda el aviso inferior. `interaccionUsuario`
     // evita que el modal salte en la carga inicial automática.
     excesoAceptado: false,
     interaccionUsuario: false,
+    // Alertas del último cálculo (para persistir un resumen por escenario en el
+    // aggregate — el flujo del proyecto lo clasifica en errores/avisos). `undefined`
+    // = todavía no se ha calculado este escenario.
+    ultimasAlertas: undefined,
   };
 
   function usoActivoForm() {
@@ -99,6 +135,75 @@
   // §2.5 — usos que se definen por nº de dormitorios + combinaciones.
   function usoUsaCombo() {
     return ["vivienda", "apartamentos_turisticos"].includes(usoActivoForm());
+  }
+
+  // Etiqueta legible de un slug de combinación (espejo de `_etiqueta_combo` del
+  // backend): "doble*2+individual*1" → "2 dobles + 1 individual". Se usa al
+  // restaurar la elección persistida (no hay respuesta de modal en la carga).
+  const PLURAL_COMBO = {
+    estudio: ["Estudio", "Estudios"],
+    individual: ["individual", "individuales"],
+    doble: ["doble", "dobles"],
+    triple: ["triple", "triples"],
+    cuadruple: ["cuádruple", "cuádruples"],
+    junior_suite: ["junior suite", "junior suites"],
+    suite: ["suite", "suites"],
+    multiple: ["múltiple", "múltiples"],
+  };
+  function etiquetaDesdeSlug(slug) {
+    if (!slug) return "";
+    if (slug === "estudio") return "Estudio";
+    return slug.split("+").map(tok => {
+      const [tam, cnt] = tok.split("*");
+      const n = parseInt(cnt || "1", 10) || 1;
+      const [sing, plur] = PLURAL_COMBO[tam] || [tam, tam + "s"];
+      return `${n} ${n === 1 ? sing : plur}`;
+    }).join(" + ");
+  }
+
+  // Input oculto que persiste la combinación elegida (uso-agnóstico). Única fuente
+  // de verdad que viaja en el payload y round-trippea por /escenarios.
+  function setCombinacionHidden(slug) {
+    const inp = document.getElementById("rc-combinacion-hidden");
+    if (inp) inp.value = slug || "";
+  }
+  function getCombinacionHidden() {
+    const inp = document.getElementById("rc-combinacion-hidden");
+    return inp ? (inp.value || "") : "";
+  }
+
+  // ─── Tipos de unidad + mezcla POR PLANTA (vivienda / apartamentos) ─────
+  // Inputs ocultos con valor JSON (array). Getters/setters análogos al de patios.
+  function _getJsonArrayHidden(id) {
+    const inp = document.getElementById(id);
+    if (!inp) return [];
+    try { const a = JSON.parse(inp.value || "[]"); return Array.isArray(a) ? a : []; }
+    catch (e) { return []; }
+  }
+  function _setJsonArrayHidden(id, arr) {
+    const inp = document.getElementById(id);
+    if (inp) inp.value = JSON.stringify(Array.isArray(arr) ? arr : []);
+  }
+  const getTiposUnidadHidden = () => _getJsonArrayHidden("rc-tipos-unidad-hidden");
+  const setTiposUnidadHidden = (arr) => _setJsonArrayHidden("rc-tipos-unidad-hidden", arr);
+  const getMezclaHidden = () => _getJsonArrayHidden("rc-mezcla-planta-hidden");
+  const setMezclaHidden = (arr) => _setJsonArrayHidden("rc-mezcla-planta-hidden", arr);
+
+  // Etiqueta de una mezcla plana (un combo-slug por unidad): agrupa por slug y
+  // compone "n × (etiqueta)" (espejo de `_etiqueta_mezcla_dorms`).
+  function etiquetaMezcla(mezclaPlana) {
+    const counts = {};
+    (mezclaPlana || []).forEach(s => { counts[s] = (counts[s] || 0) + 1; });
+    return Object.keys(counts).sort().map(slug => {
+      const etq = etiquetaDesdeSlug(slug);
+      const n = counts[slug];
+      return n === 1 ? etq : `${n} × (${etq})`;
+    }).join(" + ");
+  }
+  // nº de dormitorios de un combo-slug (suma de cuentas; estudio → 0).
+  function nDormsDeSlug(slug) {
+    if (!slug || slug === "estudio") return 0;
+    return slug.split("+").reduce((acc, tok) => acc + (parseInt(tok.split("*")[1] || "1", 10) || 1), 0);
   }
 
   // ─── Lectura del formulario → payload backend ─────────────────────────
@@ -137,6 +242,13 @@
         } else {
           bloques[bloque][nombre] = inp.value;
         }
+      } else if (nombre === "tipos_unidad" || nombre === "mezcla_planta") {
+        // Inputs ocultos con valor JSON (array de combo-slugs). Se parsean como
+        // arrays (precedente de `patios`); corruptos → []. El backend fuerza [] en hotel.
+        let arr = [];
+        try { const p = JSON.parse(inp.value || "[]"); if (Array.isArray(p)) arr = p; }
+        catch (e) { /* JSON corrupto → sin tipos */ }
+        bloques[bloque][nombre] = arr;
       } else if (nombre === "patios") {
         // Patios: un objeto por fila { id, area_m2, vertices? }. La geometría
         // (polígono UTM) viaja en data-vertices de la fila; las filas nuevas sin
@@ -152,6 +264,14 @@
             } catch (e) { /* geometría corrupta → se auto-coloca */ }
           }
           if (fila && fila.dataset.bloqueado === "true") obj.bloqueado = true;
+          if (fila && fila.dataset.origen) obj.origen = fila.dataset.origen;
+          if (fila && fila.dataset.huecos) {
+            // Anillos interiores (edificio dentro del patio → anillo). Corruptos → sin huecos.
+            try {
+              const hs = JSON.parse(fila.dataset.huecos);
+              if (Array.isArray(hs) && hs.length) obj.huecos = hs;
+            } catch (e) { /* huecos corruptos → patio macizo */ }
+          }
           bloques[bloque].patios.push(obj);
         }
       } else {
@@ -206,18 +326,33 @@
       set("construida_total_m2", fmt.m2.format(cap.construida_total_m2) + " m²");
       set("superficie_poligono_m2", fmt.m2.format(parcelaGeom ?? cap.superficie_parcela_m2) + " m²");
       set("edificabilidad_m2", fmt.m2.format(cap.edificabilidad_m2) + " m²");
-      set("n_viviendas", fmt.int.format(cap.n_viviendas_objetivo));
+      set("superficie_libre_m2", fmt.m2.format(cap.superficie_libre_total_m2 ?? 0) + " m²");
     } else if (env) {
       set("construida_total_m2", fmt.m2.format(env.edificabilidad_consumida_m2) + " m²");
       set("superficie_poligono_m2", fmt.m2.format(parcelaGeom ?? parcelaArea ?? 0) + " m²");
       set("edificabilidad_m2", fmt.m2.format(env.edificabilidad_max_m2) + " m²");
-      set("n_viviendas", fmt.int.format(env.n_viviendas_objetivo) + " obj.");
+      // La superficie libre solo está disponible tras el cálculo completo (capacidad).
+      set("superficie_libre_m2", "—");
     }
   }
 
   // ─── Aviso de exceso de construida (solo Rehabilitación) ──────────────
   const modalExceso = document.getElementById("rc-modal-exceso");
   const avisoExceso = document.getElementById("rc-aviso-exceso");
+
+  // El modal de exceso se muestra UNA sola vez POR PROYECTO: cambiar o eliminar
+  // pestañas recarga la página (reiniciaría `excesoAceptado`), así que persistimos
+  // en localStorage (con clave por proyecto) que ya se vio. Tras la primera vez solo
+  // queda el aviso inferior.
+  const _proyectoId = (typeof window.__RC_PROYECTO_ID__ === "string" && window.__RC_PROYECTO_ID__) || "sin-proyecto";
+  const EXCESO_VISTO_KEY = "rc_exceso_visto:" + _proyectoId;
+  function excesoYaVisto() {
+    try { return localStorage.getItem(EXCESO_VISTO_KEY) === "1"; } catch (e) { return false; }
+  }
+  function marcarExcesoVisto() {
+    try { localStorage.setItem(EXCESO_VISTO_KEY, "1"); } catch (e) { /* storage no disponible */ }
+  }
+  if (excesoYaVisto()) ESTADO.excesoAceptado = true;
 
   function construidaProyectada(payload) {
     const cap = payload?.capacidad;
@@ -273,6 +408,7 @@
   // Aceptar (o cerrar) = se ha visto la advertencia: a partir de ahí, aviso inferior.
   function aceptarExceso() {
     ESTADO.excesoAceptado = true;
+    marcarExcesoVisto();                 // no volver a mostrar el modal en cargas futuras
     cerrarModalExceso();
     if (avisoExceso) avisoExceso.hidden = false;
   }
@@ -377,8 +513,10 @@
   }
 
   // Etiqueta legible de una tipología (busca en todos los conjuntos de opciones).
+  // Un combo-slug (con "*") es una combinación de dormitorios → etiqueta compuesta.
   function _labelTipologia(slug) {
     if (!slug) return null;
+    if (slug.includes("*")) return etiquetaDesdeSlug(slug);
     for (const set of Object.values(OPCIONES_TIPOLOGIA)) {
       if (set[slug]) return set[slug];
     }
@@ -522,7 +660,17 @@
   // (dominio.py): antes faltaba "incumplimiento" e inventaba un "error" no emitido,
   // y por el fallback `?? 1` todo incumplimiento se degradaba al peso de "aviso".
   const NIVEL_PESO = { error: 0, incumplimiento: 1, aviso: 2, info: 3 };
+  // Conteo de alertas del último cálculo por nivel (para el resumen persistido por
+  // escenario). Los niveles casan con `NivelAlerta` del dominio.
+  function resumenAlertas(alertas) {
+    const c = { error: 0, incumplimiento: 0, aviso: 0, info: 0 };
+    (alertas || []).forEach(a => { if (a && c[a.nivel] !== undefined) c[a.nivel]++; });
+    return c;
+  }
+
   function repintarAlertas(alertas) {
+    // Se llama siempre tras un cálculo real → registra las alertas para el resumen.
+    ESTADO.ultimasAlertas = alertas || [];
     if (!alertasBox || !alertasUl) return;
     if (!alertas || !alertas.length) {
       alertasBox.hidden = true;
@@ -662,8 +810,13 @@
       actualizarBrujula(data);
       repintarKpis(data);
       repintarAlertas(data.alertas);
-      repintarTablaPlanta(data.tabla_planta);
-      repintarTablaUnidad(data.tabla_unidad);
+      // Las tablas «Por planta» / «Por unidad» permanecen vacías hasta el PRIMER
+      // cálculo disparado por el usuario: el cálculo automático de la carga inicial
+      // (opts.inicial) dibuja envolvente/KPIs pero no rellena las tablas.
+      if (!opts.inicial) {
+        repintarTablaPlanta(data.tabla_planta);
+        repintarTablaUnidad(data.tabla_unidad);
+      }
       verificarExcesoConstruida(data);
       if (!auto) mostrarToast("Capacidad calculada");
     } catch (e) {
@@ -773,25 +926,233 @@
     }
   }
 
-  // ─── Guardar parámetros ───────────────────────────────────────────────
-  let guardando = false;   // anti-doble-click: evita POST /guardar concurrentes
+  // ─── Escenarios (pestañas del activo) ─────────────────────────────────
+  // Cada pestaña es una hipótesis de programa sobre la misma parcela. El estado
+  // vive embebido (window.__RC_ESCENARIOS__): la pestaña ACTIVA se edita en el
+  // formulario; las demás conservan sus parámetros/resumen. Conmutar/crear/borrar
+  // persiste la lista y recarga (el servidor renderiza el escenario destino).
+  const tabsEscenariosEl = document.getElementById("rc-escenarios");
+  const ESCENARIOS = Array.isArray(window.__RC_ESCENARIOS__) ? window.__RC_ESCENARIOS__ : [];
+  let escenarioActivo = window.__RC_ESCENARIO_ACTIVO__
+    || (ESCENARIOS[0] && ESCENARIOS[0].id) || "e1";
+  if (!ESCENARIOS.length && estado === "ok") {
+    ESCENARIOS.push({ id: escenarioActivo, nombre: "", parametros: {}, resumen: {} });
+  }
+  let ocupadoEsc = false;   // anti-doble-click en alta/baja/conmutación
+
+  function resumenActual() {
+    // Iter. 3: el resumen viene de data.capacidad (no de edificio.totales).
+    const base = ESTADO.fullPayload?.capacidad
+      || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
+      || ESTADO.fullPayload?.edificio?.totales
+      || ESTADO.previewPayload?.envolvente
+      || {};
+    // Si hubo cálculo, embebe el resumen de alertas (lo consume el flujo del
+    // proyecto). Sin cálculo aún → se deja fuera (escenario «sin calcular»).
+    if (ESTADO.ultimasAlertas !== undefined) {
+      return { ...base, alertas_resumen: resumenAlertas(ESTADO.ultimasAlertas) };
+    }
+    return base;
+  }
+
+  function _textoOpcion(sel) {
+    if (!sel || sel.selectedIndex < 0) return "";
+    const o = sel.options[sel.selectedIndex];
+    return o ? (o.textContent || "").trim() : "";
+  }
+  function _nDorms() {
+    const inp = document.getElementById("rc-apt-ndorms");
+    const n = inp ? parseInt(inp.value, 10) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+  // Nombre reactivo de la pestaña, derivado del programa elegido en el formulario.
+  // Cola reactiva de vivienda/apartamento: en modo inmueble, el nº de dormitorios;
+  // en obra nueva/rehab, el nº de unidades de la mezcla elegida (o «sin mezcla»).
+  function _colaProgramaDorms() {
+    if (esInmueble) {
+      const n = _nDorms();
+      return n <= 0 ? "Estudio" : (n + " dorm.");
+    }
+    if (ESTADO.mezclaPlanta && ESTADO.mezclaPlanta.mezcla && ESTADO.mezclaPlanta.mezcla.length) {
+      const n = ESTADO.mezclaPlanta.mezcla.length;
+      return n + (n === 1 ? " unidad" : " uds/planta");
+    }
+    const tipos = getTiposUnidadHidden();
+    return tipos.length ? (tipos.length + (tipos.length === 1 ? " tipo" : " tipos")) : "Sin definir";
+  }
+  function nombreEscenario() {
+    const uso = usoActivoForm();
+    if (uso === "vivienda") {
+      return "Vivienda · " + _colaProgramaDorms();
+    }
+    if (uso === "apartamentos_turisticos") {
+      const llaves = (form.querySelector('select[name="categoria_apartamentos"]')?.value || "").trim();
+      const grupoVal = form.querySelector('select[name="grupo_apartamentos"]')?.value || "";
+      const grupo = grupoVal === "conjuntos" ? "Conjunto" : "Edificio";
+      return "Apartamento " + (llaves ? llaves + " · " : "") + grupo + " · " + _colaProgramaDorms();
+    }
+    if (uso === "hotelero") {
+      const cat = _textoOpcion(form.querySelector('select[name="categoria_hotelero"]'));
+      const tip = _textoOpcion(form.querySelector('select[name="tipologia_habitacion"][data-bloque="programa"]'));
+      return tip ? (cat + " · " + tip) : (cat || "Hotelero");
+    }
+    return "Escenario";
+  }
+
+  function _etiquetaEscenario(e) {
+    const nom = (e.id === escenarioActivo) ? nombreEscenario() : (e.nombre || "");
+    return nom || "Escenario";
+  }
+
+  function dibujarTabsEscenarios() {
+    if (!tabsEscenariosEl) return;
+    tabsEscenariosEl.innerHTML = "";
+    ESCENARIOS.forEach(e => {
+      const tab = document.createElement("div");
+      tab.className = "rc-esc-tab" + (e.id === escenarioActivo ? " rc-esc-tab-activo" : "");
+      tab.dataset.id = e.id;
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "rc-esc-tab-btn";
+      btn.setAttribute("role", "tab");
+      btn.setAttribute("aria-selected", e.id === escenarioActivo ? "true" : "false");
+      btn.textContent = _etiquetaEscenario(e);
+      if (e.id !== escenarioActivo) btn.addEventListener("click", () => cambiarEscenario(e.id));
+      tab.appendChild(btn);
+
+      if (puedeEditar && ESCENARIOS.length > 1) {
+        const cerrar = document.createElement("button");
+        cerrar.type = "button";
+        cerrar.className = "rc-esc-cerrar";
+        cerrar.setAttribute("aria-label", "Eliminar escenario");
+        cerrar.textContent = "×";
+        cerrar.addEventListener("click", ev => { ev.stopPropagation(); borrarEscenario(e.id); });
+        tab.appendChild(cerrar);
+      }
+      tabsEscenariosEl.appendChild(tab);
+    });
+    if (puedeEditar) {
+      const mas = document.createElement("button");
+      mas.type = "button";
+      mas.className = "rc-esc-add";
+      mas.title = "Añadir escenario";
+      mas.setAttribute("aria-label", "Añadir escenario");
+      mas.textContent = "+";
+      mas.addEventListener("click", crearEscenario);
+      tabsEscenariosEl.appendChild(mas);
+    }
+  }
+
+  // Actualiza en vivo el nombre de la pestaña activa al cambiar el programa.
+  function actualizarNombreActivo() {
+    if (!tabsEscenariosEl) return;
+    const e = ESCENARIOS.find(x => x.id === escenarioActivo);
+    const nom = nombreEscenario();
+    if (e) e.nombre = nom;
+    const btn = tabsEscenariosEl.querySelector(".rc-esc-tab-activo .rc-esc-tab-btn");
+    if (btn) btn.textContent = nom || "Escenario";
+  }
+
+  function _snapshotActivo() {
+    const e = ESCENARIOS.find(x => x.id === escenarioActivo);
+    if (!e) return;
+    e.parametros = leerFormulario();
+    e.resumen = resumenActual();
+    e.nombre = nombreEscenario();
+  }
+
+  function _persistirEscenarios(nuevoActivo) {
+    const body = {
+      escenarios: ESCENARIOS.map(e => ({
+        id: e.id, nombre: e.nombre || "",
+        parametros: e.parametros || {}, resumen: e.resumen || {},
+      })),
+      activo: nuevoActivo || escenarioActivo,
+      modo: modoActivo,
+    };
+    return fetch("/modulos/render-calculos/escenarios", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  function _nuevoIdEscenario() {
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID().slice(0, 8); } catch (e) { /* sin crypto */ }
+    return "e" + Math.abs(Date.now()).toString(36);
+  }
+
+  function _irAEscenario(id) {
+    const u = new URL(window.location.href);
+    u.searchParams.set("escenario", id);
+    window.location.assign(u.toString());
+  }
+
+  async function cambiarEscenario(id) {
+    if (id === escenarioActivo || ocupadoEsc) return;
+    ocupadoEsc = true;
+    try {
+      if (puedeEditar) {
+        _snapshotActivo();
+        const r = await _persistirEscenarios(id);
+        if (!r.ok && r.status !== 409) {
+          ocupadoEsc = false;
+          mostrarToast("No se pudo guardar antes de cambiar", true);
+          return;
+        }
+      }
+      _irAEscenario(id);   // el servidor renderiza el escenario destino
+    } catch (e) { ocupadoEsc = false; mostrarToast("Error de red", true); }
+  }
+
+  async function crearEscenario() {
+    if (!puedeEditar || ocupadoEsc) return;
+    ocupadoEsc = true;
+    try {
+      _snapshotActivo();
+      // Pestaña nueva EN BLANCO: no copia el escenario activo. `parametros: {}` →
+      // el backend lo normaliza a los parámetros de fábrica (por defecto); `resumen`
+      // vacío → sin cálculos (las tablas salen vacías hasta el primer cálculo).
+      const nuevo = {
+        id: _nuevoIdEscenario(),
+        nombre: "",
+        parametros: {},
+        resumen: {},
+      };
+      ESCENARIOS.push(nuevo);
+      const r = await _persistirEscenarios(nuevo.id);
+      if (!r.ok) { ocupadoEsc = false; mostrarToast("No se pudo crear el escenario", true); return; }
+      _irAEscenario(nuevo.id);
+    } catch (e) { ocupadoEsc = false; mostrarToast("Error de red", true); }
+  }
+
+  async function borrarEscenario(id) {
+    if (!puedeEditar || ocupadoEsc || ESCENARIOS.length <= 1) return;
+    ocupadoEsc = true;
+    try {
+      const idx = ESCENARIOS.findIndex(x => x.id === id);
+      if (idx < 0) { ocupadoEsc = false; return; }
+      if (id !== escenarioActivo) _snapshotActivo();   // no snapshotear el que se elimina
+      ESCENARIOS.splice(idx, 1);
+      const destino = (id === escenarioActivo)
+        ? (ESCENARIOS[Math.max(0, idx - 1)] || ESCENARIOS[0]).id
+        : escenarioActivo;
+      const r = await _persistirEscenarios(destino);
+      if (!r.ok) { ocupadoEsc = false; mostrarToast("No se pudo eliminar", true); return; }
+      _irAEscenario(destino);
+    } catch (e) { ocupadoEsc = false; mostrarToast("Error de red", true); }
+  }
+
+  // ─── Guardar (persiste el escenario activo en su pestaña) ─────────────
+  let guardando = false;   // anti-doble-click: evita POST concurrentes
   async function guardar() {
-    if (!puedeEditar || guardando) return;
+    if (!puedeEditar || guardando || !ESCENARIOS.length) return;
     guardando = true;
     if (btnGuardar) btnGuardar.disabled = true;
     try {
-      const bloques = leerFormulario();
-      // Iter. 3: el resumen ahora viene de data.capacidad (no de edificio.totales).
-      const resumen = ESTADO.fullPayload?.capacidad
-        || ESTADO.fullPayload?.totales          // modo inmueble (estancias)
-        || ESTADO.fullPayload?.edificio?.totales
-        || ESTADO.previewPayload?.envolvente
-        || {};
-      const resp = await fetch("/modulos/render-calculos/guardar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parametros: bloques, resumen, modo: modoActivo }),
-      });
+      _snapshotActivo();
+      const resp = await _persistirEscenarios(escenarioActivo);
       if (resp.status === 409) { mostrarToast("Crea o abre un proyecto primero", true); return; }
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ detail: resp.statusText }));
@@ -1083,6 +1444,7 @@
     // Guardar la normativa aplicada para que el backend la use como referencia
     // al calcular avisos (incumplimientos / valores inferiores a la normativa).
     ESTADO_NORM.aplicada = { id: data.id, nombre: data.nombre, urbanisticos: urb };
+    gatearUsoDestinoPorPgou();   // ajusta el uso destino a los usos de la normativa aplicada
     modal.close();
     mostrarToast(`Normativa "${data.nombre}" aplicada`);
     recalcularAuto();
@@ -1121,13 +1483,20 @@
 
   function fijarCombo(combo) {
     ESTADO.comboDormitorios = combo;   // { slug, etiqueta } | null
+    setCombinacionHidden(combo ? combo.slug : "");   // persiste por /escenarios
     refrescarChipCombo();
   }
+
+  // Fila de tipología que abrió el modal (paradigma «por tipo»); null = uso legado.
+  let filaTipoActiva = null;
 
   async function abrirModalCombinaciones() {
     if (!modalTip) return;
     if (estado !== "ok") { mostrarToast("Localiza primero la parcela", true); return; }
-    const nDorms = Math.max(0, parseInt(inpNdorms && inpNdorms.value, 10) || 0);
+    // El nº de dormitorios sale del numberbox de la fila que abrió el modal (por tipo);
+    // en modo inmueble/legado cae a `#rc-apt-ndorms`.
+    const nInput = (filaTipoActiva && filaTipoActiva.querySelector(".rc-tipo-ndorms")) || inpNdorms;
+    const nDorms = Math.max(0, parseInt(nInput && nInput.value, 10) || 0);
     const bloques = leerFormulario();
     const sub = document.getElementById("rc-modal-tip-sub");
     const body = document.getElementById("rc-modal-tip-body");
@@ -1188,7 +1557,9 @@
       }
       for (const c of combos) {
         const tr = document.createElement("tr");
-        const elegida = ESTADO.comboDormitorios && ESTADO.comboDormitorios.slug === c.slug;
+        const elegida = filaTipoActiva
+          ? filaTipoActiva.dataset.combo === c.slug
+          : (ESTADO.comboDormitorios && ESTADO.comboDormitorios.slug === c.slug);
         tr.className = "rc-modal-tip-fila" + (elegida ? " rc-modal-tip-elegida" : "");
         tr.innerHTML =
           `<td>${c.etiqueta}</td>` +
@@ -1197,10 +1568,19 @@
           `<td class="rc-num"><strong>${fmt.int.format(c.n_unidades)}</strong></td>` +
           `<td><button type="button" class="boton-secundario rc-btn-pequeno rc-modal-tip-elegir">Elegir</button></td>`;
         tr.querySelector(".rc-modal-tip-elegir").addEventListener("click", () => {
-          fijarCombo({ slug: c.slug, etiqueta: c.etiqueta });
-          modalTip.close();
-          mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
-          pedirCalculo();
+          if (filaTipoActiva) {
+            // Paradigma «por tipo»: fija la ocupación de ESA tipología (no la global).
+            filaTipoActiva.dataset.combo = c.slug;
+            _pintarChipTipo(filaTipoActiva);
+            modalTip.close();
+            mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
+            sincronizarTiposDesdeFilas(true);
+          } else {
+            fijarCombo({ slug: c.slug, etiqueta: c.etiqueta });
+            modalTip.close();
+            mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
+            pedirCalculo();
+          }
         });
         body.appendChild(tr);
       }
@@ -1226,6 +1606,362 @@
   });
   refrescarChipCombo();
 
+  // ─── Modal "Combinaciones de habitaciones por planta" (hotel) ─────────
+  const modalCH = document.getElementById("rc-modal-comb-hotel");
+  const btnCombHotel = document.getElementById("rc-btn-combinaciones-hotel");
+  const comboHotelBox = document.getElementById("rc-combo-hotel-elegido");
+  const comboHotelTxt = document.getElementById("rc-combo-hotel-elegido-txt");
+  const btnComboHotelLimpiar = document.getElementById("rc-combo-hotel-limpiar");
+
+  function refrescarChipComboHotel() {
+    if (!comboHotelBox) return;
+    if (ESTADO.comboHotel) {
+      comboHotelBox.hidden = false;
+      comboHotelTxt.textContent = ESTADO.comboHotel.etiqueta;
+    } else {
+      comboHotelBox.hidden = true;
+      comboHotelTxt.textContent = "";
+    }
+  }
+
+  function fijarComboHotel(combo) {
+    ESTADO.comboHotel = combo;   // { slug, etiqueta } | null
+    setCombinacionHidden(combo ? combo.slug : "");
+    refrescarChipComboHotel();
+  }
+
+  async function abrirModalCombinacionesHotel() {
+    if (!modalCH) return;
+    if (estado !== "ok") { mostrarToast("Localiza primero la parcela", true); return; }
+    const bloques = leerFormulario();
+    const sub = document.getElementById("rc-modal-ch-sub");
+    const body = document.getElementById("rc-modal-ch-body");
+    const vacio = document.getElementById("rc-modal-ch-vacio");
+    const nocaben = document.getElementById("rc-modal-ch-nocaben");
+    body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Calculando…</td></tr>';
+    vacio.hidden = true;
+    if (nocaben) nocaben.hidden = true;
+    if (typeof modalCH.showModal === "function") modalCH.showModal();
+    else modalCH.setAttribute("open", "");
+    try {
+      const resp = await fetch("/modulos/render-calculos/combinaciones-hotel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bloques),
+      });
+      if (resp.status === 409) {
+        body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Localiza primero la parcela.</td></tr>';
+        return;
+      }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(err.detail || "Error")}</td></tr>`;
+        return;
+      }
+      const data = await resp.json();
+      if (data.error) {
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(data.error)}</td></tr>`;
+        return;
+      }
+      sub.textContent = `Mezclas de habitaciones que caben en una planta de ${fmt.m2.format(data.util_planta_m2)} m² útiles.`;
+      const combos = data.combinaciones || [];
+
+      // Conteo de las que no caben: tipologías que no caben ni una vez + combinaciones
+      // omitidas por la cota. Espejo del «no caben» del ejemplo del arquitecto.
+      const noCabenTipos = data.no_caben_tipos || [];
+      const noMostradas = data.no_mostradas || 0;
+      if (nocaben && (noCabenTipos.length || noMostradas)) {
+        const partes = [];
+        if (noCabenTipos.length) {
+          const nombres = noCabenTipos.map(s => (PLURAL_COMBO[s] ? PLURAL_COMBO[s][0] : s)).join(", ");
+          partes.push(`No caben ni una vez en la planta: ${nombres}`);
+        }
+        if (noMostradas) partes.push(`${noMostradas} combinación(es) adicionales no mostradas`);
+        nocaben.hidden = false;
+        nocaben.textContent = partes.join(". ") + ".";
+      }
+
+      body.innerHTML = "";
+      if (!combos.length) {
+        vacio.hidden = false;
+        return;
+      }
+      for (const c of combos) {
+        const tr = document.createElement("tr");
+        const elegida = ESTADO.comboHotel && ESTADO.comboHotel.slug === c.slug;
+        tr.className = "rc-modal-tip-fila" + (elegida ? " rc-modal-tip-elegida" : "");
+        tr.innerHTML =
+          `<td>${escapeHtml(c.etiqueta)}</td>` +
+          `<td class="rc-num"><strong>${fmt.int.format(c.unidades_por_planta)}</strong></td>` +
+          `<td class="rc-num">${fmt.int.format(c.plazas_por_planta)}</td>` +
+          `<td class="rc-num">${fmt.m2.format(c.util_usado_m2)} m²</td>` +
+          `<td><button type="button" class="boton-secundario rc-btn-pequeno rc-modal-tip-elegir">Elegir</button></td>`;
+        tr.querySelector(".rc-modal-tip-elegir").addEventListener("click", () => {
+          fijarComboHotel({ slug: c.slug, etiqueta: c.etiqueta });
+          modalCH.close();
+          mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
+          pedirCalculo();
+        });
+        body.appendChild(tr);
+      }
+    } catch (e) {
+      body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Error de red</td></tr>';
+    }
+  }
+
+  if (btnCombHotel) btnCombHotel.addEventListener("click", abrirModalCombinacionesHotel);
+  const btnModalCHCerrar = document.getElementById("rc-modal-ch-cerrar");
+  if (btnModalCHCerrar && modalCH) btnModalCHCerrar.addEventListener("click", () => modalCH.close());
+  if (btnComboHotelLimpiar) btnComboHotelLimpiar.addEventListener("click", () => {
+    fijarComboHotel(null);
+    pedirCalculo();
+  });
+
+  // ─── Tipos de unidad + "Combinaciones por planta" (vivienda / apartamentos) ──
+  const contTipos = document.getElementById("rc-tipos-unidad");
+  const modalCP = document.getElementById("rc-modal-comb-planta");
+  const btnCombPlanta = document.getElementById("rc-btn-combinaciones-planta");
+  const btnAddTipo = document.getElementById("rc-btn-add-tipo");
+  const btnComboPlantaLimpiar = document.getElementById("rc-combo-planta-limpiar");
+
+  function refrescarChipMezcla() {
+    const box = document.getElementById("rc-combo-planta-elegido");
+    const txt = document.getElementById("rc-combo-planta-elegido-txt");
+    if (!box) return;
+    if (ESTADO.mezclaPlanta) { box.hidden = false; txt.textContent = ESTADO.mezclaPlanta.etiqueta; }
+    else { box.hidden = true; txt.textContent = ""; }
+  }
+
+  function fijarMezcla(m) {
+    ESTADO.mezclaPlanta = m;   // { mezcla:[...combo_slug], etiqueta } | null
+    setMezclaHidden(m ? m.mezcla : []);
+    if (m) {
+      // Al elegir mezcla, invalida la combinación homogénea legada para que no
+      // interfiera (el backend da prioridad a `mezcla_planta`; no debe llegar
+      // `combo_dormitorios` de una restauración antigua).
+      ESTADO.comboDormitorios = null;
+      setCombinacionHidden("");
+    }
+    refrescarChipMezcla();
+    actualizarNombreActivo();   // nombre reactivo de la pestaña (elegir/limpiar no pasan por el debounce)
+  }
+
+  // Pinta el chip de ocupación de una fila desde su `data-combo` (o placeholder).
+  function _pintarChipTipo(fila) {
+    const chip = fila.querySelector(".rc-tipo-combo-chip");
+    if (!chip) return;
+    const slug = fila.dataset.combo || "";
+    if (slug) {
+      chip.textContent = etiquetaDesdeSlug(slug);
+      chip.classList.remove("rc-tipo-combo-vacio");
+    } else {
+      chip.textContent = "— elige combinación";
+      chip.classList.add("rc-tipo-combo-vacio");
+    }
+  }
+
+  // Fila de tipo: numberbox (nº dormitorios) + botón «Ver combinaciones» (abre el modal
+  // de ocupaciones acotado a esta fila) + chip de la ocupación elegida + botón −. La
+  // ocupación elegida (combo-slug) se guarda en `data-combo`.
+  function crearFilaTipo(comboSlug) {
+    const n = nDormsDeSlug(comboSlug);
+    const fila = document.createElement("div");
+    fila.className = "rc-tipo-fila";
+    if (comboSlug) fila.dataset.combo = comboSlug;
+    fila.innerHTML =
+      `<label class="rc-tipo-ndorms-wrap"><span class="rc-tipo-ndorms-lbl">Dorms.</span>` +
+      `<input type="number" class="rc-tipo-ndorms" min="0" step="1" value="${n}" aria-label="Nº de dormitorios del tipo"></label>` +
+      `<button type="button" class="boton-secundario rc-btn-pequeno rc-tipo-vercomb">Ver combinaciones</button>` +
+      `<span class="rc-tipo-combo-chip"></span>` +
+      `<button type="button" class="rc-tip-quitar" aria-label="Eliminar tipo">−</button>`;
+    _pintarChipTipo(fila);
+    return fila;
+  }
+
+  // Reconstruye las filas desde el hidden (al menos una). Uso-dependiente.
+  function construirTiposDesdeHidden() {
+    if (!contTipos) return;
+    contTipos.innerHTML = "";
+    let tipos = getTiposUnidadHidden();
+    if (!tipos.length) tipos = ["doble*1"];   // un tipo por defecto para el uso activo
+    tipos.forEach(s => contTipos.appendChild(crearFilaTipo(s)));
+  }
+
+  // Filas → alfabeto distinto de combo-slugs (solo filas con ocupación elegida) → hidden.
+  // Si el alfabeto cambió, la mezcla elegida deja de ser válida y se limpia.
+  function sincronizarTiposDesdeFilas(recalc) {
+    if (!contTipos) return;
+    const slugs = [];
+    contTipos.querySelectorAll(".rc-tipo-fila").forEach(fila => {
+      const s = fila.dataset.combo;
+      if (s && !slugs.includes(s)) slugs.push(s);
+    });
+    const antes = JSON.stringify(getTiposUnidadHidden());
+    setTiposUnidadHidden(slugs);
+    if (JSON.stringify(slugs) !== antes && ESTADO.mezclaPlanta) fijarMezcla(null);
+    if (recalc) calcularConDebounce();
+  }
+
+  if (contTipos) {
+    // Cambiar el nº de dormitorios de una fila: estudio (0) tiene ocupación única y se
+    // autofija; N≥1 invalida la ocupación anterior (era de otro N) hasta elegir en el modal.
+    contTipos.addEventListener("change", ev => {
+      const fila = ev.target.closest(".rc-tipo-fila");
+      if (!fila || !ev.target.classList.contains("rc-tipo-ndorms")) return;
+      const n = Math.max(0, parseInt(ev.target.value, 10) || 0);
+      ev.target.value = n;
+      if (n === 0) fila.dataset.combo = "estudio";
+      else delete fila.dataset.combo;
+      _pintarChipTipo(fila);
+      sincronizarTiposDesdeFilas(true);
+    });
+    contTipos.addEventListener("click", ev => {
+      const verBtn = ev.target.closest(".rc-tipo-vercomb");
+      if (verBtn) {
+        filaTipoActiva = ev.target.closest(".rc-tipo-fila");
+        abrirModalCombinaciones();
+        return;
+      }
+      const quitar = ev.target.closest(".rc-tip-quitar");
+      if (quitar) {
+        // No dejar el edificio sin ningún tipo.
+        if (contTipos.querySelectorAll(".rc-tipo-fila").length <= 1) return;
+        const fila = quitar.closest(".rc-tipo-fila");
+        if (fila) fila.remove();
+        sincronizarTiposDesdeFilas(true);
+      }
+    });
+  }
+  if (btnAddTipo) btnAddTipo.addEventListener("click", () => {
+    if (!contTipos) return;
+    contTipos.appendChild(crearFilaTipo("doble*1"));
+    sincronizarTiposDesdeFilas(true);
+  });
+
+  async function abrirModalCombinacionesPorPlanta() {
+    if (!modalCP) return;
+    if (estado !== "ok") { mostrarToast("Localiza primero la parcela", true); return; }
+    sincronizarTiposDesdeFilas(false);   // hidden fresco antes del POST
+    const bloques = leerFormulario();
+    const sub = document.getElementById("rc-modal-cp-sub");
+    const body = document.getElementById("rc-modal-cp-body");
+    const vacio = document.getElementById("rc-modal-cp-vacio");
+    const nocaben = document.getElementById("rc-modal-cp-nocaben");
+    body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Calculando…</td></tr>';
+    vacio.hidden = true;
+    if (nocaben) nocaben.hidden = true;
+    if (typeof modalCP.showModal === "function") modalCP.showModal();
+    else modalCP.setAttribute("open", "");
+    try {
+      const resp = await fetch("/modulos/render-calculos/combinaciones-por-planta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bloques),
+      });
+      if (resp.status === 409) {
+        body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Localiza primero la parcela.</td></tr>';
+        return;
+      }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(err.detail || "Error")}</td></tr>`;
+        return;
+      }
+      const data = await resp.json();
+      if (data.error) {
+        body.innerHTML = `<tr><td colspan="5" class="rc-vacio">${escapeHtml(data.error)}</td></tr>`;
+        return;
+      }
+      sub.textContent = `Mezclas de unidades que caben en una planta de ${fmt.m2.format(data.util_planta_m2)} m² útiles.`;
+      const combos = data.combinaciones || [];
+      const noCabenTipos = data.no_caben_tipos || [];
+      const noMostradas = data.no_mostradas || 0;
+      if (nocaben && (noCabenTipos.length || noMostradas)) {
+        const partes = [];
+        if (noCabenTipos.length) {
+          partes.push(`No caben ni una vez en la planta: ${noCabenTipos.map(s => etiquetaDesdeSlug(s)).join(", ")}`);
+        }
+        if (noMostradas) partes.push(`${noMostradas} combinación(es) adicionales no mostradas`);
+        nocaben.hidden = false;
+        nocaben.textContent = partes.join(". ") + ".";
+      }
+      body.innerHTML = "";
+      if (!combos.length) { vacio.hidden = false; return; }
+      const mezclaves = ESTADO.mezclaPlanta
+        ? JSON.stringify([...ESTADO.mezclaPlanta.mezcla].sort()) : null;
+      for (const c of combos) {
+        const tr = document.createElement("tr");
+        const elegida = mezclaves && JSON.stringify([...(c.mezcla || [])].sort()) === mezclaves;
+        tr.className = "rc-modal-tip-fila" + (elegida ? " rc-modal-tip-elegida" : "");
+        tr.innerHTML =
+          `<td>${escapeHtml(c.etiqueta)}</td>` +
+          `<td class="rc-num"><strong>${fmt.int.format(c.unidades_por_planta)}</strong></td>` +
+          `<td class="rc-num">${fmt.int.format(c.plazas_por_planta)}</td>` +
+          `<td class="rc-num">${fmt.m2.format(c.util_usado_m2)} m²</td>` +
+          `<td><button type="button" class="boton-secundario rc-btn-pequeno rc-modal-tip-elegir">Elegir</button></td>`;
+        tr.querySelector(".rc-modal-tip-elegir").addEventListener("click", () => {
+          fijarMezcla({ mezcla: c.mezcla, etiqueta: c.etiqueta });
+          modalCP.close();
+          mostrarToast(`Combinación "${c.etiqueta}" aplicada`);
+          pedirCalculo();
+        });
+        body.appendChild(tr);
+      }
+    } catch (e) {
+      body.innerHTML = '<tr><td colspan="5" class="rc-vacio">Error de red</td></tr>';
+    }
+  }
+
+  if (btnCombPlanta) btnCombPlanta.addEventListener("click", abrirModalCombinacionesPorPlanta);
+  const btnModalCPCerrar = document.getElementById("rc-modal-cp-cerrar");
+  if (btnModalCPCerrar && modalCP) btnModalCPCerrar.addEventListener("click", () => modalCP.close());
+  if (btnComboPlantaLimpiar) btnComboPlantaLimpiar.addEventListener("click", () => {
+    fijarMezcla(null);
+    pedirCalculo();
+  });
+
+  // Restaurar la combinación persistida del escenario (inputs ocultos) al chip correcto.
+  (function restaurarCombinacion() {
+    const slug = getCombinacionHidden();
+    if (slug) {
+      const combo = { slug, etiqueta: etiquetaDesdeSlug(slug) };
+      if (usoActivoForm() === "hotelero") ESTADO.comboHotel = combo;
+      else ESTADO.comboDormitorios = combo;
+    }
+    // Mezcla POR PLANTA (vivienda / apartamentos): restaura estado + reconstruye filas.
+    const uso = usoActivoForm();
+    if (uso === "vivienda" || uso === "apartamentos_turisticos") {
+      const mezcla = getMezclaHidden();
+      if (mezcla.length) ESTADO.mezclaPlanta = { mezcla, etiqueta: etiquetaMezcla(mezcla) };
+    }
+    construirTiposDesdeHidden();
+    if (!esInmueble && (uso === "vivienda" || uso === "apartamentos_turisticos")) {
+      sincronizarTiposDesdeFilas(false);   // fija el hidden si venía vacío (fila por defecto)
+    }
+    refrescarChipCombo();
+    refrescarChipComboHotel();
+    refrescarChipMezcla();
+  })();
+
+  // Cambiar el USO invalida la combinación (era de otro uso): limpia chips + hidden.
+  const selUsoCombo = form.querySelector('select[name="uso"]');
+  if (selUsoCombo) selUsoCombo.addEventListener("change", () => {
+    ESTADO.comboDormitorios = null;
+    ESTADO.comboHotel = null;
+    ESTADO.mezclaPlanta = null;
+    setCombinacionHidden("");
+    setMezclaHidden([]);
+    setTiposUnidadHidden([]);
+    construirTiposDesdeHidden();   // rearma una fila por defecto para el nuevo uso
+    const uso = usoActivoForm();
+    if (!esInmueble && (uso === "vivienda" || uso === "apartamentos_turisticos")) {
+      sincronizarTiposDesdeFilas(false);
+    }
+    refrescarChipCombo();
+    refrescarChipComboHotel();
+    refrescarChipMezcla();
+  });
+
   // ─── Modal "Superficies mínimas de estancias" (vivienda · Normativa) ──
   const API_SUP = "/modulos/render-calculos/superficies-vivienda";
   const modalSup = document.getElementById("rc-modal-superficies");
@@ -1245,7 +1981,7 @@
       const resp = await fetch(API_SUP);
       if (!resp.ok) { cont.innerHTML = '<p class="rc-vacio">No se pudieron cargar las superficies.</p>'; return; }
       const data = await resp.json();
-      pintarSeccionesSuperficies(data.filas || [], data.util_maximo || {});
+      pintarSeccionesSuperficies(data.filas || []);
     } catch (e) {
       cont.innerHTML = '<p class="rc-vacio">Error de red.</p>';
     }
@@ -1254,6 +1990,8 @@
   // Construye una fila <tr> de estancia editable. `f` es la fila del backend.
   function filaSuperficie(f) {
     const tr = document.createElement("tr");
+    // La fila del útil mínimo de la unidad no es una estancia: se resalta como total.
+    if (f.estancia === "_util_minimo") tr.className = "rc-sup-fila-util";
     const td1 = document.createElement("td");
     td1.textContent = f.etiqueta;
     const td2 = document.createElement("td");
@@ -1273,33 +2011,8 @@
     return tr;
   }
 
-  // Fila del ÚTIL MÁXIMO de una tipología (R3). No es una estancia: su mínimo
-  // es el techo de la unidad. Se envía con estancia "_util_maximo".
-  function filaUtilMaximo(nDorms, valor) {
-    const tr = document.createElement("tr");
-    tr.className = "rc-sup-fila-maximo";
-    const td1 = document.createElement("td");
-    td1.textContent = "Útil máximo de la unidad";
-    const td2 = document.createElement("td");
-    const inp = document.createElement("input");
-    inp.type = "number";
-    inp.min = "0";
-    inp.step = "1";
-    inp.value = valor;
-    inp.className = "rc-sup-input";
-    inp.dataset.ndorms = nDorms;
-    inp.dataset.estancia = "_util_maximo";
-    inp.dataset.original = valor;
-    if (!puedeEditar) inp.disabled = true;
-    td2.appendChild(inp);
-    tr.appendChild(td1);
-    tr.appendChild(td2);
-    return tr;
-  }
-
-  // Construye una sección (título + tabla). `utilMaximo` (n_dorms→m²) añade,
-  // solo en las secciones por tipología, la fila editable del útil máximo.
-  function seccionSuperficies(titulo, filas, nDorms, utilMaximo) {
+  // Construye una sección (título + tabla).
+  function seccionSuperficies(titulo, filas) {
     const sec = document.createElement("section");
     sec.className = "rc-sup-seccion";
     const h = document.createElement("h3");
@@ -1310,15 +2023,12 @@
     tabla.innerHTML = "<thead><tr><th>Estancia</th><th>Mínimo (m²)</th></tr></thead>";
     const tbody = document.createElement("tbody");
     filas.forEach(f => tbody.appendChild(filaSuperficie(f)));
-    if (nDorms != null && utilMaximo != null && utilMaximo[nDorms] != null) {
-      tbody.appendChild(filaUtilMaximo(nDorms, utilMaximo[nDorms]));
-    }
     tabla.appendChild(tbody);
     sec.appendChild(tabla);
     return sec;
   }
 
-  function pintarSeccionesSuperficies(filas, utilMaximo) {
+  function pintarSeccionesSuperficies(filas) {
     const cont = document.getElementById("rc-sup-secciones");
     cont.innerHTML = "";
     if (!filas.length) {
@@ -1349,7 +2059,7 @@
     });
     Array.from(grupos.keys()).sort((a, b) => a - b).forEach(n => {
       const titulo = LBL_TIPOLOGIA_VIV[n] || (n + " dormitorios");
-      cont.appendChild(seccionSuperficies(titulo, grupos.get(n), n, utilMaximo));
+      cont.appendChild(seccionSuperficies(titulo, grupos.get(n)));
     });
   }
 
@@ -1410,7 +2120,8 @@
     estudio: "Estudio", "1d": "1 dormitorio", "2d": "2 dormitorios",
     "3d": "3 dormitorios", "4d": "4 o más dormitorios",
     individual: "Individual", doble: "Doble", triple: "Triple",
-    cuadruple: "Cuádruple", multiple: "Múltiple (albergue)",
+    cuadruple: "Cuádruple", junior_suite: "Junior Suite", suite: "Suite",
+    multiple: "Múltiple (albergue)",
     salon_comedor: "Salón-comedor (común de la unidad)", comunes: "Áreas comunes",
   };
   const SELECT_CATEGORIA_MIN = {
@@ -1600,7 +2311,7 @@
     _toggleOpcion(catSel, "4L", !soloDos, "2L");
   }
 
-  // "Múltiple" solo existe en albergue (resto: individual/doble/triple/cuádruple).
+  // "Múltiple" solo existe en albergue (resto: individual/doble/junior suite/suite).
   function _filtrarTipologiaHotelero() {
     const catSel = form.querySelector('select[name="categoria_hotelero"]');
     if (!catSel) return;
@@ -1609,6 +2320,30 @@
     form.querySelectorAll('[data-opciones="hotelero"] select').forEach(
       sel => _toggleOpcion(sel, "multiple", permite, "doble")
     );
+  }
+
+  // El "uso destino" solo ofrece lo que el PGOU permite (checkboxes usos_permitidos).
+  // Cada uso PGOU mapea a un UsoEdificio; el resto se deshabilita. Si el uso activo
+  // deja de estar permitido, salta al primero permitido. Sin ninguno marcado → todo
+  // deshabilitado (bloquea el uso destino). Coincide con el `habilitado` del servidor.
+  const PGOU_A_USO = {
+    residencial: "vivienda",
+    hotelero: "hotelero",
+    apartamento: "apartamentos_turisticos",
+  };
+  function gatearUsoDestinoPorPgou() {
+    const sel = form.querySelector('select[name="uso"]');
+    if (!sel) return;
+    const marcados = [...form.querySelectorAll('[name="usos_permitidos"]:checked')].map(c => c.value);
+    const permitidos = new Set(marcados.map(v => PGOU_A_USO[v]).filter(Boolean));
+    const primero = [...sel.options].map(o => o.value).find(v => permitidos.has(v)) || sel.value;
+    ["vivienda", "apartamentos_turisticos", "hotelero"].forEach(v => {
+      const opt = [...sel.options].find(o => o.value === v);
+      if (!opt) return;                        // pudo haberlo filtrado el modo
+      opt.disabled = !permitidos.has(v);       // visible pero deshabilitado (igual que el server)
+      if (opt.disabled && sel.value === v) sel.value = primero;   // salto al primero permitido
+    });
+    sel.disabled = permitidos.size === 0;      // PGOU vacío → bloquea el uso destino
   }
 
   function actualizarOpcionesCondicionales() {
@@ -1750,6 +2485,9 @@
       aplicarEstadoBloqueo(fila, !!p.bloqueado);
       const forma = p.poligono || p.base;
       if (forma) fila.dataset.vertices = JSON.stringify(forma);
+      // Huecos (edificio dentro del patio → anillo): persisten para el siguiente recálculo/guardado.
+      if (Array.isArray(p.huecos) && p.huecos.length) fila.dataset.huecos = JSON.stringify(p.huecos);
+      else delete fila.dataset.huecos;
       const cabe = p.cabe !== false;
       fila.classList.toggle("rc-patio-fila-nocabe", !cabe);
       let aviso = fila.querySelector(".rc-patio-aviso");
@@ -1804,7 +2542,7 @@
   const OPCIONES_TIPOLOGIA = {
     vivienda: { "estudio": "Estudio", "1d": "1 dormitorio", "2d": "2 dormitorios", "3d": "3 dormitorios", "4d+": "4 o más dormitorios" },
     apartamento: { "estudio": "Estudio", "individual": "Individual", "doble": "Doble", "triple": "Triple", "cuadruple": "Cuádruple" },
-    hotelero: { "individual": "Individual", "doble": "Doble", "triple": "Triple", "cuadruple": "Cuádruple", "multiple": "Múltiple (albergue)" },
+    hotelero: { "individual": "Individual", "doble": "Doble", "junior_suite": "Junior Suite", "suite": "Suite", "multiple": "Múltiple (albergue)" },
   };
   const DEFAULT_TIPOLOGIA = { vivienda: "1d", apartamento: "doble", hotelero: "doble" };
 
@@ -1956,8 +2694,10 @@
   // ─── Bindings ─────────────────────────────────────────────────────────
   function calcularConDebounce() {
     ESTADO.interaccionUsuario = true;   // cualquier edición habilita el modal de exceso
+    gatearUsoDestinoPorPgou();          // puede saltar de uso; antes de aplicar visibilidad
     aplicarVisibilidad();
     actualizarOpcionesCondicionales();
+    actualizarNombreActivo();           // nombre reactivo de la pestaña activa
     if (ESTADO.debounceId) clearTimeout(ESTADO.debounceId);
     ESTADO.debounceId = setTimeout(recalcularAuto, 300);
   }
@@ -1967,6 +2707,7 @@
   // iteración): el cálculo ya es automático con cada cambio, sin binding aquí.
   if (btnGuardar) btnGuardar.addEventListener("click", guardar);
   if (btnCsv) btnCsv.addEventListener("click", exportCsv);
+  if (tabsEscenariosEl) dibujarTabsEscenarios();   // barra de escenarios (pestañas)
 
   // Brújula inicial vacía + handler de rotación → render (no existe en inmueble).
   if (window.RcBrujula && brujulaEl) {
@@ -1978,6 +2719,7 @@
     });
   }
 
+  gatearUsoDestinoPorPgou();
   aplicarVisibilidad();
   actualizarOpcionesCondicionales();
 
@@ -1991,8 +2733,24 @@
   if (chkUsarCoef) chkUsarCoef.addEventListener("change", aplicarToggleCoef);
   aplicarToggleCoef();
 
-  // Si hay proyecto + parcela, primer cálculo automático
+  // ¿El escenario activo ya tiene un cálculo guardado (resumen no vacío)? Si es
+  // así, sus tablas se rellenan al abrir (persiste lo guardado); un escenario
+  // nuevo/sin calcular las deja vacías hasta el primer cálculo del usuario.
+  const _escActivo = ESCENARIOS.find(e => e.id === escenarioActivo);
+  const _yaCalculado = estado === "ok"
+    && !!(_escActivo && _escActivo.resumen && Object.keys(_escActivo.resumen).length);
+
+  if (!_yaCalculado) {
+    // Placeholder inicial: las tablas quedan vacías («Sin datos…») hasta el primer
+    // cálculo del usuario (cualquier cambio de parámetro).
+    repintarTablaPlanta([]);
+    repintarTablaUnidad([]);
+  }
+
+  // Si hay proyecto + parcela, primer cálculo automático de la carga. Dibuja la
+  // envolvente/KPIs/canvas siempre; rellena las tablas solo si el escenario YA
+  // estaba calculado (opts.inicial suprime el pintado de tablas en el resto).
   if (estado === "ok") {
-    recalcularAuto();
+    pedirCalculo({ auto: true, inicial: !_yaCalculado });
   }
 })();

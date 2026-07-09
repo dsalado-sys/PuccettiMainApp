@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from .dominio import Parcela, Subreferencia
+from .dominio import Parcela, PatioCatastral, Subreferencia
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,8 @@ class ParcelaRaw:
     # catastral) y su superficie en m². n_patios=None → el Catastro no dio el dato.
     n_patios: int | None = None
     patios_m2: tuple[float, ...] = field(default_factory=tuple)
+    # Geometría de cada patio (anillo WGS84 + tipo). Paralela a patios_m2.
+    patios_geom: tuple[PatioCatastral, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

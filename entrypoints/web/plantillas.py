@@ -8,7 +8,8 @@ from fastapi.templating import Jinja2Templates
 from app.nucleo.modelo import Rol
 from app.nucleo.modelo.rol import acceso
 
-from .catalogo_modulos import CATALOGO
+from .catalogo_modulos import CATALOGO, MODULOS_SIN_PROYECTO
+from .dependencias import COOKIE_PROYECTO
 
 RAIZ_WEB = Path(__file__).parent
 DIR_ESTATICOS = RAIZ_WEB / "static"
@@ -30,22 +31,48 @@ def _contexto_shell(request) -> dict:
     except (AssertionError, AttributeError):
         slug_rol = None
     try:
-        rol = Rol(slug_rol) if slug_rol else Rol.INVERSOR
+        rol = Rol(slug_rol) if slug_rol else Rol.CLIENTE
     except ValueError:
-        rol = Rol.INVERSOR
+        rol = Rol.CLIENTE
+
+    # Sin proyecto activo (cookie ausente) solo son navegables Proyectos, Normativa
+    # y Buscar parcela; el resto se oculta del rail (coherente con el gate central).
+    hay_proyecto = bool(request.cookies.get(COOKIE_PROYECTO))
 
     ruta = request.url.path
     items = []
     for tarjeta in CATALOGO:
+        requiere_proyecto = tarjeta.id not in MODULOS_SIN_PROYECTO
         items.append({
             "modulo": tarjeta,
             "acceso": acceso(rol, tarjeta.id),
             "activo": ruta == tarjeta.ruta or ruta.startswith(tarjeta.ruta + "/"),
+            "requiere_proyecto": requiere_proyecto,
+            # Deshabilitado (no oculto) si exige proyecto y no lo hay; el rail lo
+            # alterna en vivo por JS al activar/desactivar (ver proyectos.js).
+            "disponible": hay_proyecto or not requiere_proyecto,
         })
     return {"nav_items": items}
 
 
 plantillas.env.globals["contexto_shell"] = _contexto_shell
+
+
+def _formato_es(valor, decimales: int = 2) -> str:
+    """Formatea un número al estilo es-ES (punto de millar, coma decimal) para el
+    informe. `None`/no-numérico → «—»/texto tal cual. Filtro Jinja `es_num`."""
+    if valor is None:
+        return "—"
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError):
+        return str(valor)
+    txt = f"{numero:,.{decimales}f}"           # formato en-US: 1,234.56
+    # Intercambia separadores → es-ES: millar '.', decimal ','.
+    return txt.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
+plantillas.env.filters["es_num"] = _formato_es
 
 
 def _calcular_version_estaticos() -> str:

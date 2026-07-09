@@ -19,7 +19,7 @@ app/
 │   └── rol.py                # Rol, PermisoModulo, MODULOS, MATRIZ_PERMISOS, AccesoModulo, puede_acceder/acceso
 ├── contextos/                # un bounded context por §x.y (dominio puro)
 │   ├── localizacion/         # §2.1  dominio/puertos/casos_uso + geometria.py (fichero plano)
-│   ├── viabilidad/           # §2.9  dominio/casos_uso (sin puertos.py) — único __init__ con __all__
+│   ├── viabilidad/           # §2.9  dominio/casos_uso/puertos + finanzas.py + modelo_dcf.py (costura DCF) — único __init__ con __all__
 │   ├── render_calculos/      # §2.4–2.7 dominio/puertos/casos_uso/parametros + geometria/ (subpaquete 14+ módulos) + README.md
 │   ├── proyectos/            # §2.11 puertos/casos_uso (SIN dominio: el aggregate vive en nucleo/)
 │   └── usuarios/             # login real: dominio/puertos/casos_uso + seguridad.py (PBKDF2)
@@ -39,8 +39,10 @@ app/
 ├── data/puccetti.sqlite      # BBDD (SE TRACKEA en git, ver §Persistencia)
 └── run.py  requirements.txt
 ```
-Pendientes de integrar como contexto: **solo** `modelos_planos` (desactivado en el
-catálogo) e `informe` (stub de ruta `/modulos/informe`). El resto ya existe.
+Pendiente de integrar como contexto: **solo** `modelos_planos` (desactivado en el
+catálogo). El contexto **`informe`** ya existe: ensamblador puro del documento de
+prefactibilidad (§2.8) + planimetría a SVG server-side; documento imprimible a PDF
+(print-CSS) en `GET /modulos/informe/{id}/documento`. DXF de planimetría diferido.
 
 ## Núcleo: aggregate Proyecto y comunicación inter-módulos
 `nucleo/modelo/proyecto.py` — `Proyecto` es una **dataclass de dominio puro** (sin
@@ -68,12 +70,14 @@ ModuloPuccetti, Rol, PermisoModulo, MATRIZ_PERMISOS, puede_acceder`. `acceso`,
 
 ## Roles y permisos
 `nucleo/modelo/rol.py` es la **única fuente de verdad de autorización**:
-- `Rol(str,Enum)`: `arquitecto, financiero, inversor`. `PermisoModulo`: `ver, editar`.
+- `Rol(str,Enum)`: `arquitecto, financiero, cliente` (roles de negocio) + `superadmin`
+  (rol **técnico**: cuenta administrativa, no de negocio). `PermisoModulo`: `ver, editar`.
 - `MATRIZ_PERMISOS: dict[Rol, dict[slug_str, frozenset[PermisoModulo]]]` — **la clave
   de módulo es un slug `str` (= `ModuloPuccetti.value`), NO el enum**; por eso los
-  llamantes pasan `ModuloPuccetti.X.value`. ARQUITECTO: VER+EDITAR en los 7.
-  FINANCIERO: VER+EDITAR en viabilidad/informe, VER en otros, sin acceso a modelos_planos.
-  INVERSOR: VER en todos salvo modelos_planos; nunca EDITAR.
+  llamantes pasan `ModuloPuccetti.X.value`. ARQUITECTO: VER+EDITAR en los de negocio.
+  FINANCIERO: **solo** proyectos (VER) e informe (VER+EDITAR). CLIENTE: **solo**
+  informe (VER, lectura). SUPERADMIN: **solo** `gestion_usuarios` (VER+EDITAR). El
+  fail-closed oculta el resto → el rail/hub muestran únicamente lo permitido por rol.
 - `puede_acceder(rol, slug, permiso=VER)->bool` (lo usan las rutas). `acceso(rol,
   slug)->AccesoModulo(modulo, puede_ver, puede_editar)` (lo llama `rutas/menu.py`
   para pintar tarjetas; la plantilla recibe el objeto, no importa la función).
@@ -94,9 +98,17 @@ ModuloPuccetti, Rol, PermisoModulo, MATRIZ_PERMISOS, puede_acceder`. `acceso`,
   `CargarTodosLosDetalles` para no quemar la cuota Catastro).
 - **viabilidad §2.9** — `dominio.py` (`Operacion` VENTA/RENTA, `Intervencion`
   OBRA_NUEVA/REHABILITACION, `FuenteSuperficie`, `ParametrosEconomicos`,
-  `EstudioViabilidad`; defaults: venta 3200 €/m², obra nueva 1400, rehab 900);
-  `casos_uso.py` (`CalcularViabilidad`, puro, sin repo). **Único `__init__.py` con
-  `__all__`** → se importa desde el paquete.
+  `EstudioViabilidad`; defaults: venta 3200 €/m², obra nueva 1400, rehab 900). En
+  evolución (plan DCF): `dominio.py` añade el motor DCF (`SupuestosDCF`, `Financiacion`,
+  `FlujoCaja`, `Escenario`/`DefinicionEscenario`, `ResultadoEscenario`,
+  `EstudioViabilidadDCF`) y umbrales PR (`UmbralesPR`, `Estado`, `TipologiaPR`);
+  `finanzas.py` (VAN/TIR/MOIC/payback puros); `modelo_dcf.py` = **única costura
+  spec-dependiente** (`construir_flujos`, hoy STUB pendiente de la spec del financiero);
+  `puertos.py` (`UmbralesPRPort`). `casos_uso.py` (`CalcularViabilidad`,
+  `CalcularViabilidadDCF`, `evaluar_umbrales`/`semaforo_global`, helpers de superficie/
+  saneo reutilizables; puro, sin repo salvo umbrales). Umbrales PR viven en BBDD
+  (`umbrales_pr`, adapter `UmbralesPRSQLAlchemy`). **Único `__init__.py` con `__all__`**
+  → se importa desde el paquete. Detalle/estado del plan: `viabilidad/REGISTRO.md`.
 - **render_calculos §2.4–2.7** — `dominio.py` (`UsoEdificio`
   vivienda/hotelero/apartamentos_turisticos + enums de categoría/tipología; `Alerta`,
   `NivelAlerta` ∈ error/incumplimiento/aviso/info); `parametros.py` (parser MUY
@@ -126,14 +138,16 @@ usuarios). Hay que registrar cada ORM en `_registrar_modelos()` o `create_all` n
   revisiones, fuera de git — borrado deliberado). NO hay migraciones: cambiar el esquema
   sobre una BBDD existente = borrar/migrar a mano. El comentario de `sqlalchemy_base.py`
   que aún cita Alembic está stale.
-- **Tablas (~14)**: `proyectos, usuarios, normativa_municipal, anexo_i_vivienda,
+- **Tablas (~15)**: `proyectos, usuarios, normativa_municipal, anexo_i_vivienda,
   parametros_motor_vivienda, anexo_i_apartamentos, anexo_i_apartamentos_conjuntos,
   anexo_i_hotelero, provincias_ine, municipios_ine, carpeta_proyecto, proyecto_en_carpeta,
-  carpeta_normativa, normativa_archivada`.
+  carpeta_normativa, normativa_archivada, umbrales_pr` (esta última = singleton `id=1`,
+  umbrales internos PR de viabilidad §2.9).
 - **Adapters**: `ProyectosSQLAlchemy` (default), `ProyectosEnMemoria` (solo tests),
   `UsuariosSQLAlchemy`, `NormativaMunicipalSQLAlchemy`,
   `CatalogoSuperficies/Apartamentos/HoteleroSQLAlchemy`, `CallejeroSQLAlchemy`,
-  `CarpetasProyecto/NormativaSQLAlchemy`; + `CatastroMEH`, `ParcelasEnMemoria`.
+  `CarpetasProyecto/NormativaSQLAlchemy`, `UmbralesPRSQLAlchemy` (singleton umbrales
+  PR §2.9); + `CatastroMEH`, `ParcelasEnMemoria`.
   Cambiar a Postgres = cambiar `PUCCETTI_DB_URL` y nada más (dominio/casos de uso no saben qué BBDD hay).
 - **Seeds** idempotentes (por "tabla vacía") y `reset()` atómico por catálogo. Las filas
   Anexo I **se derivan** de `geometria.programa*` (no son literales): editar mínimos en
@@ -192,13 +206,20 @@ subreferencia; usa ESCatastroLib + REST.
 - **localizacion** `/modulos/localizacion`: `GET ''`, `POST /buscar/{rc|direccion|coordenada}`,
   `/simplificar`, `/lado/{i}/{tipo|orientacion}`, `/subreferencia/{rc20}/detalle`,
   `/seleccionar-inmueble`, `/guardar-como-proyecto`; `GET /callejero/{provincias|municipios|vias}`.
-- **viabilidad** `/modulos/viabilidad`: `GET ''`, `POST /calcular` (preview JSON, no
-  persiste), `POST /guardar` (persiste en aggregate).
-- **render_calculos** `/modulos/render-calculos`: `GET ''` (`?modo=` → landing o render),
-  `POST /preview|/calcular|/estancias|/tipologias-dormitorios|/guardar|/aplicar-normativa`;
+- **viabilidad** `/modulos/viabilidad`: margen — `GET ''`, `POST /calcular` (preview
+  JSON), `POST /guardar`; DCF — `POST /calcular-dcf` (preview + semáforo), `/precio-maximo`,
+  `/sensibilidad`, `/guardar-dcf`, `GET/POST /umbrales` (config PR editable). UI DCF en
+  `viabilidad.html` + `viabilidad_dcf.js` (one-pager vía `@media print`).
+- **render_calculos** `/modulos/render-calculos`: `GET ''` (`?modo=` [→ landing o render] +
+  `?escenario=` [pestaña a previsualizar]),
+  `POST /preview|/calcular|/estancias|/tipologias-dormitorios|/escenarios|/aplicar-normativa`;
   `GET/POST /normativa[...]` (LEGADO, solo consulta), `/superficies-vivienda[/reset]`,
-  `/minimos/{uso}[/reset]`, `POST /export.csv`.
+  `/minimos/{uso}[/reset]`, `POST /export.csv`. `POST /escenarios` (antes `/guardar`) persiste
+  la LISTA de escenarios/pestañas del modo activo (ver §Persistencia render).
 - **normativa_municipal** `/modulos/normativa-municipal`: CRUD carpetas + normativas archivadas.
+- **gestion_usuarios** `/modulos/gestion-usuarios` (solo SUPERADMIN): `GET ''` (pantalla),
+  `POST /crear`, `POST /{id}/{rol|activo|contrasena|eliminar}`. Server-rendered (forms
+  POST + redirect con flash). El superadmin aterriza aquí desde `/` (redirect en `menu.py`).
 - **modulos** `/modulos`: solo `GET /modulos/informe` (stub). `modelos_planos` no tiene ruta.
 
 ## Tests

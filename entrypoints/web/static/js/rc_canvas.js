@@ -40,6 +40,14 @@
       this._lastPayload = null;
       this._lastIndicePlanta = 0;
       this._overlay = null;   // capa de edición (patios): fn(renderer) en ctx ya rotado
+      // Capa raster del WMS de Catastro (opcional). Se pide una única imagen GetMap
+      // en el CRS UTM de la parcela y se dibuja encima con globalAlpha (slider).
+      this._catastro = {
+        activa: false, alpha: 1,
+        img: null, imgBbox: null,          // imagen mostrada + bbox con que se pidió
+        pedidoBbox: null, pedidoEpsg: null, // última vista pedida (evita re-pedir igual)
+        timer: null,                        // debounce de la petición al mover la vista
+      };
       // Vista del usuario (zoom). Persiste entre repintados mientras la parcela (bbox)
       // no cambie; al cambiar de parcela, `_calcViewport` re-encaja.
       this._vistaUsuario = false;
@@ -95,6 +103,136 @@
     // Capa de edición opcional, dibujada al final de `dibujar` dentro del contexto
     // YA rotado (así los tiradores se pegan a la geometría girada por la brújula).
     setOverlay(fn) { this._overlay = fn; }
+
+    // Paneo del plano arrastrando con el ratón (como mover un mapa). Se registra
+    // DESPUÉS del editor de patios: si el editor consumió el mousedown (agarró un
+    // tirador/patio/botón), llama a preventDefault y aquí lo respetamos → solo se
+    // panea al arrastrar sobre zona vacía. Mueve todo por igual (parcela, patios
+    // bloqueados o no, y la capa de Catastro), porque todo se dibuja vía _x/_y.
+    habilitarPaneo() {
+      if (this._panBind) return;
+      this._panBind = true;
+      const cv = this.cv;
+      cv.addEventListener("mousedown", (e) => {
+        if (e.defaultPrevented || e.button !== 0 || !this._lastPayload) return;
+        this._pan = { x: e.clientX, y: e.clientY, movido: false };
+        cv.style.cursor = "grabbing";
+      });
+      window.addEventListener("mousemove", (e) => {
+        if (!this._pan) return;
+        const dx = e.clientX - this._pan.x, dy = e.clientY - this._pan.y;
+        if (!this._pan.movido && Math.hypot(dx, dy) < 3) return;
+        this._pan.movido = true;
+        this._pan.x = e.clientX; this._pan.y = e.clientY;
+        this.panear(dx, dy);
+      });
+      window.addEventListener("mouseup", () => {
+        if (this._pan) { this._pan = null; cv.style.cursor = ""; }
+      });
+    }
+
+    // Desplaza la vista un delta de PANTALLA. Como la rotación de la brújula se
+    // aplica alrededor del centro en `dibujar` y origenX/Y viven en el marco SIN
+    // rotar, se convierte el delta al marco sin rotar (R(-θ)) para que el plano
+    // acompañe al cursor en cualquier ángulo.
+    panear(dxPx, dyPx) {
+      const rad = -this.rotationDeg * Math.PI / 180;
+      const c = Math.cos(rad), s = Math.sin(rad);
+      this.origenX += dxPx * c - dyPx * s;
+      this.origenY += dxPx * s + dyPx * c;
+      this._vistaUsuario = true;   // preserva la vista paneada (no re-encaja a la bbox)
+      this.repintar();
+    }
+
+    // Activa/desactiva la capa de Catastro y fija su opacidad (0..1). Al activarse,
+    // pide el WMS para la vista actual y repinta cuando cargue.
+    setCapaCatastro({ activa, alpha }) {
+      this._catastro.activa = !!activa;
+      if (typeof alpha === "number") this._catastro.alpha = Math.max(0, Math.min(1, alpha));
+      if (this._catastro.activa) this._refrescarCatastro();
+      this.repintar();
+    }
+
+    // Bbox del MUNDO (UTM) visible ahora en el lienzo, con margen. Se calcula
+    // proyectando a mundo las 4 esquinas de pantalla (deshaciendo la rotación),
+    // de modo que al girar la brújula cubre todo el rectángulo girado.
+    _viewportMundoBbox(pad) {
+      const esq = [[0, 0], [this.wPx, 0], [0, this.hPx], [this.wPx, this.hPx]];
+      let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+      for (const [px, py] of esq) {
+        const [wx, wy] = this._pantallaAMundo(px, py);
+        if (wx < mnx) mnx = wx; if (wx > mxx) mxx = wx;
+        if (wy < mny) mny = wy; if (wy > mxy) mxy = wy;
+      }
+      const dx = (mxx - mnx) * pad, dy = (mxy - mny) * pad;
+      return [mnx - dx, mny - dy, mxx + dx, mxy + dy];
+    }
+
+    // Pide al WMS de Catastro una imagen para la vista actual, a la resolución de
+    // la pantalla, y la re-pide (debounced) cuando la vista cambia lo suficiente
+    // (zoom / rotación / nueva parcela). Así los detalles y etiquetas se rasterizan
+    // a la escala correcta en cada nivel de zoom, igual que en «Buscar parcela».
+    _refrescarCatastro() {
+      const c = this._catastro;
+      if (!c.activa) return;
+      const parcela = this._lastPayload && this._lastPayload.parcela;
+      const epsg = parcela && parcela.epsg;
+      if (!epsg || !this.scale || this.scale <= 0) return;
+      const bbox = this._viewportMundoBbox(0.15);
+      const [minx, miny, maxx, maxy] = bbox;
+      const W = maxx - minx, H = maxy - miny;
+      if (!(W > 0) || !(H > 0)) return;
+      // ¿La vista cambió de forma apreciable respecto a lo ya pedido? (evita
+      // re-pedir en cada repintado, p.ej. el repaint del onload).
+      const prev = c.pedidoBbox;
+      if (prev && Math.abs(prev[0] - minx) < W * 0.06 && Math.abs(prev[1] - miny) < H * 0.06
+          && Math.abs(prev[2] - maxx) < W * 0.06 && Math.abs(prev[3] - maxy) < H * 0.06
+          && c.pedidoEpsg === epsg) return;
+      c.pedidoBbox = bbox; c.pedidoEpsg = epsg;
+      if (c.timer) clearTimeout(c.timer);
+      c.timer = setTimeout(() => this._pedirCatastro(bbox, epsg), 160);
+    }
+
+    // Lanza la petición GetMap y, al cargar, sustituye la imagen mostrada (guardando
+    // el bbox con el que se pidió, para dibujarla alineada). No fija crossOrigin: el
+    // WMS no envía CORS; solo se dibuja, nunca se leen píxeles del canvas.
+    _pedirCatastro(bbox, epsg) {
+      const [minx, miny, maxx, maxy] = bbox;
+      const W = maxx - minx, H = maxy - miny;
+      // Resolución = px de pantalla que ocupa el bbox (× nitidez), acotada.
+      const nitidez = 1.4, maxLado = 2048;
+      let w = Math.round(W * this.scale * nitidez);
+      let h = Math.round(H * this.scale * nitidez);
+      const k = maxLado / Math.max(w, h);
+      if (k < 1) { w = Math.round(w * k); h = Math.round(h * k); }
+      w = Math.max(256, w); h = Math.max(256, h);
+      const url = "https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx"
+        + "?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=Catastro&STYLES="
+        + "&SRS=EPSG:" + epsg
+        + "&BBOX=" + [minx, miny, maxx, maxy].join(",")
+        + "&WIDTH=" + w + "&HEIGHT=" + h
+        + "&FORMAT=image/png&TRANSPARENT=TRUE&EXCEPTIONS=BLANK";
+      const img = new Image();
+      img.onload = () => {
+        if (!img.naturalWidth) return;
+        this._catastro.img = img;
+        this._catastro.imgBbox = bbox;
+        this.repintar();
+      };
+      img.src = url;
+    }
+
+    _dibujarCatastro() {
+      const c = this._catastro;
+      if (!c.activa || c.alpha <= 0 || !c.img || !c.img.complete || !c.img.naturalWidth || !c.imgBbox) return;
+      const [minx, miny, maxx, maxy] = c.imgBbox;
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.globalAlpha = c.alpha;
+      // Mapeado por _x/_y ⇒ dentro del contexto ya rotado sigue rotación y zoom.
+      ctx.drawImage(c.img, this._x(minx), this._y(maxy), (maxx - minx) * this.scale, (maxy - miny) * this.scale);
+      ctx.restore();
+    }
 
     _ajustarTamano() {
       const dpr = window.devicePixelRatio || 1;
@@ -182,21 +320,25 @@
       }
     }
 
-    _patronPatio(ring) {
+    _patronPatio(ring, huecos) {
       const ctx = this.ctx;
       ctx.save();
+      const trazar = (anillo) => {
+        anillo.forEach((p, i) => {
+          const px = this._x(p[0]), py = this._y(p[1]);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+      };
       ctx.beginPath();
-      ring.forEach((p, i) => {
-        const px = this._x(p[0]);
-        const py = this._y(p[1]);
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      });
-      ctx.closePath();
+      trazar(ring);
+      // Huecos (edificio dentro del patio → anillo): con "evenodd" recortan el relleno.
+      (huecos || []).forEach(h => { if (h && h.length >= 3) trazar(h); });
       ctx.fillStyle = COLOR.grisSuave;
-      ctx.fill();
-      ctx.clip();
-      // Rayas diagonales
+      ctx.fill("evenodd");
+      ctx.clip("evenodd");
+      // Rayas diagonales (el clip las limita al anillo menos los huecos)
       ctx.strokeStyle = COLOR.grisMedio;
       ctx.lineWidth = 1;
       const xs = ring.map(p => this._x(p[0]));
@@ -208,6 +350,42 @@
         ctx.moveTo(x, minY);
         ctx.lineTo(x + (maxY - minY), maxY);
         ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    _marcarPatioBloqueado(ring, huecos) {
+      // Patio bloqueado (catastral o fijado por el usuario): borde dorado
+      // discontinuo + candado, para distinguirlo de un patio editable.
+      if (!ring || ring.length < 2) return;
+      const ctx = this.ctx;
+      const xs = ring.map(p => this._x(p[0]));
+      const ys = ring.map(p => this._y(p[1]));
+      ctx.save();
+      ctx.strokeStyle = COLOR.dorado;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      const contorno = (anillo) => {
+        ctx.beginPath();
+        anillo.forEach((p, i) => {
+          const px = this._x(p[0]), py = this._y(p[1]);
+          (i === 0) ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+        ctx.stroke();
+      };
+      contorno(ring);
+      (huecos || []).forEach(h => { if (h && h.length >= 3) contorno(h); });   // borde del edificio interior
+      ctx.setLineDash([]);
+      const w = Math.max(...xs) - Math.min(...xs);
+      const h = Math.max(...ys) - Math.min(...ys);
+      if (Math.min(w, h) >= 16) {
+        const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+        const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+        ctx.font = "11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("🔒", cx, cy);
       }
       ctx.restore();
     }
@@ -228,17 +406,35 @@
       ctx.stroke();
     }
 
+    // Ray casting en coordenadas de mundo: ¿(x,y) dentro del anillo?
+    _puntoEnPoligono(x, y, ring) {
+      let dentro = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const xi = ring[i][0], yi = ring[i][1];
+        const xj = ring[j][0], yj = ring[j][1];
+        if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+          dentro = !dentro;
+        }
+      }
+      return dentro;
+    }
+
     _etiquetaOrientacion(lado) {
       const a = lado.p1, b = lado.p2;
       const mx = (a[0] + b[0]) / 2;
       const my = (a[1] + b[1]) / 2;
-      // normal exterior (apuntando hacia fuera) — depende del winding del contorno
+      // Normal al lado; el signo se decide para que la etiqueta caiga SIEMPRE fuera
+      // del polígono (el winding del contorno no es fiable).
       const dx = b[0] - a[0];
       const dy = b[1] - a[1];
       const L = Math.hypot(dx, dy) || 1;
-      const nx = dy / L;
-      const ny = -dx / L;
-      const offset = 14 / this.scale;
+      let nx = dy / L;
+      let ny = -dx / L;
+      const offset = 16 / this.scale;
+      const ring = this._lastPayload && this._lastPayload.parcela && this._lastPayload.parcela.poligono;
+      if (ring && ring.length >= 3 && this._puntoEnPoligono(mx + nx * offset, my + ny * offset, ring)) {
+        nx = -nx; ny = -ny;   // apuntaba hacia dentro → voltear hacia fuera
+      }
       const tx = mx + nx * offset;
       const ty = my + ny * offset;
 
@@ -376,12 +572,16 @@
       }
 
       if (planta) {
-        // Footprint con muros
+        // Footprint con muros. La huella llega íntegra tras retranqueos normativos
+        // (la ocupación máxima ya no la recorta: no hay anillo de retranqueo por ocupación).
         if (planta.footprint) {
           this._trazarPoligono(planta.footprint, "rgba(255,255,255,0.85)", null, 0);
         }
         // Patios
-        (planta.patios || []).forEach(p => this._patronPatio(p.poligono));
+        (planta.patios || []).forEach(p => {
+          this._patronPatio(p.poligono, p.huecos);
+          if (p.bloqueado) this._marcarPatioBloqueado(p.poligono, p.huecos);
+        });
         // Pasillos
         (planta.pasillos || []).forEach(p =>
           this._trazarPoligono(p.poligono, "rgba(255,255,255,0.95)", COLOR.grisMedio, 0.8)
@@ -412,6 +612,14 @@
         this._dibujarLado(l);
         this._etiquetaOrientacion(l);
       });
+
+      // Capa de Catastro (raster WMS) encima de la geometría. Al mínimo de
+      // transparencia (alpha=1) tapa el render → vista limpia del parcelario.
+      // Adaptativa al zoom: re-pide el WMS a la escala de la vista actual.
+      if (this._catastro.activa) {
+        this._refrescarCatastro();        // re-pide si la vista cambió (zoom/rotación/parcela)
+        this._dibujarCatastro();
+      }
 
       // Capa de edición de patios (tiradores, selección, arrastre en vivo). Se
       // dibuja en el contexto YA rotado para pegarse a la geometría de la planta.

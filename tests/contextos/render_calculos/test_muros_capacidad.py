@@ -50,16 +50,19 @@ def test_tabiqueria_no_cambia_los_muros_de_planta_y_baja_la_util():
 
     # Muros de planta IDÉNTICOS: la tabiquería no se suma aquí.
     assert abs(cap1.muros_por_planta[0] - cap0.muros_por_planta[0]) < 1e-6
-    # Ahora hay tabiquería = 10% del útil disponible (55 → 5.5).
-    assert abs(cap1.muros_interior_por_planta[0] - 5.5) < 1e-6
-    # Y la útil baja en esa misma cantidad (55 → 49.5).
-    assert abs(cap1.util_por_planta[0] - (util0 - 5.5)) < 1e-6
+    # Tabiquería = 10% del útil disponible. Aquí parcela = huella (sin superficie
+    # libre), así que el patio de 12 m² excava y resta a la útil: la base es
+    # 100 − 20 muros − 10 circ (m²) − 15 núcleo − 12 patio excavado = 43 → 4.3.
+    assert abs(cap1.muros_interior_por_planta[0] - 4.3) < 1e-6
+    # Y la útil baja en esa misma cantidad.
+    assert abs(cap1.util_por_planta[0] - (util0 - 4.3)) < 1e-6
     assert cap1.util_por_planta[0] < util0
 
 
 def test_conservacion_construida_incluye_tabiqueria():
-    """construida = útil + muros(perímetro) + muros_interior + circ + núcleo
-    (el patio queda fuera de la construida reportada)."""
+    """construida = útil + muros(perímetro) + muros_interior + circ + núcleo + patio
+    excavado. El patio no resta a la construida reportada (huella íntegra); la parte
+    excavada aparece como término aparte de la identidad (resta a la útil)."""
     p = ParametrosRender()
     p.diseno.pct_muros_interior = 10.0
     cap = calcular_capacidad(_env(100.0), p.a_parametros_motor())
@@ -69,5 +72,6 @@ def test_conservacion_construida_incluye_tabiqueria():
         + cap.muros_interior_por_planta[0]
         + cap.circulacion_por_planta[0]
         + cap.nucleo_por_planta[0]
+        + cap.patio_excavado_m2
     )
     assert abs(cap.construida_por_planta[0] - suma) < 1e-6

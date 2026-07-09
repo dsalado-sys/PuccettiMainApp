@@ -12,27 +12,27 @@
 </section>
 
 <section class="rejilla-modulos">
+  {# Solo se muestran los módulos que el rol puede ver: los no accesibles se
+     OCULTAN por completo (no se pintan como tarjeta bloqueada). #}
   {% for item in tarjetas %}
     {% set t = item.modulo %}
     {% set a = item.acceso %}
-    <a class="tarjeta {% if not a.puede_ver %}tarjeta-bloqueada{% endif %}"
-       href="{% if a.puede_ver %}{{ t.ruta }}{% else %}#{% endif %}"
-       {% if not a.puede_ver %}aria-disabled="true"{% endif %}>
+    {% if a.puede_ver %}
+    <a class="tarjeta" href="{{ t.ruta }}">
       <header>
         <svg class="tarjeta-icono" aria-hidden="true"><use href="#{{ t.icono }}"></use></svg>
         <h2>{{ t.titulo }}</h2>
       </header>
       <p>{{ t.descripcion }}</p>
       <footer>
-        {% if not a.puede_ver %}
-          <span class="tarjeta-candado" title="Tu rol no tiene acceso a este módulo">Bloqueado</span>
-        {% elif not a.puede_editar %}
+        {% if not a.puede_editar %}
           <span class="tarjeta-solo-lectura" title="Solo lectura para este rol">Solo lectura</span>
         {% else %}
           <span class="tarjeta-flecha" aria-hidden="true">→</span>
         {% endif %}
       </footer>
     </a>
+    {% endif %}
   {% endfor %}
 </section>
 {% endblock %}

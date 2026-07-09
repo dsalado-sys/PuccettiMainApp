@@ -14,7 +14,8 @@ Endpoints:
 - POST   /proyectos/{id}/activar          → fijar proyecto activo (cookie)
 - POST   /proyectos/desactivar            → deseleccionar proyecto activo (cookie)
 - POST   /proyectos/carpetas              → crear carpeta (JSON)
-- DELETE /proyectos/carpetas/{id}         → eliminar carpeta (JSON; no borra proyectos)
+- DELETE /proyectos/carpetas/{id}         → eliminar carpeta (JSON; `?con_proyectos=true`
+                                            borra también sus proyectos, si no solo la carpeta)
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ from app.contextos.proyectos.casos_uso import (
     EliminarProyecto,
     ListarProyectos,
 )
+from app.contextos.proyectos.flujo import calcular_flujo, flujo_a_dict
 from app.nucleo.modelo import Proyecto, Rol
 from app.nucleo.modelo.rol import PermisoModulo, puede_acceder
 
@@ -93,6 +95,8 @@ def datos(
             "estado": p.estado.value,
             "actualizado_en": p.actualizado_en.strftime("%Y-%m-%d %H:%M"),
             "carpeta_id": mapa.get(p.id),
+            # Flujo de estados (interno; la UI aún no lo pinta).
+            "flujo": flujo_a_dict(calcular_flujo(p)),
         }
         for p in uc.ejecutar()
     ]
@@ -201,10 +205,27 @@ def crear_carpeta(
 @router.delete("/carpetas/{carpeta_id}")
 def eliminar_carpeta(
     carpeta_id: int,
+    request: Request,
+    con_proyectos: bool = False,
     rol: Rol = Depends(rol_activo),
     carpetas=Depends(carpetas_proyecto_repo),
+    uc: EliminarProyecto = Depends(eliminar_proyecto_uc),
 ):
+    """Elimina una carpeta. Por defecto solo la carpeta (sus proyectos pasan a «Sin
+    carpeta»); con `con_proyectos=true` borra también los proyectos que contiene."""
     _exige_edicion(rol)
+    # Capturar los proyectos ANTES de borrar la carpeta (que desvincula la pertenencia).
+    proyecto_ids = carpetas.proyectos_en_carpeta(carpeta_id) if con_proyectos else []
     if not carpetas.eliminar_carpeta(carpeta_id):
         raise HTTPException(404, f"Carpeta {carpeta_id} no encontrada.")
-    return JSONResponse({"ok": True})
+    activo = request.cookies.get(COOKIE_PROYECTO)
+    activo_borrado = False
+    for pid in proyecto_ids:
+        uc.ejecutar(pid)
+        if activo == pid:
+            activo_borrado = True
+    respuesta = JSONResponse({"ok": True})
+    # Si el proyecto activo estaba dentro de la carpeta borrada, dejar de tenerlo activo.
+    if activo_borrado:
+        respuesta.delete_cookie(COOKIE_PROYECTO)
+    return respuesta

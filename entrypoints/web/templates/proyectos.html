@@ -143,6 +143,34 @@
   </article>
 </dialog>
 
+{# Submodal: eliminar carpeta (dos opciones) #}
+<dialog id="pr-submodal-borrar-carpeta" class="modal modal--sm">
+  <article class="modal-card">
+    <header class="modal-header">
+      <h3>Eliminar carpeta</h3>
+      <button type="button" class="modal-cerrar" data-cerrar="pr-submodal-borrar-carpeta" aria-label="Cerrar">×</button>
+    </header>
+    <div class="modal-cuerpo">
+      <p>¿Qué quieres hacer con la carpeta «<strong id="pr-borrar-carpeta-nombre"></strong>»<span id="pr-borrar-carpeta-cuenta"></span>?</p>
+      <ul class="pr-borrar-opciones">
+        <li>
+          <span class="pr-borrar-opcion-tit">Eliminar solo la carpeta</span>
+          Se borra la carpeta pero <strong>sus proyectos se conservan</strong> y pasan al grupo «Sin carpeta».
+        </li>
+        <li>
+          <span class="pr-borrar-opcion-tit pr-borrar-opcion-tit--peligro">Eliminar carpeta y proyectos</span>
+          Se borra la carpeta y <strong>también todos los proyectos que contiene</strong>. Esta acción no se puede deshacer.
+        </li>
+      </ul>
+    </div>
+    <footer class="modal-acciones">
+      <button type="button" class="boton-secundario" data-cerrar="pr-submodal-borrar-carpeta">Cancelar</button>
+      <button type="button" id="pr-borrar-carpeta-solo" class="boton-primario">Eliminar solo la carpeta</button>
+      <button type="button" id="pr-borrar-carpeta-con" class="boton-peligro">Eliminar carpeta y proyectos</button>
+    </footer>
+  </article>
+</dialog>
+
 {# Submodal: confirmar eliminación #}
 <dialog id="pr-submodal-confirmar" class="modal modal--sm">
   <article class="modal-card">
@@ -155,7 +183,7 @@
     </div>
     <footer class="modal-acciones">
       <button type="button" class="boton-secundario" data-cerrar="pr-submodal-confirmar">Cancelar</button>
-      <button type="button" id="pr-submodal-confirmar-ok" class="boton-peligro--solido">Eliminar</button>
+      <button type="button" id="pr-submodal-confirmar-ok" class="boton-peligro">Eliminar</button>
     </footer>
   </article>
 </dialog>

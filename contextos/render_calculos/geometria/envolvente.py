@@ -130,10 +130,10 @@ class Patio:
 @dataclass
 class Planta:
     n: int                       # 0=PB, 1=P1, ...
-    footprint: Polygon
+    footprint: Polygon           # huella tras retranqueos normativos (SIN recorte de ocupación)
     interior: Polygon
     patios: list[Patio] = field(default_factory=list)
-    area_construida_m2: float = 0.0
+    area_construida_m2: float = 0.0   # limitada por ocupación (cap numérico, no geometría)
     area_util_m2: float = 0.0
     computa_edif: bool = True
     tipo: str = "regular"        # "regular" | "atico" | "sotano"
@@ -170,34 +170,6 @@ def _restar_franja_lado(huella: Polygon, p1, p2, retranqueo: float) -> Polygon:
     # huella intacta, sobreestimando el suelo edificable): así el ValueError de
     # construir_envolvente refleja que no queda espacio (§2.7-2.9).
     return _normalizar(huella.difference(franja))
-
-
-def _aplicar_ocupacion_maxima(huella: Polygon, ocup_area: float) -> Polygon:
-    """Erosiona uniformemente la huella hasta que su área ≤ ocup_area.
-
-    Bisección numérica: prueba buffer(-delta) con delta creciente hasta encajar.
-    Para parcelas pequeñas suele converger en <8 iteraciones.
-    """
-    if huella.area <= ocup_area + 1e-3:
-        return huella
-    lo, hi = 0.0, max(huella.area ** 0.5, 1.0)
-    mejor = huella
-    for _ in range(20):
-        mid = (lo + hi) / 2.0
-        candidato = huella.buffer(-mid).buffer(0)
-        if candidato.is_empty:
-            hi = mid
-            continue
-        if hasattr(candidato, "geoms"):
-            candidato = max(candidato.geoms, key=lambda g: g.area)
-        if candidato.area <= ocup_area + 1e-3:
-            mejor = candidato
-            hi = mid
-        else:
-            lo = mid
-        if hi - lo < 1e-3:
-            break
-    return mejor
 
 
 def aplicar_retranqueos(parcela: Polygon, params: Parametros, lados=None) -> Polygon:
@@ -433,13 +405,19 @@ def colocar_patios(interior_planta: Polygon, params: Parametros, footprint: Opti
             continue
         verts = getattr(d, "vertices", None)
         if verts and len(verts) >= 3:
+            # Huecos: anillos interiores (edificio dentro del patio) → patio en anillo.
+            huecos = getattr(d, "huecos", None) or []
+            anillos_int = [
+                [(float(x), float(y)) for x, y in h]
+                for h in huecos if h and len(h) >= 3
+            ]
             try:
-                geom = _normalizar(Polygon([(float(x), float(y)) for x, y in verts]))
+                geom = _normalizar(Polygon([(float(x), float(y)) for x, y in verts], anillos_int))
             except Exception:
                 geom = Polygon()
             if geom.is_empty:
                 continue
-            geom = _ajustar_area(geom, area)   # área fija: normaliza al área asignada
+            geom = _ajustar_area(geom, area)   # área fija: normaliza al área NETA asignada
             bases[idx] = (geom, area, str(getattr(d, "id", "") or ""), bool(getattr(d, "bloqueado", False)))
             residual = _normalizar(residual.difference(geom))
     # A2: patios sin posición → auto-colocado en el residual restante.
@@ -508,7 +486,7 @@ def construir_envolvente(
     lados=None,
     superficie_referencia: float | None = None,
 ) -> Envolvente:
-    """Pipeline §2.4 completo: retranqueos direccionales → ocupación → N plantas → patios.
+    """Pipeline §2.4: retranqueos direccionales → N plantas → patios.
 
     Iteración 4: acepta `lados: list[LadoParcela] | None`. Si se pasan, los
     retranqueos se aplican direccionalmente según el tipo de cada lado.
@@ -518,6 +496,11 @@ def construir_envolvente(
     superficie catastral real de la parcela se pasa aquí; si es None/0 se usa el
     área geométrica del polígono reproyectado (comportamiento histórico). La FORMA
     de la huella (retranqueos, geometría) siempre proviene del polígono.
+
+    Ocupación máxima: NO es geometría. La huella de todas las plantas es la huella
+    íntegra tras retranqueos normativos (sin recorte ni anillo por ocupación); la
+    ocupación solo interviene como LÍMITE NUMÉRICO de la superficie construida por
+    planta (cap = ocupación × sup_ref), que a su vez acota la edificabilidad.
     """
     sup_ref = (
         float(superficie_referencia)
@@ -530,16 +513,15 @@ def construir_envolvente(
 
     espesor = params.diseno.espesor_muro_fachada
 
-    # Ocupación máxima POR CATEGORÍA DE PLANTA: PB (y sótano) usan la ocupación de
-    # planta baja; las plantas tipo (y el ático) la suya. Partimos de la MISMA huella
-    # tras retranqueos y la erosionamos a cada límite de forma independiente. Si ambas
-    # ocupaciones coinciden (lo habitual / proyectos sin ocupación de tipo) las huellas
-    # son idénticas y el resultado no cambia respecto al histórico.
-    def _huella_ocupada(ocup_frac: float) -> Polygon:
-        area = max(0.0, float(ocup_frac)) * sup_ref
-        if area <= 0:
-            return huella_retr
-        return _aplicar_ocupacion_maxima(huella_retr, area)
+    # Ocupación máxima por categoría de planta como CAP NUMÉRICO (no erosión): la
+    # construida de la planta = min(huella, ocupación × sup_ref). PB (y sótano) usan la
+    # ocupación de planta baja; plantas tipo (y ático) la suya.
+    ocup_pb = params.urbanismo.ocupacion_maxima
+    ocup_tipo = getattr(params.urbanismo, "ocupacion_maxima_tipo", ocup_pb)
+
+    def _construida_ocup(area_geom: float, ocup_frac: float) -> float:
+        lim = max(0.0, float(ocup_frac)) * sup_ref
+        return min(area_geom, lim) if lim > 0 else area_geom
 
     def _interior(h: Polygon) -> Polygon:
         # `_normalizar`: el offset de muro puede partir la huella en un cuello estrecho
@@ -550,39 +532,33 @@ def construir_envolvente(
         i = _normalizar(h.buffer(-espesor))
         return i if not i.is_empty else h
 
-    huella_pb = _huella_ocupada(params.urbanismo.ocupacion_maxima)
-    if huella_pb.is_empty:
-        raise ValueError("Tras aplicar ocupación máxima no queda huella construible.")
-    huella_tipo = _huella_ocupada(
-        getattr(params.urbanismo, "ocupacion_maxima_tipo", params.urbanismo.ocupacion_maxima)
-    )
-    if huella_tipo.is_empty:
-        huella_tipo = huella_pb
-
+    # La huella es la misma (íntegra) en PB y plantas tipo: la ocupación ya no la recorta.
+    huella_pb = huella_retr
+    huella_tipo = huella_retr
     interior_pb = _interior(huella_pb)
-    interior_tipo = _interior(huella_tipo)
+    interior_tipo = interior_pb
 
     plantas: list[Planta] = []
     edif_acumulada = 0.0
 
-    # ── Sótano (bajo rasante: ocupa la huella completa de PB) ──────────────────
+    # ── Sótano (bajo rasante: ocupa la huella de PB) ───────────────────────────
     if params.urbanismo.tiene_sotano:
+        construida_sot = _construida_ocup(huella_pb.area, ocup_pb)
         sotano = Planta(
             n=-1,
             footprint=huella_pb,
             interior=interior_pb,
             patios=[],
-            area_construida_m2=huella_pb.area,
+            area_construida_m2=construida_sot,
             area_util_m2=interior_pb.area,
             computa_edif=params.urbanismo.sotano_computa_edificabilidad,
             tipo="sotano",
         )
         plantas.append(sotano)
         if sotano.computa_edif:
-            edif_acumulada += huella_pb.area
+            edif_acumulada += construida_sot
 
-    # ── Plantas regulares: la primera (PB) usa la huella de PB; el resto, la de las
-    #    plantas tipo (su propia ocupación). ──────────────────────────────────
+    # ── Plantas regulares ──────────────────────────────────────────────────────
     huella_ultima_regular = huella_pb
     for n in range(params.programa.n_plantas):
         f = huella_pb if n == 0 else huella_tipo
@@ -591,11 +567,10 @@ def construir_envolvente(
         patios = colocar_patios(i, params, footprint=f)
         for pt in patios:
             i = _normalizar(i.difference(pt.geometry))
-        # El patio interior (vacío a cielo abierto) no computa ni como construido ni
-        # como edificabilidad: la construida de la planta —y el techo que consume— es
-        # la huella menos el área de patio.
-        patios_area = sum(pt.area_m2 for pt in patios)
-        construida = max(0.0, f.area - patios_area)
+        # La construida = huella limitada por ocupación (cap numérico). Los patios NO
+        # restan: las unidades se construyen sobre la construida completa y los patios
+        # se contabilizan contra la «superficie libre» (complemento de la ocupación).
+        construida = _construida_ocup(f.area, ocup_pb if n == 0 else ocup_tipo)
         plantas.append(Planta(
             n=n,
             footprint=f,
@@ -609,25 +584,26 @@ def construir_envolvente(
         edif_acumulada += construida
 
     # ── Ático ────────────────────────────────────────────────────────────────
-    # Retranqueo perimetral sobre la huella de la planta inmediatamente inferior
-    # (plantas tipo si las hay; si no, PB). El ático comparte el perfil de las tipo.
+    # El retranqueo de ÁTICO sí se conserva (retranqueo legítimo, no el de ocupación):
+    # se aplica sobre la huella íntegra tras retranqueos normativos.
     if params.urbanismo.tiene_atico:
         huella_at = _huella_atico(huella_ultima_regular, params.urbanismo.retranqueo_atico)
         interior_at = _normalizar(huella_at.buffer(-espesor)) if not huella_at.is_empty else Polygon()
         n_at = (plantas[-1].n + 1) if plantas else 0
+        construida_at = _construida_ocup(huella_at.area, ocup_tipo)
         atico = Planta(
             n=n_at,
             footprint=huella_at,
             interior=interior_at if not interior_at.is_empty else huella_at,
             patios=[],
-            area_construida_m2=huella_at.area,
+            area_construida_m2=construida_at,
             area_util_m2=interior_at.area if not interior_at.is_empty else 0.0,
             computa_edif=params.urbanismo.atico_computa_edificabilidad,
             tipo="atico",
         )
         plantas.append(atico)
         if atico.computa_edif:
-            edif_acumulada += huella_at.area
+            edif_acumulada += construida_at
 
     # El techo máximo debe respetar el mismo criterio que `calcular_capacidad`:
     # por coeficiente (parcela × coef) o, si no se usa el coeficiente, por

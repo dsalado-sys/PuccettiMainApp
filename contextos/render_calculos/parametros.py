@@ -7,10 +7,11 @@ Iteración 4 (2026-06-04):
   direccionales: `retranqueo_fachada_m` (resta solo desde lados tipo "fachada")
   y `retranqueo_linderos_m` (resta solo desde lados tipo "medianera").
 - `usos_permitidos` pasa de `list[UsoEdificio]` a `list[str]` con valores
-  fijos del PGOU: "residencial" | "hotelero" | "terciario" | "mixto".
-  Hoy es decorativo (sin mapeo al uso del programa).
-- Tres porcentajes explícitos: `pct_muros`, `pct_circulacion` y `pct_nucleo`
-  (porcentajes 0-100). Suma ≤ 90% (validado en motor).
+  fijos del PGOU: "residencial" | "hotelero" | "apartamento". Cada valor mapea
+  a un `UsoEdificio` (`PGOU_A_USO_DESTINO`) y condiciona qué usos destino quedan
+  habilitados en el módulo Render.
+- Porcentajes explícitos: `pct_muros` y `pct_circulacion` (0-100). El núcleo
+  (escalera/ascensor) se define como área fija en m² en el programa (`nucleo_m2`).
 """
 from __future__ import annotations
 
@@ -36,7 +37,14 @@ from .geometria.config import (
 )
 
 
-USOS_PGOU_VALIDOS: tuple[str, ...] = ("residencial", "hotelero", "terciario", "mixto")
+USOS_PGOU_VALIDOS: tuple[str, ...] = ("residencial", "hotelero", "apartamento")
+
+# Mapeo de cada uso permitido por el PGOU al `UsoEdificio` (uso destino) que habilita.
+PGOU_A_USO_DESTINO: dict[str, str] = {
+    "residencial": "vivienda",
+    "hotelero": "hotelero",
+    "apartamento": "apartamentos_turisticos",
+}
 
 
 @dataclass
@@ -53,6 +61,12 @@ class PatioDef:
     id: str = ""
     vertices: list | None = None
     bloqueado: bool = False   # patio congelado: el usuario no puede editarlo y el motor lo prioriza
+    # Procedencia: "" = lo añadió el usuario; "catastral" = hueco catastral exacto
+    # (gml:interior); "catastral_aprox" = patio abierto catastral (geometría aproximada).
+    origen: str = ""
+    # Anillos interiores (UTM) cuando el patio es un ANILLO: la construcción está en
+    # medio y el patio la rodea. None/[] = patio macizo. `area_m2` es el área NETA.
+    huecos: list | None = None
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -69,9 +83,23 @@ def area_de_patio(pd: Any) -> float:
         return 0.0
 
 
+def _parse_anillo(raw: Any) -> list[list[float]] | None:
+    """Anillo `[[x,y],...]` (≥ 3 vértices) desde JSON, o None si no es válido."""
+    if not isinstance(raw, (list, tuple)):
+        return None
+    pts: list[list[float]] = []
+    for v in raw:
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            try:
+                pts.append([float(v[0]), float(v[1])])
+            except (TypeError, ValueError):
+                return None
+    return pts if len(pts) >= 3 else None
+
+
 def _parse_patio(item: Any) -> PatioDef | None:
     """Parsea una entrada de `patios` del JSON: número suelto (solo área) u objeto
-    `{area_m2|area, id?, vertices?}`. Devuelve None si el área no es positiva."""
+    `{area_m2|area, id?, vertices?, huecos?}`. Devuelve None si el área no es positiva."""
     if isinstance(item, bool):
         return None
     if isinstance(item, (int, float)):
@@ -84,24 +112,15 @@ def _parse_patio(item: Any) -> PatioDef | None:
             return None
         if a <= 0:
             return None
-        verts: list | None = None
-        raw = item.get("vertices")
-        if isinstance(raw, (list, tuple)):
-            pts: list[list[float]] = []
-            for v in raw:
-                if isinstance(v, (list, tuple)) and len(v) >= 2:
-                    try:
-                        pts.append([float(v[0]), float(v[1])])
-                    except (TypeError, ValueError):
-                        pts = []
-                        break
-            if len(pts) >= 3:
-                verts = pts
+        verts = _parse_anillo(item.get("vertices"))
+        huecos = [h for h in (_parse_anillo(r) for r in (item.get("huecos") or [])) if h] or None
         return PatioDef(
             area_m2=a,
             id=str(item.get("id") or ""),
             vertices=verts,
             bloqueado=bool(item.get("bloqueado", False)),
+            origen=str(item.get("origen") or ""),
+            huecos=huecos,
         )
     return None
 
@@ -146,7 +165,7 @@ class ParametrosUrbanisticos:
 
     # ── informativos / no comparados ──
     usos_permitidos: list[str] = field(default_factory=lambda: [
-        "residencial", "hotelero", "mixto",
+        "residencial", "hotelero", "apartamento",
     ])
     tiene_atico: bool = False
     atico_computa_edificabilidad: bool = False
@@ -158,8 +177,9 @@ class ParametrosUrbanisticos:
 class ParametrosDiseno:
     """§2.6 — defaults del Anexo II A2.x.
 
-    Iteración 4: tres porcentajes explícitos para muros, circulación y núcleo.
-    Suma de los tres ≤ 90% (validado en motor).
+    Iteración 4: porcentajes explícitos para muros y circulación (suma ≤ 90%,
+    validado en motor). El núcleo (escalera/ascensor) es área fija en m² y vive
+    en el programa (`ParametrosPrograma.nucleo_m2`).
     """
     espesor_muro_fachada_m: float = 0.25
     espesor_muro_medianero_m: float = 0.25
@@ -174,13 +194,12 @@ class ParametrosDiseno:
     # construida, junto con `pct_muros` (perímetro), para obtener la útil neta de la
     # unidad. Default 0 (opt-in): sin él, la útil solo descuenta el perímetro.
     pct_muros_interior: float = 0.0
-    pct_circulacion_pb: float = 8.0     # % circulación en planta baja
-    pct_circulacion_tipo: float = 8.0   # % circulación en plantas tipo / ático
-    pct_nucleo: float = 5.0
-    # % circulación INTERIOR de la unidad (pasillos+vestíbulo dentro de cada
-    # vivienda/apartamento/habitación). Único, compartido por todos los usos;
-    # solo se lee del bloque de PB (`diseno`). Sustituye el 1.15 antes fijo.
-    pct_circulacion_interior: float = 15.0
+    # Circulación común de la planta en m² ABSOLUTOS (antes eran %). Reserva fija por
+    # planta (como el núcleo), acotada a la huella disponible.
+    circulacion_pb_m2: float = 10.0     # m² circulación en planta baja
+    circulacion_tipo_m2: float = 10.0   # m² circulación en plantas tipo / ático
+    # La circulación INTERIOR de la unidad ya no es un % del panel: es un m² mínimo
+    # por tipología editable en «Ver / editar mínimos» (estancia `circulacion_interior`).
 
 
 @dataclass
@@ -196,11 +215,36 @@ class ParametrosPrograma:
     salon_cocina_open: bool = False
     # Tipologías adicionales para la mezcla multi-tipología. Los slugs válidos
     # dependen del uso activo (vivienda: estudio/1d/2d/3d/4d+; apartamentos:
-    # estudio/1d/2d/3d; hotelero: individual/doble/triple/cuadruple/multiple).
+    # estudio/1d/2d/3d; hotelero: individual/doble/junior_suite/suite/multiple).
     tipologias_extra: list[str] = field(default_factory=list)
-    pct_local_pb: float = 0.0                       # % útil PB destinado a local no residencial
-    pct_otros_pb: float = 0.0                       # % útil PB destinado a otros usos
-    pct_usos_comunes_pb: float = 0.0                # % útil PB para usos comunes (AT / hoteles)
+    # Combinación elegida por el arquitecto (slug canónico multiconjunto). Su
+    # SEMÁNTICA depende del uso:
+    #   · vivienda/apartamentos → composición de DORMITORIOS dentro de una unidad
+    #     (edificio homogéneo), p. ej. "doble*1+individual*2".
+    #   · hotelero → composición de habitaciones POR PLANTA (patrón que se replica
+    #     en cada planta), p. ej. "doble*2+individual*1".
+    # Vacía ("") = reparto automático. Persistida por escenario.
+    combinacion: str = ""
+    # Tipos de unidad para la mezcla POR PLANTA (vivienda / apartamentos turísticos):
+    # ALFABETO de combo-slugs distintos, cada uno una combinación de dormitorios
+    # ("doble*1", "doble*1+individual*1", "estudio"). Análogo a las tipologías de
+    # habitación de hotel, pero de dormitorios. Necesario para enumerar y para pintar
+    # la UI antes de elegir mezcla. Hotel siempre lo deja vacío.
+    tipos_unidad: list[str] = field(default_factory=list)
+    # Mezcla elegida por el arquitecto: UN combo-slug POR UNIDAD (lista plana). Mapea
+    # 1:1 a `composicion_planta_forzada`. Es el análogo vivienda/apt del `combinacion`
+    # de hotel (que no puede codificar este multiconjunto por la colisión de los
+    # separadores del slug). Vacía = reparto homogéneo (compat) o sin elegir.
+    mezcla_planta: list[str] = field(default_factory=list)
+    # Reservas de planta baja en m² ABSOLUTOS (antes eran % del útil de PB). Se
+    # descuentan del útil de la PB, acotadas a lo disponible.
+    local_pb_m2: float = 0.0                        # m² PB destinados a local no residencial
+    otros_pb_m2: float = 0.0                        # m² PB destinados a otros usos
+    usos_comunes_pb_m2: float = 0.0                 # m² PB para usos comunes (AT / hoteles)
+    # Núcleo de comunicación vertical (escalera + ascensor): área FIJA en m² que se
+    # reserva en cada planta. Es de EDIFICIO (único y vertical); no aplica a un
+    # inmueble suelto.
+    nucleo_m2: float = 15.0
 
 
 @dataclass
@@ -255,12 +299,11 @@ class ParametrosRender:
             n_dorms = CATEGORIA_A_NUM_DORMS.get(programa.categoria_vivienda, 2)
             categoria_label = programa.categoria_vivienda.value
 
-        # Sanitiza porcentajes 0..100; suma se valida en el motor.
+        # Sanitiza porcentajes de muros 0..80; la circulación común es m² absolutos.
         pct_muros = max(0.0, min(80.0, float(diseno.pct_muros)))
         pct_muros_interior = max(0.0, min(80.0, float(getattr(diseno, "pct_muros_interior", 0.0))))
-        pct_circulacion_pb = max(0.0, min(50.0, float(diseno.pct_circulacion_pb)))
-        pct_circulacion_tipo = max(0.0, min(50.0, float(diseno.pct_circulacion_tipo)))
-        pct_nucleo = max(0.0, min(30.0, float(diseno.pct_nucleo)))
+        circulacion_pb_m2 = max(0.0, float(diseno.circulacion_pb_m2))
+        circulacion_tipo_m2 = max(0.0, float(diseno.circulacion_tipo_m2))
 
         # La vía int-based de `tipologias_extra` solo la consume el preview de
         # vivienda. Para el resto de usos la mezcla la resuelve `casos_uso`
@@ -296,9 +339,8 @@ class ParametrosRender:
                 area_patio_min=sum(area_de_patio(pd) for pd in self.urbanisticos.patios),
                 pct_muros=pct_muros,
                 pct_muros_interior=pct_muros_interior,
-                pct_circulacion_pb=pct_circulacion_pb,
-                pct_circulacion_tipo=pct_circulacion_tipo,
-                pct_nucleo=pct_nucleo,
+                circulacion_pb_m2=circulacion_pb_m2,
+                circulacion_tipo_m2=circulacion_tipo_m2,
                 pct_muros_normativo=max(0.0, min(80.0, float(self.urbanisticos.pct_muros_normativo))),
             ),
             urbanismo=UrbMotor(
@@ -322,9 +364,10 @@ class ParametrosRender:
                 salon_cocina_open=programa.salon_cocina_open,
                 n_plantas=self.urbanisticos.n_plantas_max,
                 tipologias_extra=tipologias_extra_n,
-                pct_local_pb=max(0.0, min(100.0, float(programa.pct_local_pb))),
-                pct_otros_pb=max(0.0, min(100.0, float(programa.pct_otros_pb))),
-                pct_usos_comunes_pb=max(0.0, min(100.0, float(programa.pct_usos_comunes_pb))),
+                local_pb_m2=max(0.0, float(programa.local_pb_m2)),
+                otros_pb_m2=max(0.0, float(programa.otros_pb_m2)),
+                usos_comunes_pb_m2=max(0.0, float(programa.usos_comunes_pb_m2)),
+                nucleo_m2=max(0.0, float(programa.nucleo_m2)),
             ),
             # Colocación individual de cada patio (polígono libre opcional). El motor
             # los dibuja uno a uno y los resta del interior; capacidad sigue usando solo
@@ -335,6 +378,7 @@ class ParametrosRender:
                     id=(pd.id if isinstance(pd, PatioDef) else ""),
                     vertices=(pd.vertices if isinstance(pd, PatioDef) else None),
                     bloqueado=(pd.bloqueado if isinstance(pd, PatioDef) else False),
+                    huecos=(pd.huecos if isinstance(pd, PatioDef) else None),
                 )
                 for pd in self.urbanisticos.patios
                 if area_de_patio(pd) > 0
@@ -353,6 +397,10 @@ def _patio_def_a_dict(pd: Any) -> dict[str, Any]:
             out["vertices"] = [[float(x), float(y)] for x, y in pd.vertices]
         if pd.bloqueado:
             out["bloqueado"] = True
+        if pd.origen:
+            out["origen"] = pd.origen
+        if pd.huecos:
+            out["huecos"] = [[[float(x), float(y)] for x, y in h] for h in pd.huecos]
         return out
     return {"id": "", "area_m2": float(pd)}
 
@@ -369,10 +417,8 @@ def _diseno_a_dict(d: ParametrosDiseno) -> dict[str, Any]:
         "ancho_min_puerta_m": d.ancho_min_puerta_m,
         "pct_muros": d.pct_muros,
         "pct_muros_interior": d.pct_muros_interior,
-        "pct_circulacion_pb": d.pct_circulacion_pb,
-        "pct_circulacion_tipo": d.pct_circulacion_tipo,
-        "pct_nucleo": d.pct_nucleo,
-        "pct_circulacion_interior": d.pct_circulacion_interior,
+        "circulacion_pb_m2": d.circulacion_pb_m2,
+        "circulacion_tipo_m2": d.circulacion_tipo_m2,
     }
 
 
@@ -387,9 +433,13 @@ def _programa_a_dict(prog: ParametrosPrograma) -> dict[str, Any]:
         "grupo_apartamentos": prog.grupo_apartamentos.value,
         "salon_cocina_open": prog.salon_cocina_open,
         "tipologias_extra": list(prog.tipologias_extra),
-        "pct_local_pb": prog.pct_local_pb,
-        "pct_otros_pb": prog.pct_otros_pb,
-        "pct_usos_comunes_pb": prog.pct_usos_comunes_pb,
+        "combinacion": prog.combinacion,
+        "tipos_unidad": list(prog.tipos_unidad),
+        "mezcla_planta": list(prog.mezcla_planta),
+        "local_pb_m2": prog.local_pb_m2,
+        "otros_pb_m2": prog.otros_pb_m2,
+        "usos_comunes_pb_m2": prog.usos_comunes_pb_m2,
+        "nucleo_m2": prog.nucleo_m2,
     }
 
 
@@ -477,13 +527,6 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
         (p. ej. solo % muros + % circulación) y completen el resto desde su padre.
         """
         node = node or {}
-
-        def _circ(field: str, base_val: float) -> float:
-            # Compat JSON antiguo: `pct_circulacion` único alimenta pb y tipo.
-            if "pct_circulacion" in node and field not in node:
-                return max(0.0, min(50.0, _f(node, "pct_circulacion", base_val)))
-            return max(0.0, min(50.0, _f(node, field, base_val)))
-
         return ParametrosDiseno(
             espesor_muro_fachada_m=_f(node, "espesor_muro_fachada_m", base_d.espesor_muro_fachada_m),
             espesor_muro_medianero_m=_f(node, "espesor_muro_medianero_m", base_d.espesor_muro_medianero_m),
@@ -495,10 +538,8 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             ancho_min_puerta_m=_f(node, "ancho_min_puerta_m", base_d.ancho_min_puerta_m),
             pct_muros=max(0.0, min(80.0, _f(node, "pct_muros", base_d.pct_muros))),
             pct_muros_interior=max(0.0, min(80.0, _f(node, "pct_muros_interior", base_d.pct_muros_interior))),
-            pct_circulacion_pb=_circ("pct_circulacion_pb", base_d.pct_circulacion_pb),
-            pct_circulacion_tipo=_circ("pct_circulacion_tipo", base_d.pct_circulacion_tipo),
-            pct_nucleo=max(0.0, min(30.0, _f(node, "pct_nucleo", base_d.pct_nucleo))),
-            pct_circulacion_interior=max(0.0, min(40.0, _f(node, "pct_circulacion_interior", base_d.pct_circulacion_interior))),
+            circulacion_pb_m2=max(0.0, _f(node, "circulacion_pb_m2", base_d.circulacion_pb_m2)),
+            circulacion_tipo_m2=max(0.0, _f(node, "circulacion_tipo_m2", base_d.circulacion_tipo_m2)),
         )
 
     def _parse_programa(node: dict[str, Any] | None, base_prog: ParametrosPrograma) -> ParametrosPrograma:
@@ -522,7 +563,7 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
 
         # Los slugs válidos de la mezcla dependen del uso activo.
         if uso == UsoEdificio.HOTELERO:
-            slugs_validos = {"individual", "doble", "triple", "cuadruple", "multiple"}
+            slugs_validos = {"individual", "doble", "junior_suite", "suite", "multiple"}
         elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             slugs_validos = {"estudio", "individual", "doble", "triple", "cuadruple"}
         else:  # VIVIENDA
@@ -532,6 +573,55 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             tip_extra = list(base_prog.tipologias_extra)
         else:
             tip_extra = [str(s) for s in tip_extra_raw if isinstance(s, str) and s in slugs_validos]
+
+        # Combinación elegida (slug multiconjunto). Se valida contra los slugs del uso
+        # activo (una combinación de otro uso, o con tipologías no permitidas, se
+        # descarta → reparto automático). Se re-canonicaliza vía ComboDormitorios.
+        from .geometria.combinador_tipologias import slug_a_combo
+        comb_raw = node.get("combinacion", base_prog.combinacion)
+        combinacion = ""
+        if comb_raw:
+            combo = slug_a_combo(str(comb_raw))
+            if not combo.composicion or all(k in slugs_validos for k in combo.composicion):
+                combinacion = combo.slug
+
+        # Tipos de unidad + mezcla POR PLANTA (vivienda / apartamentos). Se validan
+        # contra los TAMAÑOS de dormitorio del uso (no el alfabeto de `tipologias_extra`,
+        # que son nº de dormitorios): vivienda {individual, doble}; apartamentos
+        # {individual, doble, triple, cuadruple}; estudio (composición vacía) siempre.
+        # Hotel fuerza ambos a []. Invariante autosanante: `tipos_unidad =
+        # distinct(canon(tipos) ∪ canon(mezcla))`; `mezcla_planta` referencia solo
+        # tipos existentes. Acepta lista JSON o string suelto; claves ausentes → [].
+        if uso == UsoEdificio.VIVIENDA:
+            tam_validos = {"individual", "doble"}
+        elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
+            tam_validos = {"individual", "doble", "triple", "cuadruple"}
+        else:
+            tam_validos = set()
+
+        def _canon_combo(s: Any) -> str | None:
+            if not isinstance(s, str) or not s:
+                return None
+            combo = slug_a_combo(s)
+            if combo.composicion and not all(k in tam_validos for k in combo.composicion):
+                return None
+            return combo.slug
+
+        def _lista(raw: Any) -> list[str]:
+            if isinstance(raw, list):
+                return [x for x in raw if isinstance(x, str)]
+            if isinstance(raw, str) and raw:
+                return [raw]
+            return []
+
+        if uso == UsoEdificio.HOTELERO or not tam_validos:
+            tipos_unidad: list[str] = []
+            mezcla_planta: list[str] = []
+        else:
+            tipos_canon = [c for c in (_canon_combo(s) for s in _lista(node.get("tipos_unidad"))) if c]
+            mezcla_canon = [c for c in (_canon_combo(s) for s in _lista(node.get("mezcla_planta"))) if c]
+            tipos_unidad = list(dict.fromkeys(tipos_canon + mezcla_canon))
+            mezcla_planta = [c for c in mezcla_canon if c in tipos_unidad]
 
         return ParametrosPrograma(
             uso=uso,
@@ -543,9 +633,13 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             grupo_apartamentos=grupo_apt,
             salon_cocina_open=_b(node, "salon_cocina_open", base_prog.salon_cocina_open),
             tipologias_extra=tip_extra,
-            pct_local_pb=max(0.0, min(100.0, _f(node, "pct_local_pb", base_prog.pct_local_pb))),
-            pct_otros_pb=max(0.0, min(100.0, _f(node, "pct_otros_pb", base_prog.pct_otros_pb))),
-            pct_usos_comunes_pb=max(0.0, min(100.0, _f(node, "pct_usos_comunes_pb", base_prog.pct_usos_comunes_pb))),
+            combinacion=combinacion,
+            tipos_unidad=tipos_unidad,
+            mezcla_planta=mezcla_planta,
+            local_pb_m2=max(0.0, _f(node, "local_pb_m2", base_prog.local_pb_m2)),
+            otros_pb_m2=max(0.0, _f(node, "otros_pb_m2", base_prog.otros_pb_m2)),
+            usos_comunes_pb_m2=max(0.0, _f(node, "usos_comunes_pb_m2", base_prog.usos_comunes_pb_m2)),
+            nucleo_m2=max(0.0, _f(node, "nucleo_m2", base_prog.nucleo_m2)),
         )
 
     urb_in = d.get("urbanisticos") or {}
@@ -640,9 +734,9 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
             "grupo_apartamentos": programa.grupo_apartamentos.value,
             "categoria_hotelero": programa.categoria_hotelero.value,
             "salon_cocina_open": programa.salon_cocina_open,
-            "pct_local_pb": programa.pct_local_pb,
-            "pct_otros_pb": programa.pct_otros_pb,
-            "pct_usos_comunes_pb": programa.pct_usos_comunes_pb,
+            "local_pb_m2": programa.local_pb_m2,
+            "otros_pb_m2": programa.otros_pb_m2,
+            "usos_comunes_pb_m2": programa.usos_comunes_pb_m2,
             "categoria_vivienda": prog_tipo_node.get("categoria_vivienda", programa.categoria_vivienda.value),
             "tipologia_apartamento": prog_tipo_node.get("tipologia_apartamento", programa.tipologia_apartamento.value),
             "tipologia_habitacion": prog_tipo_node.get("tipologia_habitacion", programa.tipologia_habitacion.value),

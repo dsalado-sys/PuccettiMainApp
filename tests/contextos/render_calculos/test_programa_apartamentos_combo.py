@@ -53,9 +53,12 @@ def test_util_minimo_combo_aplica_adicional_salon_por_personas_sobre_4():
     assert util_minimo_combo(combo, cat) == round(esperado, 2)
 
 
-def test_util_objetivo_combo_es_minimo_por_1_15():
+def test_util_objetivo_combo_es_minimo_mas_circulacion_m2():
+    # Objetivo = útil mínimo + circulación interior (m² por tipología, ya no ×1.15).
+    from app.contextos.render_calculos.geometria.programa_apartamentos import _circ_interior_combo
     combo = ComboDormitorios({"doble": 2})
-    assert util_objetivo_combo(combo, "2L") == round(util_minimo_combo(combo, "2L") * 1.15, 2)
+    esperado = round(util_minimo_combo(combo, "2L") + _circ_interior_combo(combo), 2)
+    assert util_objetivo_combo(combo, "2L") == esperado
 
 
 def test_estudio_combo_equivale_al_sizer_monodormitorio():

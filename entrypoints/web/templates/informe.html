@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block titulo %}Puccetti · Informe{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/informe.css?v={{ estaticos_version }}" />
+{% endblock %}
+
+{% block contenido %}
+
+<section class="hero">
+  <div class="hero-titulo">
+    <span class="eyebrow eyebrow--oro">Módulo</span>
+    <h1>Informes</h1>
+  </div>
+  <div class="hero-acciones">
+    <span id="inf-toast" class="toast" role="status" aria-live="polite"></span>
+  </div>
+</section>
+
+<section class="inf-panel"
+         data-puede-editar="{{ 'true' if puede_editar else 'false' }}">
+  <div class="inf-barra">
+    <label class="buscador" aria-label="Buscar proyecto">
+      <span class="icono-lupa" aria-hidden="true">⌕</span>
+      <input type="text" id="inf-buscar" placeholder="Buscar proyecto…" autocomplete="off">
+    </label>
+  </div>
+
+  <div id="inf-lista" class="inf-lista" aria-live="polite">
+    <p class="inf-vacio">Cargando…</p>
+  </div>
+</section>
+
+<script src="/static/js/informe.js?v={{ estaticos_version }}" defer></script>
+{% endblock %}

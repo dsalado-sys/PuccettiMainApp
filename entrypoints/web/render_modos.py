@@ -39,7 +39,7 @@ class ModoRender:
     #   "urbanismo"        → oculta el grupo «Urbanismo» entero
     #   "atico_sotano"     → oculta el grupo «Ático y sótano»
     #   "circulacion_comun"→ oculta el % de circulación común del edificio (Diseño)
-    #   "nucleo"           → oculta el % de núcleo del edificio (Diseño)
+    #   "nucleo"           → oculta el núcleo del edificio (m², en Programa)
     secciones_ocultas: tuple[str, ...] = field(default_factory=tuple)
     # ¿Trabaja este modo sobre un inmueble concreto (estancias de UNA unidad) en vez
     # de sobre el edificio completo de la parcela? Cambia la pantalla: sin canvas de

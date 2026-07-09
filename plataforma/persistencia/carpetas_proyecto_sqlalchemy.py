@@ -85,6 +85,16 @@ class CarpetasProyectoSQLAlchemy:
         items = self._session.scalars(select(ProyectoEnCarpetaORM)).all()
         return {m.proyecto_id: m.carpeta_id for m in items}
 
+    def proyectos_en_carpeta(self, carpeta_id: int) -> list[str]:
+        """IDs de los proyectos ubicados en una carpeta (para el borrado en cascada
+        opcional: quien elimina la carpeta decide si borra también sus proyectos)."""
+        items = self._session.scalars(
+            select(ProyectoEnCarpetaORM.proyecto_id).where(
+                ProyectoEnCarpetaORM.carpeta_id == carpeta_id
+            )
+        ).all()
+        return list(items)
+
     def mover_proyecto(self, proyecto_id: str, carpeta_id: int | None) -> None:
         """Asigna el proyecto a una carpeta, o lo saca de toda carpeta (None)."""
         actual = self._session.get(ProyectoEnCarpetaORM, proyecto_id)

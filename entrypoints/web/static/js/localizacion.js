@@ -10,10 +10,44 @@
   const COLOR_MEDIANERA = css.getPropertyValue("--negro").trim() || "#0A0A0A";
   const PESO_LADO = 4;
 
+  // Mensajes rotativos del spinner mientras se busca la parcela. Cosméticos
+  // (la búsqueda es una sola petición), pero siguen el orden real del servidor.
+  const MENSAJES_CARGA = [
+    // Fase 1: búsqueda en el Catastro
+    "Consultando el Catastro…",
+    "Obteniendo datos de la referencia catastral…",
+    "Recuperando geometría de la parcela…",
+    "Validando el polígono…",
+    // Fase 2: análisis geométrico
+    "Extrayendo lados del contorno…",
+    "Computando azimuts y orientaciones…",
+    // Fase 4: clasificación de lados
+    "Clasificando muros de fachada…",
+    "Detectando medianeras…",
+    "Validando tipo de cada lado…",
+    // Fase 5: cálculos de metaparcela
+    "Recogiendo datos de inmuebles…",
+    "Calculando superficie útil…",
+    "Computando edificabilidad…",
+    "Contabilizando viviendas…",
+    "Calculando densidad de viviendas…",
+    // Fase 6: render
+    "Preparando datos para el plano…",
+    "Dibujando contorno…",
+    "Pintando lados…",
+    "Colocando etiquetas de orientación…",
+    "Montando tabla de lados…",
+    "Renderizando panel de información…",
+    "Finalizando…",
+  ];
+
   const cfg = window.PUCCETTI_LOC || {};
   const puedeEditar = !!cfg.puedeEditar;
 
   let parcelaActual = null;
+  // Orientaciones: por defecto solo se marcan las de los muros de fachada; el
+  // botón «Calcular orientaciones» revela las del resto de muros (medianeras).
+  let orientacionesTodas = false;
   let capaContorno = null;
   let capaLados = [];
   let capaEtiquetasOri = [];
@@ -308,50 +342,67 @@
 
   // ── HTTP ─────────────────────────────────────────────────────────────────
   function enviarForm(url, formData) {
+    orientacionesTodas = false;   // parcela nueva → arranca mostrando solo fachada
     limpiarMensaje();
     mostrarSpinner();
+    iniciarMensajesCarga();
     fetch(url, { method: "POST", body: formData })
       .then(parseRespuesta)
-      .then(pintarParcela)
+      .then(function (p) { pintarParcela(p, true); })
       .catch(mostrarError)
-      .finally(ocultarSpinner);
+      .finally(function () { ocultarSpinner(); detenerMensajesCarga(); });
   }
 
   function buscarPorCoordenada(lon, lat) {
+    orientacionesTodas = false;
     limpiarMensaje();
     mostrarSpinner();
+    iniciarMensajesCarga();
     fetch("/modulos/localizacion/buscar/coordenada", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lon: lon, lat: lat }),
     })
       .then(parseRespuesta)
-      .then(pintarParcela)
+      .then(function (p) { pintarParcela(p, true); })
       .catch(mostrarError)
-      .finally(ocultarSpinner);
+      .finally(function () { ocultarSpinner(); detenerMensajesCarga(); });
   }
 
   function buscarPorRcStr(rc) {
+    orientacionesTodas = false;
     limpiarMensaje();
     mostrarSpinner();
+    iniciarMensajesCarga();
     const fd = new FormData();
     fd.append("rc", rc);
     fetch("/modulos/localizacion/buscar/rc", { method: "POST", body: fd })
       .then(parseRespuesta)
-      .then(pintarParcela)
+      .then(function (p) { pintarParcela(p, true); })
       .catch(mostrarError)
-      .finally(ocultarSpinner);
+      .finally(function () { ocultarSpinner(); detenerMensajesCarga(); });
   }
 
-  // Elegir un inmueble de la metaparcela SIN volver a llamar al Catastro: la
-  // subreferencia (escalera·planta·puerta + construida) ya está cargada.
+  // Normaliza una RC igual que el backend (mayúsculas, sin espacios) para
+  // poder comparar la clicada con la ya elegida.
+  function normalizarRc(rc) {
+    return (rc || "").trim().toUpperCase().replace(/\s+/g, "");
+  }
+
+  // Elegir/deseleccionar un inmueble de la metaparcela SIN volver a llamar al
+  // Catastro: la subreferencia (escalera·planta·puerta + construida) ya está
+  // cargada. Re-clicar el inmueble ya elegido lo deselecciona (rc vacío → el
+  // backend pone inmueble_seleccionado = None).
   function seleccionarInmueble(rc) {
     if (!puedeEditar) return;
     limpiarMensaje();
+    const elegidoActual = parcelaActual && parcelaActual.inmueble_seleccionado
+      ? normalizarRc(parcelaActual.inmueble_seleccionado.rc) : "";
+    const rcEnviar = normalizarRc(rc) === elegidoActual ? "" : rc;
     fetch("/modulos/localizacion/seleccionar-inmueble", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rc: rc }),
+      body: JSON.stringify({ rc: rcEnviar }),
     })
       .then(parseRespuesta)
       .then(pintarParcela)
@@ -389,11 +440,15 @@
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
-  function pintarParcela(parcela) {
+  // `reencuadrar` = true solo al cargar una parcela NUEVA (búsqueda); en los
+  // re-render por edición (muro, orientaciones, simplificar, inmueble) se omite
+  // el fitBounds para conservar el zoom/paneo del usuario.
+  function pintarParcela(parcela, reencuadrar) {
     parcelaActual = parcela;
     pintarFicha(parcela);
-    pintarMapa(parcela);
+    pintarMapa(parcela, reencuadrar);
     pintarTablaLados(parcela);
+    actualizarBotonOrientaciones(parcela);
     pintarCardsSubref(parcela);
     pintarAgregados(parcela);
     pintarDatosCatastrales(parcela);
@@ -476,9 +531,11 @@
 
     p.subreferencias.forEach(function (s) {
       const card = document.createElement("article");
-      card.className = "loc-card" + (s.rc === rcElegido ? " loc-card-elegida" : "");
+      const esElegida = s.rc === rcElegido;
+      card.className = "loc-card" + (esElegida ? " loc-card-elegida" : "");
       card.title =
-        "Click para elegir este inmueble · RC: " + s.rc +
+        (esElegida ? "Click para deseleccionar este inmueble" : "Click para elegir este inmueble") +
+        " · RC: " + s.rc +
         (s.localizacion ? "  ·  Localización: " + s.localizacion : "") +
         (s.uso ? "  ·  Uso: " + s.uso : "");
       card.tabIndex = 0;
@@ -530,7 +587,7 @@
     return sp;
   }
 
-  function pintarMapa(p) {
+  function pintarMapa(p, reencuadrar) {
     if (capaContorno) { mapa.removeLayer(capaContorno); capaContorno = null; }
     capaLados.forEach(function (cl) { mapa.removeLayer(cl.polyline); });
     capaLados = [];
@@ -565,23 +622,28 @@
         }
       });
 
-      // Etiqueta de orientación cardinal en el punto medio del lado.
-      const latMid = (lado.p1[1] + lado.p2[1]) / 2.0;
-      const lonMid = (lado.p1[0] + lado.p2[0]) / 2.0;
-      const etiqueta = L.marker([latMid, lonMid], {
-        icon: L.divIcon({
-          className: "loc-orientacion-tag tipo-" + lado.tipo,
-          html: lado.orientacion || "?",
-          iconSize: null,
-        }),
-        interactive: false,
-        keyboard: false,
-      }).addTo(mapa);
-      capaEtiquetasOri.push(etiqueta);
+      // Etiqueta de orientación cardinal en el punto medio del lado. Solo se
+      // marca la de los muros de fachada; las demás solo si se han "calculado".
+      if (lado.tipo === "fachada" || orientacionesTodas) {
+        const latMid = (lado.p1[1] + lado.p2[1]) / 2.0;
+        const lonMid = (lado.p1[0] + lado.p2[0]) / 2.0;
+        const etiqueta = L.marker([latMid, lonMid], {
+          icon: L.divIcon({
+            className: "loc-orientacion-tag tipo-" + lado.tipo,
+            html: lado.orientacion || "?",
+            iconSize: null,
+          }),
+          interactive: false,
+          keyboard: false,
+        }).addTo(mapa);
+        capaEtiquetasOri.push(etiqueta);
+      }
       capaLados.push({ lado: lado, polyline: pl });
     });
 
-    mapa.fitBounds(capaContorno.getBounds(), { padding: [40, 40], maxZoom: 19 });
+    if (reencuadrar) {
+      mapa.fitBounds(capaContorno.getBounds(), { padding: [40, 40], maxZoom: 19 });
+    }
   }
 
   function pintarTablaLados(p) {
@@ -595,24 +657,33 @@
       const tdIdx = document.createElement("td"); tdIdx.textContent = lado.indice + 1;
       const tdLon = document.createElement("td"); tdLon.textContent = lado.longitud_m.toFixed(1) + " m";
 
-      // Orientación cardinal — editable
+      // Orientación cardinal — solo se marca la de los muros de fachada; las
+      // medianeras quedan "—" hasta pulsar «Calcular orientaciones».
       const tdOri = document.createElement("td");
-      const selOri = document.createElement("select");
-      selOri.className = "select";
-      ["N", "NE", "E", "SE", "S", "SO", "O", "NO"].forEach(function (o) {
-        const opt = document.createElement("option");
-        opt.value = o;
-        opt.textContent = o;
-        if (o === lado.orientacion) opt.selected = true;
-        selOri.appendChild(opt);
-      });
-      selOri.title = "Azimut auto: " + lado.azimut_grados.toFixed(0) + "° · click para corregir";
-      selOri.addEventListener("change", function () {
-        if (!puedeEditar) return;
-        cambiarOrientacionLado(lado.indice, selOri.value);
-      });
-      selOri.addEventListener("focus", function () { seleccionarLado(lado.indice); });
-      tdOri.appendChild(selOri);
+      if (lado.tipo === "fachada" || orientacionesTodas) {
+        const selOri = document.createElement("select");
+        selOri.className = "select";
+        ["N", "NE", "E", "SE", "S", "SO", "O", "NO"].forEach(function (o) {
+          const opt = document.createElement("option");
+          opt.value = o;
+          opt.textContent = o;
+          if (o === lado.orientacion) opt.selected = true;
+          selOri.appendChild(opt);
+        });
+        selOri.title = "Azimut auto: " + lado.azimut_grados.toFixed(0) + "° · click para corregir";
+        selOri.addEventListener("change", function () {
+          if (!puedeEditar) return;
+          cambiarOrientacionLado(lado.indice, selOri.value);
+        });
+        selOri.addEventListener("focus", function () { seleccionarLado(lado.indice); });
+        tdOri.appendChild(selOri);
+      } else {
+        const vacia = document.createElement("span");
+        vacia.className = "loc-ori-oculta";
+        vacia.textContent = "—";
+        vacia.title = "Pulsa «Calcular orientaciones» para calcularla";
+        tdOri.appendChild(vacia);
+      }
 
       const tdTipo = document.createElement("td");
       const sel = document.createElement("select");
@@ -668,6 +739,61 @@
       const sp = document.getElementById("loc-spinner");
       if (sp) sp.classList.add("oculto");
     }
+  }
+
+  // ── Mensajes rotativos del spinner (línea única, pausa aleatoria 1–3 s) ────
+  let mensajeTimer = null;
+  let mensajeIdx = 0;
+  function textoSpinner() { return document.querySelector(".loc-spinner-texto"); }
+  function iniciarMensajesCarga() {
+    detenerMensajesCarga();
+    mensajeIdx = 0;
+    const el = textoSpinner();
+    if (el) el.textContent = MENSAJES_CARGA[0];
+    programarSiguienteMensaje();
+  }
+  function programarSiguienteMensaje() {
+    const ms = 1000 + Math.random() * 2000;   // 1–3 s
+    mensajeTimer = setTimeout(function () {
+      mensajeTimer = null;
+      if (mensajeIdx >= MENSAJES_CARGA.length - 1) return;  // fija el último
+      mensajeIdx += 1;
+      const el = textoSpinner();
+      if (el) el.textContent = MENSAJES_CARGA[mensajeIdx];
+      programarSiguienteMensaje();
+    }, ms);
+  }
+  function detenerMensajesCarga() {
+    if (mensajeTimer) { clearTimeout(mensajeTimer); mensajeTimer = null; }
+    const el = textoSpinner();
+    if (el) el.textContent = "Cargando…";   // por defecto (guardar/otros flujos)
+  }
+
+  // ── Botón «Calcular orientaciones» (revela las de los muros no de fachada) ─
+  const btnOrientaciones = document.getElementById("btn-calcular-orientaciones");
+  function actualizarBotonOrientaciones(p) {
+    if (!btnOrientaciones) return;
+    const hayNoFachada = !!(p && p.lados && p.lados.some(function (l) {
+      return l.tipo !== "fachada";
+    }));
+    btnOrientaciones.hidden = !hayNoFachada;
+    if (hayNoFachada) {
+      btnOrientaciones.disabled = false;
+      btnOrientaciones.textContent = orientacionesTodas
+        ? "Ocultar orientaciones" : "Calcular orientaciones";
+    }
+  }
+  if (btnOrientaciones) {
+    btnOrientaciones.addEventListener("click", function () {
+      if (!parcelaActual) return;
+      btnOrientaciones.disabled = true;
+      btnOrientaciones.textContent = "Calculando…";
+      // Breve espera cosmética: el dato ya viene del servidor, solo se revela.
+      setTimeout(function () {
+        orientacionesTodas = !orientacionesTodas;
+        pintarParcela(parcelaActual);
+      }, 600);
+    });
   }
 
   function mostrarError(err) {
@@ -761,6 +887,6 @@
 
   // ── Estado inicial ───────────────────────────────────────────────────────
   if (cfg.parcelaInicial) {
-    pintarParcela(cfg.parcelaInicial);
+    pintarParcela(cfg.parcelaInicial, true);   // primera pintada: encuadrar
   }
 })();

@@ -4,7 +4,7 @@ Endpoints:
 - GET  /modulos/render-calculos                   → pantalla del módulo
 - POST /modulos/render-calculos/preview           → envolvente rápida (req. 8)
 - POST /modulos/render-calculos/calcular          → cálculo completo (req. 8+12)
-- POST /modulos/render-calculos/guardar           → persiste params en aggregate
+- POST /modulos/render-calculos/escenarios        → persiste escenarios (pestañas) en aggregate
 - GET  /modulos/render-calculos/normativa         → lista municipios con PGOU guardado
 - GET  /modulos/render-calculos/normativa/{p}/{m} → consulta PGOU de un municipio
 - POST /modulos/render-calculos/normativa/{p}/{m} → crea/actualiza PGOU
@@ -15,11 +15,14 @@ from __future__ import annotations
 import csv
 import io
 import json
+from datetime import datetime, timezone
 from typing import Annotated, Any
 
 # Tope de tamaño del "resumen" persistido en el aggregate: evita que un POST
 # guarde un blob arbitrariamente grande en el JSON del proyecto.
 _RESUMEN_MAX_BYTES = 100_000
+# Nº máximo de escenarios (pestañas) por modo: cota anti-DoS del JSON del proyecto.
+_ESCENARIOS_MAX = 24
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -27,21 +30,25 @@ from sqlalchemy.orm import Session
 
 from app.contextos.proyectos.puertos import ProyectoRepositorio
 from app.contextos.render_calculos.casos_uso import (
+    CalcularCombinacionesHotel,
+    CalcularCombinacionesPorPlanta,
     CalcularEnvolvente,
     CalcularEstanciasInmueble,
     CalcularLayout,
     CalcularTipologiasDormitorios,
-    GuardarRender,
+    GuardarEscenariosRender,
     ValidarCumplimiento,
     adaptar_params_a_edificio_existente,
     aviso_atico_catastral,
     construir_parcela_metrica,
+    contenedor_escenarios_proyecto,
     parametros_desde_proyecto,
 )
 from app.contextos.render_calculos.dominio import UsoEdificio
 from app.contextos.render_calculos.geometria.envolvente import fusionar_anillos
 from app.contextos.render_calculos.geometria.serializacion import ring
 from app.contextos.render_calculos.parametros import (
+    PGOU_A_USO_DESTINO,
     ParametrosUrbanisticos,
     parametros_a_dict,
     parametros_desde_dict,
@@ -238,14 +245,12 @@ def _construida_inmueble_m2(proyecto: Proyecto | None) -> float:
 def _tiene_params_guardados(proyecto: Proyecto | None, modo: str, *, heredar_legado: bool) -> bool:
     """¿El modo dado ya tiene parámetros propios guardados en el aggregate?
 
-    El formato plano legado solo cuenta para el modo por defecto (`heredar_legado`)."""
+    Reconoce el contenedor de escenarios y el formato plano legado (este último solo
+    cuenta para el modo por defecto, `heredar_legado`)."""
     if proyecto is None:
         return False
-    datos = proyecto.datos_por_modulo.get(ModuloPuccetti.RENDER_CALCULOS.value) or {}
-    blk = datos.get(modo)
-    if isinstance(blk, dict) and blk.get("parametros"):
-        return True
-    return bool(heredar_legado and datos.get("parametros"))
+    cont = contenedor_escenarios_proyecto(proyecto, modo, heredar_legado=heredar_legado)
+    return bool(cont and any(e.get("parametros") for e in cont["escenarios"]))
 
 
 # ─── Pantalla principal ─────────────────────────────────────────────────────
@@ -253,6 +258,7 @@ def _tiene_params_guardados(proyecto: Proyecto | None, modo: str, *, heredar_leg
 def pantalla(
     request: Request,
     modo: Annotated[str, Query()] = "",
+    escenario: Annotated[str, Query()] = "",
     rol: Rol = Depends(rol_activo),
     proyecto: Proyecto | None = Depends(proyecto_activo),
     repo_norm: NormativaMunicipalRepositorio = Depends(_normativa_repo),
@@ -307,6 +313,7 @@ def pantalla(
         proyecto, modo_cfg.slug,
         heredar_legado=es_modo_defecto,
         adaptar_a_existente=es_rehabilitacion,
+        escenario_id=(escenario or None),
     )
 
     municipios = repo_norm.listar()
@@ -331,14 +338,42 @@ def pantalla(
             adaptar_params_a_edificio_existente(params, proyecto)
             aviso_atico = aviso_atico_catastral(proyecto)
 
+    # El uso destino se habilita según lo que permita el PGOU vigente de los params.
+    permitidos_pgou = set(params.urbanisticos.usos_permitidos or [])
+    uso_destino_ok = {PGOU_A_USO_DESTINO[u] for u in permitidos_pgou if u in PGOU_A_USO_DESTINO}
     usos_catalogo = [
-        {"value": "vivienda", "label": "Vivienda", "habilitado": True},
-        {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos", "habilitado": True},
-        {"value": "hotelero", "label": "Hotelero", "habilitado": True},
+        {"value": "vivienda", "label": "Vivienda"},
+        {"value": "apartamentos_turisticos", "label": "Apartamentos turísticos"},
+        {"value": "hotelero", "label": "Hotelero"},
     ]
+    for u in usos_catalogo:
+        u["habilitado"] = u["value"] in uso_destino_ok
+        u["motivo"] = "" if u["habilitado"] else "no permitido por el PGOU"
     # Hook de configuración por modo: si el modo restringe usos, se filtran.
     if modo_cfg.usos_permitidos:
         usos_catalogo = [u for u in usos_catalogo if u["value"] in modo_cfg.usos_permitidos]
+
+    # Escenarios (pestañas) del modo → barra superior. Cada escenario lleva sus
+    # parámetros y resumen (el frontend los reenvía al persistir). Sin ninguno
+    # guardado, se ofrece uno solo con los parámetros calculados arriba.
+    cont = contenedor_escenarios_proyecto(proyecto, modo_cfg.slug, heredar_legado=es_modo_defecto)
+    if cont is None:
+        escenarios_full = [
+            {"id": "e1", "nombre": "", "parametros": parametros_a_dict(params), "resumen": {}}
+        ]
+        escenario_activo = "e1"
+    else:
+        escenarios_full = [
+            {
+                "id": e["id"],
+                "nombre": e.get("nombre") or "",
+                "parametros": e.get("parametros") or {},
+                "resumen": e.get("resumen_ultimo_calculo") or {},
+            }
+            for e in cont["escenarios"]
+        ]
+        ids = [e["id"] for e in cont["escenarios"]]
+        escenario_activo = escenario if escenario in ids else cont["activo"]
 
     return plantillas.TemplateResponse(
         request,
@@ -361,6 +396,9 @@ def pantalla(
             # Aviso sobre la procedencia del ático en rehabilitación (o None).
             "aviso_atico": aviso_atico,
             "normativa_aplicada": normativa_aplicada,
+            # Pestañas de escenario (barra superior) + cuál está activa.
+            "escenarios": escenarios_full,
+            "escenario_activo": escenario_activo,
         },
     )
 
@@ -520,7 +558,7 @@ def tipologias_dormitorios(
     """Para un nº de dormitorios, devuelve las combinaciones viables y cuántas
     unidades cabe de cada una (ordenadas, podadas las no viables). El cliente
     muestra el modal de selección; la elección se reenvía a `/calcular` como
-    `combo_dormitorios` (no se persiste hasta `/guardar`)."""
+    `combo_dormitorios` (no se persiste hasta `/escenarios`)."""
     _exige_permiso(rol, PermisoModulo.VER)
     if proyecto is None:
         raise HTTPException(409, "No hay proyecto activo.")
@@ -542,35 +580,134 @@ def tipologias_dormitorios(
     return JSONResponse(resultado)
 
 
-# ─── Guardar parámetros en el aggregate ─────────────────────────────────────
-@router.post("/guardar")
-def guardar(
+# ─── Combinaciones de tipologías de unidad POR PLANTA (hotel) ────────────────
+@router.post("/combinaciones-hotel")
+def combinaciones_hotel(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Enumera las combinaciones de tipologías de habitación que caben en una planta
+    (individual/doble/triple…) sobre el útil de una planta representativa. El cliente
+    muestra el modal de selección; la elección viaja como `programa.combinacion` (que
+    el escenario persiste) y el motor la replica en cada planta habitable."""
+    _exige_permiso(rol, PermisoModulo.VER)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    parcela = construir_parcela_metrica(proyecto)
+    if parcela is None:
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
+
+    params = parametros_desde_dict(payload)
+    resultado = CalcularCombinacionesHotel(
+        catalogo_vivienda=catalogo_viv,
+        catalogo_apartamentos=catalogo_apt,
+        catalogo_hotelero=catalogo_hot,
+    ).ejecutar(parcela, params)
+    return JSONResponse(resultado)
+
+
+# ─── Combinaciones de tipologías de unidad POR PLANTA (vivienda / apartamentos) ──
+@router.post("/combinaciones-por-planta")
+def combinaciones_por_planta(
+    payload: Annotated[dict[str, Any], Body(...)],
+    rol: Rol = Depends(rol_activo),
+    proyecto: Proyecto | None = Depends(proyecto_activo),
+    catalogo_viv=Depends(catalogo_superficies_adapter),
+    catalogo_apt=Depends(catalogo_apartamentos_adapter),
+    catalogo_hot=Depends(catalogo_hotelero_adapter),
+):
+    """Enumera las combinaciones de tipos de unidad (por dormitorios) que caben en una
+    planta representativa, sobre las tipologías definidas en `programa.tipos_unidad`.
+    El cliente muestra el modal; la elección viaja como `programa.mezcla_planta` (que
+    el escenario persiste) y el motor la replica en cada planta habitable. Despacho por
+    uso en el caso de uso (vivienda/apartamentos; hotel usa `/combinaciones-hotel`)."""
+    _exige_permiso(rol, PermisoModulo.VER)
+    if proyecto is None:
+        raise HTTPException(409, "No hay proyecto activo.")
+    parcela = construir_parcela_metrica(proyecto)
+    if parcela is None:
+        raise HTTPException(409, "El proyecto no tiene parcela asociada. Localízala en «Buscar parcela».")
+
+    params = parametros_desde_dict(payload)
+    resultado = CalcularCombinacionesPorPlanta(
+        catalogo_vivienda=catalogo_viv,
+        catalogo_apartamentos=catalogo_apt,
+        catalogo_hotelero=catalogo_hot,
+    ).ejecutar(parcela, params)
+    return JSONResponse(resultado)
+
+
+# ─── Guardar escenarios (pestañas) en el aggregate ──────────────────────────
+@router.post("/escenarios")
+def guardar_escenarios(
     payload: Annotated[dict[str, Any], Body(...)],
     rol: Rol = Depends(rol_activo),
     proyecto: Proyecto | None = Depends(proyecto_activo),
     repo_proy: ProyectoRepositorio = Depends(repositorio_proyectos),
 ):
+    """Persiste la lista completa de escenarios de un modo + cuál está activo.
+
+    El frontend es la fuente de verdad: envía todos los escenarios con sus
+    parámetros/resumen; el backend valida, sanea (round-trip por el parser) y
+    reemplaza el contenedor del modo, conservando los demás modos.
+    """
     _exige_permiso(rol, PermisoModulo.EDITAR)
     if proyecto is None:
         raise HTTPException(409, "No hay proyecto activo.")
 
-    params_payload = payload.get("parametros") or payload
-    resumen = payload.get("resumen") or {}
-    try:
-        if len(json.dumps(resumen).encode("utf-8")) > _RESUMEN_MAX_BYTES:
-            raise HTTPException(413, "El resumen a guardar es demasiado grande.")
-    except (TypeError, ValueError):
-        raise HTTPException(422, "El resumen a guardar no es válido.")
-    params = parametros_desde_dict(params_payload)
+    escenarios_in = payload.get("escenarios")
+    if not isinstance(escenarios_in, list) or not escenarios_in:
+        raise HTTPException(422, "Se requiere al menos un escenario.")
+    if len(escenarios_in) > _ESCENARIOS_MAX:
+        raise HTTPException(413, f"Demasiados escenarios (máx. {_ESCENARIOS_MAX}).")
 
-    # Cada modo guarda su propio bloque. Modo inválido → modo por defecto.
+    ahora = datetime.now(timezone.utc).isoformat()
+    limpios: list[dict[str, Any]] = []
+    ids: list[str] = []
+    for e in escenarios_in:
+        if not isinstance(e, dict):
+            continue
+        eid = str(e.get("id") or "").strip()
+        if not eid or eid in ids:
+            continue
+        resumen = e.get("resumen") or e.get("resumen_ultimo_calculo") or {}
+        try:
+            if len(json.dumps(resumen).encode("utf-8")) > _RESUMEN_MAX_BYTES:
+                raise HTTPException(413, "El resumen de un escenario es demasiado grande.")
+        except (TypeError, ValueError):
+            raise HTTPException(422, "El resumen de un escenario no es válido.")
+        # Round-trip por el parser tolerante: valida y normaliza los parámetros.
+        params = parametros_desde_dict(e.get("parametros") or {})
+        limpios.append({
+            "id": eid,
+            "nombre": str(e.get("nombre") or "")[:120],
+            "parametros": parametros_a_dict(params),
+            "resumen_ultimo_calculo": resumen,
+            "timestamp": ahora,
+        })
+        ids.append(eid)
+    if not limpios:
+        raise HTTPException(422, "Ningún escenario válido.")
+
+    activo = str(payload.get("activo") or "").strip()
+    if activo not in ids:
+        activo = ids[0]
+
+    # Cada modo guarda su propio contenedor. Modo inválido → modo por defecto.
     modo_cfg = modo_o_none(payload.get("modo"))
     modo_key = modo_cfg.slug if modo_cfg else MODO_POR_DEFECTO
 
-    actualizado = GuardarRender(repo_proyectos=repo_proy).ejecutar(
-        proyecto, params, resumen, modo_key=modo_key
+    actualizado = GuardarEscenariosRender(repo_proyectos=repo_proy).ejecutar(
+        proyecto, limpios, activo, modo_key=modo_key
     )
-    return JSONResponse({"ok": True, "modo": modo_key, "actualizado_en": actualizado.actualizado_en.isoformat()})
+    return JSONResponse({
+        "ok": True, "modo": modo_key, "activo": activo,
+        "actualizado_en": actualizado.actualizado_en.isoformat(),
+    })
 
 
 # ─── Persistir normativa elegida en el aggregate ─────────────────────────────
@@ -651,7 +788,6 @@ def listar_superficies_vivienda(
     _exige_permiso(rol, PermisoModulo.VER)
     return JSONResponse({
         "filas": catalogo_viv.filas_vivienda(),
-        "util_maximo": {str(n): v for n, v in catalogo_viv.util_maximo_por_tipologia().items()},
     })
 
 

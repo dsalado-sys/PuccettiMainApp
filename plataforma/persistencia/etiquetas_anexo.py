@@ -19,6 +19,7 @@ _ETIQUETAS_ESTANCIA: dict[str, str] = {
     "habitacion": "Habitación",
     "bano": "Baño",
     "aseo": "Aseo",
+    "circulacion_interior": "Circulación interior (m²)",
     # Servicios comunes / sociales obligatorios del establecimiento.
     "areas_sociales": "Áreas sociales",
     "salon_social": "Salón social",
@@ -34,8 +35,8 @@ _ORDEN_TIPOLOGIA: dict[str, int] = {
     "estudio": 0,
     "1d": 1, "individual": 1,
     "2d": 2, "doble": 2,
-    "3d": 3, "triple": 3,
-    "4d": 4, "cuadruple": 4,
+    "3d": 3, "triple": 3, "junior_suite": 3,
+    "4d": 4, "cuadruple": 4, "suite": 4,
     "multiple": 5,
     # Salón-comedor común de la unidad: tras las ocupaciones y antes de las áreas
     # comunes del establecimiento.
@@ -55,6 +56,8 @@ def etiqueta_estancia(nombre: str) -> str:
 
 
 def _orden_estancia(nombre: str) -> tuple[int, int]:
+    if nombre == "circulacion_interior":
+        return (-1, 0)  # circulación interior de la unidad: arriba de la sección
     fijo = {"salon_comedor": 0, "salon": 0, "salon_cocina": 1, "espacio_principal": 2,
             "habitacion": 0, "dormitorio": 0, "estudio": 0, "cocina": 3, "aseo": 4}
     if nombre in fijo:
