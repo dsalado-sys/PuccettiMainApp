@@ -17,6 +17,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contextos.render_calculos.geometria.programa import (
+    CIRC_INTERIOR_M2_VIVIENDA,
+    MARGEN_UTIL_MAXIMO_VIVIENDA,
     MIN_BANO,
     MIN_COCINA,
     MIN_DORM_DOBLE,
@@ -40,7 +42,7 @@ SEED_SEVILLA = {
     "n_plantas_max": 3,
     "retranqueo_fachada_m": 0.0,
     "retranqueo_linderos_m": 0.0,
-    "usos_permitidos": ["residencial", "hotelero", "mixto"],
+    "usos_permitidos": ["residencial", "hotelero", "apartamento"],
     "luz_recta_patio_min_m": 3.0,
     "area_patio_min_m2": 12.0,
     "tiene_atico_default": 0,
@@ -108,7 +110,8 @@ def _filas_anexo_i_vivienda() -> list[tuple[int, str, float, float, float | None
     filas.append((0, "espacio_principal", 14.0, util_max_estudio, 18.0))
     filas.append((0, "cocina", MIN_COCINA, util_max_estudio, MIN_COCINA + 1.0))
     filas.append((0, "bano", MIN_BANO, util_max_estudio, 4.0))
-    filas.append((0, "circulacion_interior", 0.0, util_max_estudio, 3.0))
+    # Circulación interior de la unidad: m² mínimo editable por tipología (min_m2).
+    filas.append((0, "circulacion_interior", CIRC_INTERIOR_M2_VIVIENDA[0], util_max_estudio, None))
 
     # 1d..4d y el tramo ">4d" (clave 5, con 5 dormitorios de referencia).
     for n in range(1, 6):
@@ -122,6 +125,8 @@ def _filas_anexo_i_vivienda() -> list[tuple[int, str, float, float, float | None
         # Baños completos por nº de dormitorios: 1 hasta 2 dorms, 2 desde 3 dorms.
         for nombre in nombres_banos(banos_vivienda(n)):
             filas.append((n, nombre, MIN_BANO, util_max, MIN_BANO + 2.0))
+        # Circulación interior de la unidad (m² mínimo editable por tipología).
+        filas.append((n, "circulacion_interior", CIRC_INTERIOR_M2_VIVIENDA.get(n, 10.0), util_max, None))
     return filas
 
 
@@ -141,7 +146,8 @@ def sembrar_anexo_i_vivienda(session: Session, forzar: bool = False, commit: boo
                         n_dormitorios=n_dorms,
                         estancia=estancia,
                         min_m2=min_m2,
-                        max_m2_util=max_m2,
+                        min_m2_util=max_m2,
+                        max_m2_util=max_m2 + MARGEN_UTIL_MAXIMO_VIVIENDA,
                         area_target_m2=target,
                         editable_por_usuario=0,
                         actualizado_en=ahora,
@@ -160,7 +166,8 @@ def sembrar_anexo_i_vivienda(session: Session, forzar: bool = False, commit: boo
                 n_dormitorios=n_dorms,
                 estancia=estancia,
                 min_m2=min_m2,
-                max_m2_util=max_m2,
+                min_m2_util=max_m2,
+                max_m2_util=max_m2 + MARGEN_UTIL_MAXIMO_VIVIENDA,
                 area_target_m2=target,
                 editable_por_usuario=0,
                 actualizado_en=ahora,
@@ -201,6 +208,7 @@ def _filas_anexo_i_apartamentos() -> list[tuple[str, str, str, float, float]]:
     from app.contextos.render_calculos.geometria.programa_apartamentos import (
         programa_apartamentos,
         areas_comunes_obligatorias,
+        CIRC_INTERIOR_M2_APARTAMENTOS,
         TIPOLOGIAS,
     )
 
@@ -211,6 +219,8 @@ def _filas_anexo_i_apartamentos() -> list[tuple[str, str, str, float, float]]:
             base = round(sum(e.area_min_m2 for e in estancias), 2)
             for e in estancias:
                 filas.append((cat, tip, e.nombre, e.area_min_m2, base))
+            # Circulación interior de la unidad (m² mínimo editable por tipología).
+            filas.append((cat, tip, "circulacion_interior", CIRC_INTERIOR_M2_APARTAMENTOS.get(tip, 6.0), base))
 
     # Áreas comunes obligatorias por categoría (referencia n_unidades = 5).
     for cat in ("1L", "2L", "3L", "4L"):
@@ -220,11 +230,10 @@ def _filas_anexo_i_apartamentos() -> list[tuple[str, str, str, float, float]]:
 
 
 def sembrar_anexo_i_apartamentos(session: Session, forzar: bool = False, commit: bool = True) -> None:
+    # Idempotente: añade solo las filas (cat, tip, estancia) que falten, de modo que
+    # las estancias nuevas (p. ej. `circulacion_interior`) aparezcan sobre una BBDD ya
+    # sembrada sin necesidad de reset. `reset()` pasa forzar=True tras borrar la tabla.
     from .anexo_i_apartamentos_sqlalchemy import AnexoIApartamentosORM
-    if not forzar:
-        existe = session.scalar(select(AnexoIApartamentosORM).limit(1))
-        if existe is not None:
-            return
     ahora = datetime.now(timezone.utc)
     for cat, tip, estancia, min_m2, max_m2 in _filas_anexo_i_apartamentos():
         orm = session.get(AnexoIApartamentosORM, (cat, tip, estancia))
@@ -247,6 +256,7 @@ def _filas_anexo_i_apartamentos_conjuntos() -> list[tuple[str, str, str, float, 
     """Anexo I.4 (Decreto 194/2010, conjuntos): solo 1L/2L; sin áreas sociales."""
     from app.contextos.render_calculos.geometria.programa_apartamentos import (
         programa_apartamentos,
+        CIRC_INTERIOR_M2_APARTAMENTOS,
         TIPOLOGIAS,
     )
 
@@ -257,15 +267,14 @@ def _filas_anexo_i_apartamentos_conjuntos() -> list[tuple[str, str, str, float, 
             base = round(sum(e.area_min_m2 for e in estancias), 2)
             for e in estancias:
                 filas.append((cat, tip, e.nombre, e.area_min_m2, base))
+            # Circulación interior de la unidad (m² mínimo editable por tipología).
+            filas.append((cat, tip, "circulacion_interior", CIRC_INTERIOR_M2_APARTAMENTOS.get(tip, 6.0), base))
     return filas
 
 
 def sembrar_anexo_i_apartamentos_conjuntos(session: Session, forzar: bool = False, commit: bool = True) -> None:
+    # Idempotente: añade solo las filas que falten (ver `sembrar_anexo_i_apartamentos`).
     from .anexo_i_apartamentos_conjuntos_sqlalchemy import AnexoIApartamentosConjuntosORM
-    if not forzar:
-        existe = session.scalar(select(AnexoIApartamentosConjuntosORM).limit(1))
-        if existe is not None:
-            return
     ahora = datetime.now(timezone.utc)
     for cat, tip, estancia, min_m2, max_m2 in _filas_anexo_i_apartamentos_conjuntos():
         orm = session.get(AnexoIApartamentosConjuntosORM, (cat, tip, estancia))
@@ -289,7 +298,9 @@ def _filas_anexo_i_hotelero() -> list[tuple[str, str, str, float, float]]:
         MIN_HABITACION,
         MIN_BANO_HOTELERO,
         BANO_INTERIOR_OBLIGATORIO,
+        CIRC_INTERIOR_M2_HOTELERO,
         SALON_SOCIAL_MIN,
+        SALON_UNIDAD_MIN,
         AREA_SOCIAL_POR_UA,
         AREA_SOCIAL_POR_PLAZA,
         CATEGORIAS,
@@ -298,10 +309,16 @@ def _filas_anexo_i_hotelero() -> list[tuple[str, str, str, float, float]]:
 
     filas: list[tuple[str, str, str, float, float]] = []
     for (cat, tipo), room_min in MIN_HABITACION.items():
-        util_max = util_minimo_habitacion(cat, tipo)  # habitación + baño
+        util_max = util_minimo_habitacion(cat, tipo)  # habitación + salón + baño
         filas.append((cat, tipo, "habitacion", room_min, util_max))
+        # Salón privado de la unidad (solo junior suite / suite): mínimo editable.
+        salon = SALON_UNIDAD_MIN.get((cat, tipo), 0.0)
+        if salon > 0:
+            filas.append((cat, tipo, "salon", salon, util_max))
         if BANO_INTERIOR_OBLIGATORIO[cat]:
             filas.append((cat, tipo, "bano", MIN_BANO_HOTELERO[cat], util_max))
+        # Circulación interior de la habitación (m² mínimo editable por tipología).
+        filas.append((cat, tipo, "circulacion_interior", CIRC_INTERIOR_M2_HOTELERO.get(tipo, 5.0), util_max))
 
     # Áreas sociales del establecimiento (salón + escala por u.a. o por plaza).
     for cat in CATEGORIAS:
@@ -318,12 +335,20 @@ def _filas_anexo_i_hotelero() -> list[tuple[str, str, str, float, float]]:
 
 
 def sembrar_anexo_i_hotelero(session: Session, forzar: bool = False, commit: bool = True) -> None:
+    # Idempotente: añade solo las filas que falten (ver `sembrar_anexo_i_apartamentos`).
     from .anexo_i_hotelero_sqlalchemy import AnexoIHoteleroORM
-    if not forzar:
-        existe = session.scalar(select(AnexoIHoteleroORM).limit(1))
-        if existe is not None:
-            return
     ahora = datetime.now(timezone.utc)
+    # Limpieza idempotente: las tipologías `triple`/`cuadruple` se sustituyeron por
+    # `junior_suite`/`suite` (Anexo I.1). Borra filas obsoletas de BBDD previas para
+    # que el editor de mínimos no las siga mostrando. Solo esta tabla (apartamentos
+    # conserva triple/cuadruple en su propia tabla).
+    obsoletas = (
+        session.query(AnexoIHoteleroORM)
+        .filter(AnexoIHoteleroORM.tipologia.in_(("triple", "cuadruple")))
+        .all()
+    )
+    for orm in obsoletas:
+        session.delete(orm)
     for cat, tip, estancia, min_m2, max_m2 in _filas_anexo_i_hotelero():
         orm = session.get(AnexoIHoteleroORM, (cat, tip, estancia))
         if orm is None:

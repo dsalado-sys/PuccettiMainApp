@@ -84,11 +84,15 @@ MIN_ESPACIO_PRINCIPAL = 14.0  # estancia única del estudio (salón-dormitorio),
 SALON_MIN = {1: 14, 2: 16, 3: 18, 4: 20, 5: 24}
 SALON_MAS_COCINA_MIN = {1: 20, 2: 20, 3: 24, 4: 24, 5: 28}
 
-# Superficie útil máxima de referencia (VPO). La UI expone hasta "4d" y un
-# tramo ">4d" (clave 5). El estudio (0) no tiene máximo VPO; usamos un techo
-# holgado por encima de su objetivo (estancia + cocina + baño + circulación,
-# Anexo I.5) para que pueda crecer con el sobrante.
+# Superficie útil MÍNIMA de referencia por tipología (editable por el arquitecto).
+# La UI expone hasta "4d" y un tramo ">4d" (clave 5). Es el suelo duro del útil de
+# la unidad: el reparto nunca dimensiona una vivienda por debajo de estos m²
+# (histórico: eran el útil máximo VPO; hoy son el mínimo editable — ver REGISTRO §1.3).
 UTIL_MAX = {0: 40, 1: 60, 2: 70, 3: 90, 4: 110, 5: 130}
+
+# El útil MÁXIMO por tipología es DERIVADO = útil mínimo + este margen (no es un
+# campo editable aparte; se quitó en su día y se reintroduce así). Fuente única del +5.
+MARGEN_UTIL_MAXIMO_VIVIENDA: float = 5.0
 
 # Política de reparto del programa entre estancias. Cargable desde BBDD.
 # - AREA_TARGET_VIVIENDA: dict[n_dorms] → dict[estancia → m² target | None].
@@ -99,7 +103,11 @@ UTIL_MAX = {0: 40, 1: 60, 2: 70, 3: 90, 4: 110, 5: 130}
 # - UMBRAL_MINIMO_ESTUDIO_M2: piso absoluto del útil del estudio (Anexo I.5
 #   VPO Andalucía dice "≥ 25 m² excluyendo servicios comunes").
 AREA_TARGET_VIVIENDA: dict[int, dict[str, float | None]] = {}
-PCT_CIRCULACION_INTERIOR_VIVIENDA: float = 15.0
+# Circulación INTERIOR de la unidad en m² por tipología (pasillos+vestíbulo). Antes
+# era un % del útil compartido por el panel; ahora es un m² mínimo por tipología
+# editable en «Ver / editar mínimos» (estancia `circulacion_interior`). Defaults
+# orientativos ≈ 15 % del útil de referencia de cada tipología.
+CIRC_INTERIOR_M2_VIVIENDA: dict[int, float] = {0: 3.0, 1: 9.0, 2: 10.0, 3: 13.0, 4: 16.0, 5: 19.0}
 UMBRAL_MINIMO_ESTUDIO_M2: float = 25.0
 
 
@@ -122,11 +130,15 @@ class ProgramaViviendaConfig:
     min_espacio_principal: float = MIN_ESPACIO_PRINCIPAL
     salon_min: dict[int, float] = field(default_factory=lambda: dict(SALON_MIN))
     salon_mas_cocina_min: dict[int, float] = field(default_factory=lambda: dict(SALON_MAS_COCINA_MIN))
-    util_max: dict[int, float] = field(default_factory=lambda: dict(UTIL_MAX))
+    # Útil MÍNIMO por tipología (suelo duro editable). Útil MÁXIMO derivado = mínimo + margen.
+    util_min: dict[int, float] = field(default_factory=lambda: dict(UTIL_MAX))
+    util_max: dict[int, float] = field(
+        default_factory=lambda: {n: v + MARGEN_UTIL_MAXIMO_VIVIENDA for n, v in UTIL_MAX.items()})
     # Vacío = la política de targets cae al fallback `_targets_default_para` (igual
     # que cuando la BBDD aún no estaba sembrada en el diseño anterior).
     area_target: dict[int, dict[str, float | None]] = field(default_factory=dict)
-    pct_circulacion_interior: float = PCT_CIRCULACION_INTERIOR_VIVIENDA
+    # Circulación interior en m² por tipología (reserva fija, antes % del útil).
+    circ_interior_m2: dict[int, float] = field(default_factory=lambda: dict(CIRC_INTERIOR_M2_VIVIENDA))
     umbral_minimo_estudio_m2: float = UMBRAL_MINIMO_ESTUDIO_M2
 
 
@@ -134,13 +146,13 @@ class ProgramaViviendaConfig:
 CONFIG_DEFAULT = ProgramaViviendaConfig()
 
 
-def config_desde_repo(catalogo=None, pct_circulacion_interior: float | None = None) -> ProgramaViviendaConfig:
+def config_desde_repo(catalogo=None) -> ProgramaViviendaConfig:
     """Construye un `ProgramaViviendaConfig` desde el catálogo de BBDD (Anexo I.5).
 
     Sustituye al antiguo `cargar_desde_repo`, que mutaba globals de módulo. Cualquier
-    clave ausente conserva el default del Anexo. `pct_circulacion_interior`, si se
-    indica (valor del panel de diseño), prevalece sobre el persistido. Devuelve
-    `CONFIG_DEFAULT` si no hay catálogo o la BBDD está vacía.
+    clave ausente conserva el default del Anexo. La circulación interior por tipología
+    (`CIRC_INTERIOR_M2`) llega ya desde BBDD. Devuelve `CONFIG_DEFAULT` si no hay
+    catálogo o la BBDD está vacía.
     """
     valores: dict = {}
     obtener = getattr(catalogo, "consolidadas_vivienda", None) if catalogo is not None else None
@@ -162,7 +174,9 @@ def config_desde_repo(catalogo=None, pct_circulacion_interior: float | None = No
     mapa_dict = {
         "SALON_MIN": "salon_min",
         "SALON_MAS_COCINA_MIN": "salon_mas_cocina_min",
+        "UTIL_MIN": "util_min",
         "UTIL_MAX": "util_max",
+        "CIRC_INTERIOR_M2": "circ_interior_m2",
     }
     for clave, campo in mapa_dict.items():
         if clave in datos and isinstance(datos[clave], dict):
@@ -172,12 +186,8 @@ def config_desde_repo(catalogo=None, pct_circulacion_interior: float | None = No
             int(n): {str(est): (None if t is None else float(t)) for est, t in mp.items()}
             for n, mp in datos["AREA_TARGET_VIVIENDA"].items()
         }
-    if "PCT_CIRCULACION_INTERIOR_VIVIENDA" in datos:
-        valores["pct_circulacion_interior"] = float(datos["PCT_CIRCULACION_INTERIOR_VIVIENDA"])
     if "UMBRAL_MINIMO_ESTUDIO_M2" in datos:
         valores["umbral_minimo_estudio_m2"] = float(datos["UMBRAL_MINIMO_ESTUDIO_M2"])
-    if pct_circulacion_interior is not None:
-        valores["pct_circulacion_interior"] = max(0.0, float(pct_circulacion_interior))
     return replace(CONFIG_DEFAULT, **valores) if valores else CONFIG_DEFAULT
 
 
@@ -295,9 +305,8 @@ def programa_vivienda(
     if not targets_n:
         targets_n = _targets_default_para(n_dorms, cfg)
 
-    # 1. Circulación interior fija (% del útil).
-    pct_circ = cfg.pct_circulacion_interior / 100.0
-    circ_target = util_disponible * pct_circ
+    # 1. Circulación interior: reserva FIJA en m² por tipología (antes % del útil).
+    circ_target = min(circ_interior_vivienda(n_dorms, cfg), util_disponible)
 
     # 2. Selección de estancias según salon_cocina_open y n_dorms.
     nombres = _nombres_estancias_vivienda(n_dorms, util_disponible, salon_cocina_open)
@@ -361,21 +370,24 @@ def _programa_estudio(
             "espacio_principal": cfg.min_espacio_principal + 4.0,
             "cocina": cfg.min_cocina + 1.0,
             "bano": 4.0,
-            "circulacion_interior": 3.0,
         }
 
-    nombres_ordenados = ["espacio_principal", "cocina", "bano", "circulacion_interior"]
-    suma_baseline = sum(float(targets[e]) for e in nombres_ordenados if e in targets)
-    factor = (util_disponible / suma_baseline) if suma_baseline > 0 else 1.0
+    # Circulación interior: reserva FIJA en m² por tipología. El resto del útil se
+    # reparte entre las 3 estancias reales del estudio.
+    circ_target = min(circ_interior_vivienda(0, cfg), util_disponible)
+    disponible = max(0.0, util_disponible - circ_target)
+
+    nombres_reales = ["espacio_principal", "cocina", "bano"]
+    suma_baseline = sum(float(targets[e]) for e in nombres_reales if e in targets)
+    factor = (disponible / suma_baseline) if suma_baseline > 0 else 1.0
 
     mins = {
         "espacio_principal": cfg.min_espacio_principal,
         "cocina": cfg.min_cocina,
         "bano": cfg.min_bano,
-        "circulacion_interior": 0.0,
     }
     estancias: list[Estancia] = []
-    for est in nombres_ordenados:
+    for est in nombres_reales:
         if est not in targets:
             continue
         min_est = mins.get(est, 0.0)
@@ -387,6 +399,8 @@ def _programa_estudio(
             est, _CATEGORIA_ESTANCIA.get(est, "publica"),
             min_est, target_escalado,
         ))
+    if circ_target > 1e-6:
+        estancias.append(Estancia("circulacion_interior", "circulacion", 0.0, round(circ_target, 2)))
     return estancias
 
 
@@ -451,6 +465,16 @@ def util_maximo(n_dorms: int, cfg: ProgramaViviendaConfig = CONFIG_DEFAULT) -> f
     return cfg.util_max.get(n_dorms, cfg.util_max[4])
 
 
+def util_minimo_tipologia(n_dorms: int, cfg: ProgramaViviendaConfig = CONFIG_DEFAULT) -> float:
+    """Útil mínimo editable de la tipología (suelo duro por número de dormitorios)."""
+    return cfg.util_min.get(n_dorms, cfg.util_min.get(4, 0.0))
+
+
+def circ_interior_vivienda(n_dorms: int, cfg: ProgramaViviendaConfig = CONFIG_DEFAULT) -> float:
+    """Circulación interior de la unidad en m² (reserva fija por tipología)."""
+    return max(0.0, cfg.circ_interior_m2.get(n_dorms, cfg.circ_interior_m2.get(4, 0.0)))
+
+
 def util_minimo_vivienda(
     n_dorms: int, salon_cocina_open: bool = False,
     cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
@@ -462,22 +486,22 @@ def util_minimo_vivienda(
       `umbral_minimo_estudio_m2` (25 m² excluyendo servicios comunes, VPO). Es
       también el útil objetivo, de modo que en el reparto el estudio se escala
       con factor ≥ 1 y la cocina respeta su mínimo independiente (7 m²).
-    - 1d+: suma de mínimos × (1 + %circulación/100) — el % es editable (panel
-      de diseño) y compartido con los demás usos; antes era un 1.15 fijo.
+    - 1d+: suma de mínimos de estancia + circulación interior (m² por tipología,
+      editable en «Ver / editar mínimos»); antes la circulación era % del útil.
     """
+    piso = util_minimo_tipologia(n_dorms, cfg)
+    circ = circ_interior_vivienda(n_dorms, cfg)
     if n_dorms == 0:
         targets = cfg.area_target.get(0) or {
             "espacio_principal": cfg.min_espacio_principal + 4.0,
             "cocina": cfg.min_cocina + 1.0,
             "bano": 4.0,
-            "circulacion_interior": 3.0,
         }
-        suma_target = sum(float(t) for t in targets.values() if t is not None)
-        return round(max(cfg.umbral_minimo_estudio_m2, suma_target), 2)
+        suma_target = sum(float(t) for t in targets.values() if t is not None) + circ
+        return round(max(cfg.umbral_minimo_estudio_m2, suma_target, piso), 2)
     prog = programa_vivienda(n_dorms, util_disponible=util_maximo(n_dorms, cfg),
                              salon_cocina_open=salon_cocina_open, cfg=cfg)
-    factor = 1.0 + cfg.pct_circulacion_interior / 100.0
-    return round(sum(e.area_min_m2 for e in prog) * factor, 2)
+    return round(max(sum(e.area_min_m2 for e in prog) + circ, piso), 2)
 
 
 def descriptor_tipologia_vivienda(
@@ -485,10 +509,15 @@ def descriptor_tipologia_vivienda(
     salon_cocina_open: bool = False,
     cfg: ProgramaViviendaConfig = CONFIG_DEFAULT,
 ) -> TipologiaUnidadDescriptor:
-    """Descriptor de una tipología de vivienda para el reparto genérico."""
+    """Descriptor de una tipología de vivienda para el reparto genérico.
+
+    Objetivo = útil MÍNIMO (las unidades se dimensionan al mínimo, maximizando el
+    conteo); máximo = mínimo + margen (holgura que absorbe la última unidad de una
+    mezcla multi-tipología). El reparto nunca baja de `util_minimo`.
+    """
     return TipologiaUnidadDescriptor(
         slug=str(n_dorms),
-        util_objetivo=util_maximo(n_dorms, cfg),
+        util_objetivo=util_minimo_tipologia(n_dorms, cfg),
         util_minimo=util_minimo_vivienda(n_dorms, salon_cocina_open, cfg),
         util_maximo=util_maximo(n_dorms, cfg),
         n_dorms_label=n_dorms,
@@ -536,7 +565,8 @@ def programa_vivienda_combo(
     dorms = _dorms_de_combo_vivienda(combo, cfg)
     dorm_min_total = sum(m for _, m in dorms)
 
-    circ_target = util_disponible * (cfg.pct_circulacion_interior / 100.0)
+    # Circulación interior: reserva FIJA en m² por tipología (antes % del útil).
+    circ_target = min(circ_interior_vivienda(n_dorms, cfg), util_disponible)
 
     salon_min = (
         _salon_cocina_min_para(n_dorms, cfg) if salon_cocina_open
@@ -616,14 +646,12 @@ def util_minimo_vivienda_combo(
 
     Es el menor útil en que TODAS las estancias alcanzan su mínimo del Anexo I.5
     —el salón según su nº de dormitorios incluido— a la vez que caben la cocina y
-    los baños (a su target) y la circulación interior (15 %):
+    los baños (a su target) y la circulación interior (m² por tipología):
 
-        útil_min = (Σ mínimos salón+dormitorios + target cocina+baños) / (1 − %circ)
+        útil_min = Σ mínimos salón+dormitorios + target cocina+baños + circ. interior
 
     A este útil el reparto da al salón EXACTAMENTE su mínimo A1.5; por encima, el
-    salón crece. (El cálculo anterior sumaba sólo los mínimos sin reservar la
-    circulación ni el target de cocina/baños, por lo que el salón quedaba por
-    debajo de su mínimo.)
+    salón crece.
 
     NO se capa al útil máximo VPO: si la suma de mínimos supera el techo editable
     de la tipología, el reparto infradimensionaría la unidad en silencio. En su
@@ -633,9 +661,9 @@ def util_minimo_vivienda_combo(
     if combo.es_estudio:
         return util_minimo_vivienda(0, salon_cocina_open, cfg)
     escalante_min, fijas_target = _presupuesto_base_vivienda_combo(combo, salon_cocina_open, cfg)
-    pct = cfg.pct_circulacion_interior / 100.0
-    minimo = (escalante_min + fijas_target) / max(1e-6, 1.0 - pct)
-    return round(minimo, 2)
+    minimo = escalante_min + fijas_target + circ_interior_vivienda(combo.n_dorms, cfg)
+    # Suelo duro editable por nº de dormitorios (no bajar del útil mínimo VPO).
+    return round(max(minimo, util_minimo_tipologia(combo.n_dorms, cfg)), 2)
 
 
 def util_objetivo_vivienda_combo(
@@ -660,11 +688,13 @@ def descriptor_tipologia_vivienda_combo(
     """Descriptor para el reparto a partir de una combinación de vivienda."""
     util_obj = util_objetivo_vivienda_combo(combo, salon_cocina_open, cfg)
     util_min = util_obj if combo.es_estudio else util_minimo_vivienda_combo(combo, salon_cocina_open, cfg)
+    # Máximo = mínimo + margen (coherente con la vía int-based); nunca por debajo del mínimo.
+    util_max = max(util_min, util_maximo(combo.n_dorms, cfg))
     return TipologiaUnidadDescriptor(
         slug=combo.slug,
         util_objetivo=util_obj,
         util_minimo=util_min,
-        util_maximo=round(util_obj * 1.25, 2),
+        util_maximo=round(util_max, 2),
         n_dorms_label=combo.n_dorms,
         tipo_unidad="vivienda",
         plazas=combo.plazas(PLAZAS_DORMITORIO_VIVIENDA) or 1,

@@ -1,0 +1,208 @@
+/* Módulo Informe — flujo de estados por proyecto.
+   Reutiliza el primitivo `.aviso` (card grande) de puccetti.css y los tokens de
+   semáforo `--sem-*` (promovidos a :root). El diagrama es un tronco
+   (Parcela → Normativa) que se bifurca en una fila por pestaña. */
+
+.inf-barra {
+  margin-top: var(--space-md);
+  max-width: 420px;
+}
+
+.inf-lista {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  margin-top: var(--space-lg);
+}
+
+.inf-vacio {
+  color: var(--on-surface-muted);
+  padding: var(--space-lg) 0;
+}
+
+/* ─── Card ───────────────────────────────────────────────────────────────── */
+.inf-card {
+  margin-bottom: 0;            /* el gap de .inf-lista gestiona la separación */
+}
+
+.inf-card-cab {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 16px;
+}
+.inf-card-titulo {
+  margin: 0;                   /* anula el `margin` de `.aviso h2` */
+}
+.inf-card-sub {
+  font-size: var(--text-sm);
+  color: var(--on-surface-muted);
+}
+
+/* ─── Diagrama de flujo ──────────────────────────────────────────────────── */
+.inf-flujo {
+  overflow-x: auto;            /* el diagrama nunca desborda la card en horizontal */
+}
+
+.inf-tronco {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.inf-ramas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding-left: 28px;
+  position: relative;
+}
+/* Espina vertical de la bifurcación (sale de Normativa hacia abajo). */
+.inf-ramas::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: -8px;
+  bottom: 16px;
+  width: 2px;
+  background: var(--outline);
+}
+
+.inf-rama {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* Rama horizontal desde la espina hasta la fila. */
+.inf-rama::before {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  width: 16px;
+  height: 2px;
+  background: var(--outline);
+}
+.inf-rama--vacia .inf-rama-nota {
+  font-size: var(--text-sm);
+  color: var(--on-surface-muted);
+  font-style: italic;
+}
+
+/* Fila de escenario seleccionable: la activa se resalta con acento dorado sutil.
+   Sin margin negativo para no descuadrar el conector `.inf-rama::before`. */
+.inf-rama[role="button"] {
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radio-inner);
+  transition: background-color 120ms ease;
+}
+.inf-rama[role="button"]:hover {
+  background: var(--tint-primary-8);
+}
+.inf-rama[role="button"]:focus-visible {
+  outline: 2px solid var(--dorado);
+  outline-offset: 2px;
+}
+.inf-rama--activa {
+  background: var(--tint-primary-8);
+  box-shadow: inset 3px 0 0 var(--dorado);
+}
+
+.inf-rama-chip {
+  font-size: var(--text-eyebrow);
+  padding: 3px 10px;
+  border-radius: var(--radio-pill);
+  border: 1px solid var(--dorado);
+  color: var(--dorado);
+  background: var(--tint-primary-8);
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: none;
+}
+
+.inf-rama-nodos {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Conector entre nodos. */
+.inf-conector {
+  flex: none;
+  width: 16px;
+  height: 2px;
+  background: var(--outline);
+}
+
+/* ─── Nodo (un estado del flujo) ─────────────────────────────────────────── */
+.inf-nodo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--outline-input);
+  border-radius: var(--radio-pill);
+  background: var(--surface-muted);
+  flex: none;
+}
+.inf-luz {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--sem-gris);
+  flex: none;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.04);
+}
+.inf-nodo-txt {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.inf-nodo-dim {
+  font-size: var(--text-eyebrow);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--on-surface-muted);
+}
+.inf-nodo-estado {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+/* Iluminado: color real (borde + luz). */
+.inf-nodo--verde { border-color: var(--sem-verde); }
+.inf-nodo--verde .inf-luz { background: var(--sem-verde); }
+.inf-nodo--ambar { border-color: var(--sem-ambar); }
+.inf-nodo--ambar .inf-luz { background: var(--sem-ambar); }
+.inf-nodo--rojo { border-color: var(--sem-rojo); }
+.inf-nodo--rojo .inf-luz { background: var(--sem-rojo); }
+
+/* Bloqueado: gris + atenuado (no muestra su color real). */
+.inf-nodo--bloqueado { opacity: 0.6; }
+.inf-nodo--bloqueado .inf-luz { background: var(--sem-gris); }
+.inf-nodo--bloqueado .inf-nodo-estado {
+  color: var(--on-surface-muted);
+  font-weight: 500;
+}
+
+/* ─── Acciones (Ver informe / Aprobar, sobre el escenario seleccionado) ──── */
+.inf-card-acciones {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--outline-subtle);
+}
+.inf-card-acciones button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

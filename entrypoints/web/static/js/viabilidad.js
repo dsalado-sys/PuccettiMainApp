@@ -8,8 +8,6 @@
   if (!form) return;
 
   const puedeEditar = form.dataset.puedeEditar === "true";
-  const btnCalcular = document.getElementById("btn-calcular");
-  const btnGuardar = document.getElementById("btn-guardar");
   const toast = document.getElementById("vb-toast");
   const avisosBox = document.getElementById("vb-avisos");
   const avisosLista = avisosBox ? avisosBox.querySelector("ul") : null;
@@ -163,33 +161,6 @@
     debounceId = setTimeout(calcular, 250);
   }
 
-  async function guardar(ev) {
-    ev.preventDefault();
-    if (!puedeEditar) return;
-    const payload = payloadDesdeForm();
-    try {
-      const resp = await fetch("/modulos/viabilidad/guardar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (resp.status === 409) {
-        mostrarToast("Necesitas un proyecto activo para guardar", true);
-        return;
-      }
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-        mostrarToast(err.detail || "No se pudo guardar", true);
-        return;
-      }
-      const data = await resp.json();
-      if (data && data.estudio) repintar(data.estudio);
-      mostrarToast("Guardado.");
-    } catch (err) {
-      mostrarToast("Error de red al guardar", true);
-    }
-  }
-
   function mostrarToast(msg, esError = false) {
     if (!toast) return;
     toast.textContent = msg;
@@ -199,13 +170,11 @@
   }
 
   // ── Bindings ───────────────────────────────────────────────────────
+  // El margen se recalcula solo al editar cualquier campo (sin botón «Calcular»).
   form.addEventListener("input", calcularConDebounce);
   form.addEventListener("change", calcularConDebounce);
-  if (btnCalcular) btnCalcular.addEventListener("click", () => {
-    ultimoPayload = ""; // forzar recálculo
-    calcular();
-  });
-  form.addEventListener("submit", guardar);
+  // Evitar que Enter dispare un submit del <form> (ya no hay guardado por submit).
+  form.addEventListener("submit", (ev) => ev.preventDefault());
 
   aplicarVisibilidad();
 })();

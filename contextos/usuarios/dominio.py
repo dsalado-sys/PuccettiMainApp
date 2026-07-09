@@ -13,6 +13,17 @@ from datetime import datetime, timezone
 from app.nucleo.modelo import Rol
 
 
+class GestionUsuariosError(Exception):
+    """Regla de negocio violada al administrar usuarios (duplicado, cuenta
+    superadmin intocable, rol no asignable, auto-borrado…). El router la traduce
+    a un mensaje para el usuario."""
+
+
+# Roles que un administrador puede asignar a cuentas normales. `SUPERADMIN` queda
+# fuera a propósito: es una cuenta técnica sembrada, no se crea desde la UI.
+ROLES_ASIGNABLES: tuple[Rol, ...] = (Rol.ARQUITECTO, Rol.FINANCIERO, Rol.CLIENTE)
+
+
 def _ahora() -> datetime:
     return datetime.now(timezone.utc)
 

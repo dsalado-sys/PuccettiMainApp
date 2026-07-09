@@ -29,6 +29,7 @@ class ModuloPuccetti(str, Enum):
     INFORME = "informe"
     PROYECTOS = "proyectos"
     NORMATIVA_MUNICIPAL = "normativa_municipal"
+    GESTION_USUARIOS = "gestion_usuarios"
 
 
 def _ahora() -> datetime:

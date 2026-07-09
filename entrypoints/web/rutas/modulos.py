@@ -6,14 +6,13 @@ Cuando integremos cada módulo, sustituiremos el body por su propio router.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
 from app.nucleo.modelo import Proyecto, Rol
 from app.nucleo.modelo.rol import PermisoModulo, puede_acceder
 
 from ..catalogo_modulos import CATALOGO, TarjetaModulo
-from ..dependencias import proyecto_activo, rol_activo
 from ..plantillas import plantillas
 
 router = APIRouter(prefix="/modulos")
@@ -52,14 +51,9 @@ def _pantalla_modulo(
 # NOTA: `modelos_planos` no expone ruta. Su tarjeta está desactivada en
 # `catalogo_modulos.py` (módulo aún no integrado), por lo que `_tarjeta` no lo
 # encontraría y la ruta devolvía 404 para todos los roles. Cuando se integre, se
-# reactiva su tarjeta y se añade aquí su ruta a la vez (igual que `informe`).
+# reactiva su tarjeta y se añade aquí su ruta a la vez.
 # El enum/MODULOS/MATRIZ_PERMISOS conservan la entrada como roadmap.
-
-
-@router.get("/informe", response_class=HTMLResponse)
-def informe(
-    request: Request,
-    rol: Rol = Depends(rol_activo),
-    proyecto: Proyecto | None = Depends(proyecto_activo),
-):
-    return _pantalla_modulo(request, "informe", rol, proyecto)
+#
+# `informe` ya NO es un stub: tiene router propio (`rutas/informe.py`) con la
+# pantalla del flujo de estados. `_pantalla_modulo` se conserva como andamiaje
+# para el próximo módulo pendiente que se integre.

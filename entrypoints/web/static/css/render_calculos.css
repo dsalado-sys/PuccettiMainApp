@@ -92,7 +92,14 @@
 .rc-hint em { color: var(--dorado); font-style: normal; font-weight: 600; }
 
 .rc-fila { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-sm); }
+.rc-fila[hidden] { display: none; }
 .rc-fila:has(.rc-campo:nth-child(2):last-child) { grid-template-columns: 1fr 1fr; }
+/* Los <input type=number> tienen un ancho intrínseco (~size=20 ≈ 170px). Sin esto,
+   las columnas 1fr no pueden encoger por debajo de ese ancho (min-width:auto en las
+   celdas del grid) y la fila desborda el panel estrecho → scroll horizontal. Con
+   min-width:0 la columna manda y el input la llena (box-sizing:border-box es global). */
+.rc-fila .rc-campo { min-width: 0; }
+.rc-fila .rc-campo input { width: 100%; }
 
 .rc-checkbox {
   display: inline-flex; align-items: center; gap: var(--space-sm);
@@ -118,6 +125,18 @@
 }
 .rc-tip-quitar:hover { background: var(--tint-error-8); }
 .rc-btn-pequeno { font-size: var(--text-sm); padding: var(--space-xs) 10px; }
+
+/* ─── Tipos de unidad (vivienda / apartamentos): numberbox + «Ver combinaciones» ── */
+.rc-tipos-unidad { display: flex; flex-direction: column; gap: var(--space-sm); margin-bottom: 6px; }
+.rc-tipo-fila { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rc-tipo-ndorms-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.rc-tipo-ndorms-lbl { font-size: var(--text-eyebrow); color: var(--on-surface-muted); }
+.rc-tipo-ndorms { width: 64px; }
+.rc-tipo-vercomb { white-space: nowrap; }
+.rc-tipo-combo-chip {
+  flex: 1; min-width: 8ch; font-size: var(--text-sm); color: var(--dorado);
+}
+.rc-tipo-combo-chip.rc-tipo-combo-vacio { color: var(--on-surface-muted); font-style: italic; }
 
 /* ─── Patios del edificio (lista editable) ───────────────────────── */
 .rc-patios { border: 1px solid var(--outline); border-radius: var(--radio); padding: 10px 12px; }
@@ -166,6 +185,13 @@
 .rc-patio-fila-bloqueada input[readonly] {
   background: var(--surface-variant, var(--surface)); color: var(--on-surface-muted);
   cursor: not-allowed; opacity: 0.75;
+}
+/* Procedencia catastral del patio: caption en su PROPIA línea (flex-basis:100%),
+   para no competir con input + candado + × ni empujar el botón × a otra línea. */
+.rc-patio-origen {
+  flex-basis: 100%;
+  font-size: var(--text-eyebrow); line-height: 1.3; letter-spacing: 0.02em;
+  color: var(--dorado);
 }
 .rc-patio-add {
   background: var(--surface); border: 1px solid var(--dorado); color: var(--on-surface-secondary);
@@ -264,6 +290,42 @@
   border-radius: 50%; animation: rc-spin 0.9s linear infinite;
 }
 @keyframes rc-spin { to { transform: rotate(360deg); } }
+
+/* ── Control de capas (arriba-izquierda del lienzo) ──────────────────── */
+.rc-capas { position: absolute; top: 14px; left: 14px; z-index: 3; }
+.rc-capas-btn {
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--lienzo-papel);
+  border: 1px solid var(--dorado);
+  border-radius: var(--radio);
+  color: var(--surface-inverse);
+  cursor: pointer;
+  list-style: none;
+}
+.rc-capas-btn::-webkit-details-marker { display: none; }
+.rc-capas[open] .rc-capas-btn { color: var(--dorado); }
+.rc-capas-panel {
+  margin-top: 6px;
+  min-width: 148px;
+  padding: var(--space-sm);
+  background: var(--lienzo-papel);
+  border: 1px solid var(--dorado);
+  border-radius: var(--radio);
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--on-surface);
+}
+.rc-capas-opcion { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.rc-capas-opcion input[type="radio"] { accent-color: var(--dorado); }
+.rc-capas-transp {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 4px; padding-top: 8px;
+  border-top: 1px solid var(--gris-suave);
+}
+.rc-capas-transp[hidden] { display: none; }
+.rc-capas-transp label { font-size: var(--text-xs); color: var(--gris-medio); }
+.rc-capas-transp input[type="range"] { width: 100%; accent-color: var(--dorado); }
 
 /* ── Tabla derecha ───────────────────────────────────────────────── */
 .rc-kpis {
@@ -548,6 +610,8 @@
 }
 .rc-sup-tabla th { font-weight: 600; color: var(--gris-medio); }
 .rc-sup-tabla th:last-child, .rc-sup-tabla td:last-child { text-align: right; width: 120px; }
+/* Útil mínimo de la unidad: total de la tipología, no una estancia. */
+.rc-sup-fila-util td { font-weight: 600; border-bottom: 2px solid var(--gris-suave); }
 .rc-sup-input {
   width: 90px; text-align: right; padding: var(--space-xs) var(--space-sm);
   border: 1px solid var(--outline-input); border-radius: var(--radio); font-size: var(--text-base);
@@ -654,6 +718,42 @@
 .rc-mu-no-comp .rc-mu-fila-comp { display: none; }
 /* La nota "computable a efectos turísticos" solo aplica a usos turísticos. */
 .rc-mu-no-turismo .rc-mu-nota-turismo { display: none; }
+
+/* ── Escenarios (pestañas del activo, sobre la barra catastral) ─────────
+   Cada pestaña es una hipótesis de programa sobre la misma parcela; su nombre
+   es reactivo al uso elegido. Dorado corporativo sobre neutro. */
+.rc-escenarios {
+  display: flex; flex-wrap: wrap; align-items: stretch; gap: var(--space-xs);
+  margin: 0 0 var(--space-sm);
+}
+.rc-esc-tab {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: var(--surface); border: 1px solid var(--outline-subtle);
+  border-radius: var(--radio); padding: 0 4px 0 2px; max-width: 320px;
+}
+.rc-esc-tab-btn {
+  border: none; background: transparent; cursor: pointer;
+  padding: 8px 10px; font-size: var(--text-sm); font-weight: 500;
+  color: var(--on-surface-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;
+}
+.rc-esc-tab-btn:hover { color: var(--on-surface); }
+.rc-esc-tab-activo {
+  border-color: var(--dorado); background: var(--tint-primary-10); box-shadow: var(--sombra);
+}
+.rc-esc-tab-activo .rc-esc-tab-btn { color: var(--on-surface); font-weight: 600; cursor: default; }
+.rc-esc-cerrar {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--on-surface-muted); font-size: 15px; line-height: 1;
+  padding: 2px 6px; border-radius: var(--radio);
+}
+.rc-esc-cerrar:hover { color: var(--error); background: var(--tint-error-6); }
+.rc-esc-add {
+  border: 1px dashed var(--outline-subtle); background: transparent; cursor: pointer;
+  color: var(--on-surface-secondary); font-size: 18px; line-height: 1; font-weight: 600;
+  min-width: 34px; border-radius: var(--radio);
+}
+.rc-esc-add:hover { color: var(--dorado); border-color: var(--dorado); }
 
 /* ── Barra de datos catastrales (siempre visible en el módulo) ──────── */
 .rc-catastro-bar {

@@ -135,3 +135,82 @@
 .vb-layout[data-puede-editar="false"] button[type="submit"],
 .vb-layout[data-puede-editar="false"] #btn-calcular { pointer-events: none; opacity: 0.55; }
 .vb-layout[data-puede-editar="false"] .vb-radio { pointer-events: none; opacity: 0.55; }
+
+/* ═══════════════ Viabilidad financiera (DCF) ═══════════════ */
+/* Colores del semáforo (verde/ámbar/rojo): ámbar = dorado corporativo, rojo =
+   --error existente; verde = tono contenido. Son señales funcionales, no marca. */
+.vb-dcf {
+  --sem-verde: #2f7d54;
+  --sem-ambar: var(--dorado);
+  --sem-rojo: var(--error);
+  --sem-gris: var(--gris-medio);
+  margin-top: var(--space-xl);
+  padding-top: var(--space-xl);
+  border-top: 1px solid var(--outline-subtle);
+}
+.vb-dcf-head h2 { margin: 4px 0 6px; font-size: var(--text-lg); }
+.vb-dcf-sub { margin: 0 0 var(--space-lg); color: var(--on-surface-muted); font-size: var(--text-base); max-width: 60ch; }
+
+.vb-dcf-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1.1fr);
+  gap: var(--space-xl);
+  align-items: start;
+}
+@media (max-width: 920px) { .vb-dcf-grid { grid-template-columns: 1fr; } }
+.vb-dcf-res { gap: 16px; }
+
+/* Semáforo */
+.vb-semaforo {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px; border: 1px solid var(--outline-input); border-radius: var(--radio);
+  background: var(--surface-muted);
+}
+.vb-luz { width: 16px; height: 16px; border-radius: 50%; background: var(--sem-gris); flex: none; box-shadow: 0 0 0 3px rgba(0,0,0,0.04); }
+.vb-luz--verde { background: var(--sem-verde); }
+.vb-luz--ambar { background: var(--sem-ambar); }
+.vb-luz--rojo { background: var(--sem-rojo); }
+.vb-luz--sin_dato { background: var(--sem-gris); }
+.vb-semaforo-txt { font-weight: 700; font-size: var(--text-base); }
+.vb-semaforo-metricas { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.vb-chip {
+  font-size: var(--text-eyebrow); padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--outline-input); color: var(--on-surface-muted);
+}
+.vb-chip--verde { border-color: var(--sem-verde); color: var(--sem-verde); }
+.vb-chip--ambar { border-color: var(--sem-ambar); color: var(--sem-ambar); }
+.vb-chip--rojo { border-color: var(--sem-rojo); color: var(--sem-rojo); }
+
+/* Escenarios */
+.vb-escenarios { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+.vb-escenario .vb-card-h h3 { margin: 0; font-size: var(--text-base); }
+.vb-escenario--base { box-shadow: inset 0 0 0 1px var(--dorado); }
+
+/* Factores de escenario */
+.vb-factores { display: flex; flex-direction: column; gap: 14px; }
+.vb-factor-grupo { border: 1px solid var(--outline-subtle); border-radius: var(--radio); padding: 10px 12px; }
+.vb-factor-grupo legend { font-size: var(--text-sm); font-weight: 700; color: var(--dorado); padding: 0 6px; }
+
+/* Precio máximo + sensibilidad */
+.vb-precio-max { font-size: var(--text-lg); font-weight: 700; margin: 0 0 var(--space-md); }
+.vb-sensibilidad { margin-top: var(--space-md); overflow-x: auto; }
+.vb-tabla-sens { width: 100%; border-collapse: collapse; font-size: var(--text-base); }
+.vb-tabla-sens th, .vb-tabla-sens td { text-align: right; padding: 6px 10px; border-bottom: 1px dashed var(--outline-subtle); }
+.vb-tabla-sens th:first-child, .vb-tabla-sens td:first-child { text-align: left; }
+.vb-tabla-sens thead th { color: var(--on-surface-muted); font-weight: 600; }
+
+/* Umbrales */
+.vb-umbrales { margin-top: var(--space-lg); }
+.vb-umbrales-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.vb-umbrales-grid .vb-acciones { grid-column: 1 / -1; }
+
+/* Avisos DCF (reusa el tono dorado de .vb-avisos) */
+.vb-dcf-avisos { background: var(--tint-primary-8); border: 1px solid var(--dorado); border-radius: var(--radio); padding: 14px 18px; }
+.vb-dcf-avisos h3 { margin: 0 0 var(--space-sm); font-size: var(--text-base); color: var(--dorado); }
+.vb-dcf-avisos ul { margin: 0; padding-left: 18px; }
+.vb-dcf-avisos li { font-size: var(--text-base); margin-bottom: var(--space-xs); }
+
+/* Solo lectura (inversor): la sección DCF no muestra edición para roles sin permiso. */
+.vb-dcf[data-puede-editar="false"] input,
+.vb-dcf[data-puede-editar="false"] select,
+.vb-dcf[data-puede-editar="false"] button { pointer-events: none; opacity: 0.55; }

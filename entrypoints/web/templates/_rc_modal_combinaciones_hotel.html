@@ -1,0 +1,36 @@
+{# Modal de combinaciones de tipologías de habitación POR PLANTA (hotel) — al pulsar
+   «Ver combinaciones». Lista las mezclas de habitaciones que caben en una planta
+   representativa y el técnico elige una; esa mezcla se replica en cada planta. #}
+<dialog id="rc-modal-comb-hotel" class="rc-modal" aria-labelledby="rc-modal-ch-titulo">
+  <article class="rc-modal-card rc-modal-tip-card">
+    <header class="rc-modal-header">
+      <h2 id="rc-modal-ch-titulo">Combinaciones de habitaciones por planta</h2>
+      <button type="button" class="rc-modal-cerrar" id="rc-modal-ch-cerrar" aria-label="Cerrar">×</button>
+    </header>
+
+    <div class="rc-modal-cuerpo">
+      <p class="rc-modal-tip-sub" id="rc-modal-ch-sub">—</p>
+
+      <table class="rc-mu-est-tabla rc-modal-tip-tabla">
+        <thead>
+          <tr>
+            <th>Combinación (por planta)</th>
+            <th class="rc-num">Habitaciones</th>
+            <th class="rc-num">Plazas</th>
+            <th class="rc-num">Útil usado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rc-modal-ch-body">
+          <tr><td colspan="5" class="rc-vacio">—</td></tr>
+        </tbody>
+      </table>
+
+      <p class="rc-vacio rc-modal-tip-vacio" id="rc-modal-ch-vacio" hidden>
+        Ninguna combinación de habitaciones cabe en una planta con los parámetros
+        actuales. Revisa las tipologías elegidas o los parámetros urbanísticos.
+      </p>
+      <p class="rc-mu-nota" id="rc-modal-ch-nocaben" hidden></p>
+    </div>
+  </article>
+</dialog>

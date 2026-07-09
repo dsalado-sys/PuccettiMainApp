@@ -146,8 +146,6 @@
     </article>
 
     <div class="vb-acciones">
-      <button type="button" id="btn-calcular" class="boton-secundario">Calcular</button>
-      <button type="submit" id="btn-guardar" class="boton-primario">Guardar</button>
       <span class="toast" id="vb-toast" role="status" aria-live="polite"></span>
     </div>
   </div>
@@ -204,5 +202,133 @@
   </aside>
 </form>
 
+<!-- ═══════════════════ Viabilidad financiera (DCF) ═══════════════════ -->
+<section class="vb-dcf" id="vb-dcf" data-puede-editar="{{ 'true' if puede_editar else 'false' }}">
+  <header class="vb-dcf-head">
+    <span class="eyebrow eyebrow--oro">Viabilidad financiera</span>
+    <h2>Flujo de caja descontado (DCF)</h2>
+    <p class="vb-dcf-sub">Análisis multi-escenario sobre capital propio (1.ª iteración, sin deuda).
+      Los supuestos los define y valida el financiero.</p>
+  </header>
+
+  <div class="vb-dcf-grid">
+    <!-- Supuestos -->
+    <form id="form-dcf" class="vb-col" autocomplete="off">
+      <article class="vb-card card">
+        <header class="vb-card-h"><h3 class="eyebrow">Supuestos</h3></header>
+        <label class="vb-campo"><span class="vb-campo-label eyebrow">Horizonte (años)</span>
+          <input type="number" name="horizonte_anios" min="0" step="1" value="{{ supuestos.horizonte_anios }}"></label>
+        <label class="vb-campo"><span class="vb-campo-label eyebrow">Periodo de obra (años)</span>
+          <input type="number" name="periodo_obra_anios" min="0" step="1" value="{{ supuestos.periodo_obra_anios }}"></label>
+        <label class="vb-campo"><span class="vb-campo-label eyebrow">Tasa de descuento (%)</span>
+          <input type="number" name="tasa_descuento_pct" min="0" step="0.5"
+                 value="{{ (supuestos.tasa_descuento_anual * 100) | round(2) }}"></label>
+        <label class="vb-campo vb-campo-renta"><span class="vb-campo-label eyebrow">Exit cap rate (%)</span>
+          <input type="number" name="exit_cap_rate_pct" min="0" step="0.25"
+                 value="{{ (supuestos.exit_cap_rate * 100) | round(2) }}">
+          <small class="vb-hint">Solo renta: valor de salida = renta neta anual / cap rate.</small></label>
+        <label class="vb-campo"><span class="vb-campo-label eyebrow">TIR objetivo (%)</span>
+          <input type="number" name="tir_objetivo_pct" min="0" step="0.5"
+                 value="{{ (supuestos.tir_objetivo * 100) | round(2) }}">
+          <small class="vb-hint">Para el precio máximo de compra.</small></label>
+        <label class="vb-campo"><span class="vb-campo-label eyebrow">Tipología (semáforo)</span>
+          <select name="tipologia">
+            {% set etiquetas = {'btr_residencial': 'BTR residencial', 'hotelero': 'Hotelero', 'rehab_intensiva': 'Rehab. intensiva'} %}
+            {% for t in tipologias_pr %}
+              <option value="{{ t }}" {% if semaforo.tipologia == t %}selected{% endif %}>{{ etiquetas[t] }}</option>
+            {% endfor %}
+          </select></label>
+      </article>
+
+      <details class="vb-avanzado">
+        <summary class="eyebrow eyebrow--oro disclosure">Escenarios · factores sobre base</summary>
+        <div class="vb-factores" id="dcf-factores">
+          {% for esc in ['optimista', 'estres'] %}
+          <fieldset class="vb-factor-grupo" data-escenario="{{ esc }}">
+            <legend>{{ 'Optimista' if esc == 'optimista' else 'Estrés' }}</legend>
+            <label class="vb-campo"><span class="vb-campo-label eyebrow">Precio (×)</span>
+              <input type="number" name="{{ esc }}_factor_precio" min="0" step="0.05" value="1.00"></label>
+            <label class="vb-campo"><span class="vb-campo-label eyebrow">CAPEX (×)</span>
+              <input type="number" name="{{ esc }}_factor_capex" min="0" step="0.05" value="1.00"></label>
+            <label class="vb-campo"><span class="vb-campo-label eyebrow">Ingreso (×)</span>
+              <input type="number" name="{{ esc }}_factor_ingreso" min="0" step="0.05" value="1.00"></label>
+          </fieldset>
+          {% endfor %}
+        </div>
+      </details>
+
+      <details class="vb-avanzado">
+        <summary class="eyebrow eyebrow--oro disclosure">Benchmarks de mercado · manual</summary>
+        <label class="vb-campo"><span class="vb-campo-label eyebrow">RevPAR (€)</span>
+          <input type="number" name="revpar_eur" min="0" step="1" value="{{ benchmarks.revpar_eur or 0 }}"></label>
+        <label class="vb-campo"><span class="vb-campo-label eyebrow">ADR (€)</span>
+          <input type="number" name="adr_eur" min="0" step="1" value="{{ benchmarks.adr_eur or 0 }}"></label>
+        <label class="vb-campo"><span class="vb-campo-label eyebrow">Yield comparable (%)</span>
+          <input type="number" name="yield_comparable_pct" min="0" step="0.1"
+                 value="{{ (benchmarks.yield_comparable * 100) | round(2) }}"></label>
+        <label class="vb-campo"><span class="vb-campo-label eyebrow">Fuente</span>
+          <input type="text" name="fuente" maxlength="120" value="{{ benchmarks.fuente or '' }}"></label>
+      </details>
+
+      <div class="vb-acciones">
+        <button type="button" id="btn-guardar-dcf" class="boton-secundario">Guardar</button>
+        <button type="button" id="btn-aprobar" class="boton-primario">Aprobar</button>
+        <span class="toast" id="dcf-toast" role="status" aria-live="polite"></span>
+      </div>
+    </form>
+
+    <!-- Resultados -->
+    <div class="vb-col vb-dcf-res" aria-live="polite">
+      <div class="vb-semaforo" id="dcf-semaforo">
+        <span class="vb-luz" data-luz></span>
+        <span class="vb-semaforo-txt" data-semaforo-txt>—</span>
+        <span class="vb-semaforo-metricas" data-semaforo-metricas></span>
+      </div>
+
+      <div class="vb-escenarios" id="dcf-escenarios"></div>
+
+      <article class="vb-card card vb-dcf-derivados">
+        <header class="vb-card-h"><h3 class="eyebrow">Precio máximo de compra</h3></header>
+        <p class="vb-precio-max"><span data-precio-max>—</span></p>
+        <div class="vb-sensibilidad vb-oculto" id="dcf-sensibilidad"></div>
+      </article>
+
+      <article class="vb-dcf-avisos vb-oculto" id="dcf-avisos">
+        <h3 class="eyebrow">Avisos</h3>
+        <ul></ul>
+      </article>
+    </div>
+  </div>
+
+  {% if puede_editar %}
+  <details class="vb-avanzado vb-umbrales">
+    <summary class="eyebrow eyebrow--oro disclosure">Umbrales internos PR · editar</summary>
+    <form id="form-umbrales" class="vb-umbrales-grid" autocomplete="off">
+      <label class="vb-campo"><span class="vb-campo-label eyebrow">TIR mín. BTR residencial (%)</span>
+        <input type="number" name="tir_min_btr_residencial" min="0" step="0.5" value="{{ (umbrales.tir_min_btr_residencial * 100) | round(2) }}"></label>
+      <label class="vb-campo"><span class="vb-campo-label eyebrow">TIR mín. hotelero (%)</span>
+        <input type="number" name="tir_min_hotelero" min="0" step="0.5" value="{{ (umbrales.tir_min_hotelero * 100) | round(2) }}"></label>
+      <label class="vb-campo"><span class="vb-campo-label eyebrow">TIR mín. rehab. intensiva (%)</span>
+        <input type="number" name="tir_min_rehab_intensiva" min="0" step="0.5" value="{{ (umbrales.tir_min_rehab_intensiva * 100) | round(2) }}"></label>
+      <label class="vb-campo"><span class="vb-campo-label eyebrow">Yield neto mínimo (%)</span>
+        <input type="number" name="yield_neto_minimo" min="0" step="0.1" value="{{ (umbrales.yield_neto_minimo * 100) | round(2) }}"></label>
+      <label class="vb-campo"><span class="vb-campo-label eyebrow">Yield objetivo (%)</span>
+        <input type="number" name="yield_objetivo" min="0" step="0.1" value="{{ (umbrales.yield_objetivo * 100) | round(2) }}"></label>
+      <label class="vb-campo"><span class="vb-campo-label eyebrow">Payback máximo (años)</span>
+        <input type="number" name="payback_maximo_anios" min="0" step="1" value="{{ umbrales.payback_maximo_anios }}"></label>
+      <label class="vb-campo"><span class="vb-campo-label eyebrow">CAPEX máx. / hab. (€)</span>
+        <input type="number" name="capex_maximo_hab_eur" min="0" step="10000" value="{{ umbrales.capex_maximo_hab_eur }}"></label>
+      <div class="vb-acciones">
+        <button type="button" id="btn-guardar-umbrales" class="boton-secundario">Guardar umbrales</button>
+      </div>
+    </form>
+  </details>
+  {% endif %}
+
+  <script id="dcf-datos" type="application/json">{{ estudio_dcf | tojson }}</script>
+  <script id="dcf-semaforo-datos" type="application/json">{{ semaforo | tojson }}</script>
+</section>
+
 <script src="/static/js/viabilidad.js?v={{ estaticos_version }}" defer></script>
+<script src="/static/js/viabilidad_dcf.js?v={{ estaticos_version }}" defer></script>
 {% endblock %}

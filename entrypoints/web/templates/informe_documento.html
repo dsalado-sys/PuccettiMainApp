@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block titulo %}Puccetti · Informe — {{ informe.proyecto_nombre }}{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/informe_documento.css?v={{ estaticos_version }}" />
+{% endblock %}
+
+{% block contenido %}
+{% set etiqueta_estado = {
+  "disponible": "Disponible", "parcial": "Parcial",
+  "pendiente": "Pendiente", "reservada": "Reservada"
+} %}
+{% set nivel_etiqueta = {
+  "error": "Error", "incumplimiento": "Incumplimiento",
+  "aviso": "Aviso", "info": "Info"
+} %}
+
+<div class="doc-toolbar no-print">
+  <a class="boton-secundario" href="/modulos/informe">← Volver al listado</a>
+  <button type="button" class="boton-primario" id="inf-btn-pdf">Descargar PDF</button>
+</div>
+
+<article class="doc">
+
+  <header class="doc-cabecera">
+    <span class="eyebrow eyebrow--oro">Informe de prefactibilidad</span>
+    <h1 class="doc-titulo">{{ informe.proyecto_nombre }}</h1>
+    <p class="doc-meta">
+      {% if informe.referencia_catastral %}<span>RC {{ informe.referencia_catastral }}</span>{% endif %}
+      {% if informe.direccion %}<span>{{ informe.direccion }}</span>{% endif %}
+      {% if informe.escenario_nombre %}<span>Escenario: {{ informe.escenario_nombre }}</span>{% endif %}
+    </p>
+    <p class="doc-meta doc-meta--sec">
+      {% if informe.generado_por %}<span>Generado por {{ informe.generado_por }}</span>{% endif %}
+      {% if informe.generado_el %}<span>{{ informe.generado_el }}</span>{% endif %}
+    </p>
+  </header>
+
+  {% for sec in informe.secciones %}
+  <section class="doc-seccion" data-clave="{{ sec.clave }}" data-estado="{{ sec.estado }}">
+    <header class="doc-seccion-cab">
+      <h2>{{ loop.index }}. {{ sec.titulo }}</h2>
+      <span class="doc-estado doc-estado--{{ sec.estado }}">{{ etiqueta_estado[sec.estado] }}</span>
+    </header>
+
+    {% if sec.estado in ["pendiente", "reservada"] %}
+      {# Placeholder EXPLÍCITO — jamás datos inventados (anti-alucinación). #}
+      {% if sec.clave == "financiera" %}
+        {% set c = sec.contenido %}
+        <p class="doc-estudio-estado">Estado del estudio de viabilidad:
+          <strong>{{ c.etiqueta }}</strong></p>
+        <div class="doc-placeholder doc-reservado">
+          <span>{{ sec.nota_pendiente }}</span>
+        </div>
+      {% else %}
+        <div class="doc-placeholder">
+          <span>{{ sec.nota_pendiente }}</span>
+        </div>
+      {% endif %}
+
+    {% else %}
+      {% set c = sec.contenido %}
+
+      {% if sec.clave == "ficha" %}
+        <div class="doc-ficha">
+          <dl class="doc-datos">
+            <div><dt>Referencia catastral</dt><dd>{{ c.referencia_catastral or "—" }}</dd></div>
+            <div><dt>Dirección</dt><dd>{{ c.direccion or "—" }}</dd></div>
+            <div><dt>Municipio</dt><dd>{{ c.municipio or "—" }}{% if c.provincia %} ({{ c.provincia }}){% endif %}</dd></div>
+            <div><dt>Superficie de parcela</dt><dd>{% if c.superficie_m2 %}{{ c.superficie_m2|es_num }} m²{% else %}—{% endif %}</dd></div>
+            {% if c.uso_catastral %}<div><dt>Uso catastral</dt><dd>{{ c.uso_catastral }}</dd></div>{% endif %}
+            {% if c.anio_construccion %}<div><dt>Año de construcción</dt><dd>{{ c.anio_construccion }}</dd></div>{% endif %}
+            {% if c.superficie_construida_total_m2 %}<div><dt>Sup. construida (Catastro)</dt><dd>{{ c.superficie_construida_total_m2|es_num }} m²</dd></div>{% endif %}
+            {% if c.inmueble_seleccionado %}<div><dt>Inmueble</dt><dd>{{ c.inmueble_seleccionado.localizacion or c.inmueble_seleccionado.rc or "—" }}</dd></div>{% endif %}
+          </dl>
+          <figure class="doc-placeholder doc-aerea">
+            <span>Imagen aérea (ortofoto PNOA) — pendiente</span>
+          </figure>
+        </div>
+
+      {% elif sec.clave == "urbanismo" %}
+        {% if c.nombre %}<p class="doc-fuente">Normativa aplicada: <strong>{{ c.nombre }}</strong></p>{% endif %}
+        <table class="doc-tabla doc-tabla--params">
+          <tbody>
+          {% for f in c.parametros %}
+            <tr>
+              <th scope="row">{{ f.etiqueta }}</th>
+              <td>{% if f.numerico %}{{ f.valor|es_num(f.decimales) }}{% else %}{{ f.valor }}{% endif %}{% if f.unidad %} {{ f.unidad }}{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+
+      {% elif sec.clave == "planimetria" %}
+        <div class="doc-planos">
+          {% for pl in c.plantas %}
+          <figure class="doc-plano">
+            <div class="doc-plano-svg">{{ pl.svg | safe }}</div>
+            <figcaption>
+              <strong>{{ pl.nombre }}</strong>
+              <span>Construida {{ pl.construida_m2|es_num }} m² · Útil {{ pl.util_m2|es_num }} m²</span>
+            </figcaption>
+          </figure>
+          {% endfor %}
+        </div>
+
+      {% elif sec.clave == "superficies" %}
+        <h3 class="doc-sub">Por planta</h3>
+        <div class="doc-tabla-scroll">
+          <table class="doc-tabla">
+            <thead><tr>
+              <th>Planta</th><th>Tipo</th><th class="num">Uds.</th>
+              <th class="num">Construida m²</th><th class="num">Útil m²</th>
+              <th class="num">Muros m²</th><th class="num">Circulación m²</th>
+              <th class="num">Núcleo m²</th><th class="num">Patios m²</th>
+            </tr></thead>
+            <tbody>
+            {% for r in c.tabla_planta %}
+              <tr>
+                <td>{{ r.planta }}</td><td>{{ r.tipo }}</td>
+                <td class="num">{{ r.viviendas }}</td>
+                <td class="num">{{ r.construida_m2|es_num }}</td>
+                <td class="num">{{ r.util_viviendas_m2|es_num }}</td>
+                <td class="num">{{ (r.muros_m2 or 0)|es_num }}</td>
+                <td class="num">{{ r.circulacion_m2|es_num }}</td>
+                <td class="num">{{ (r.nucleo_m2 or 0)|es_num }}</td>
+                <td class="num">{{ (r.patios_m2 or 0)|es_num }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+            {% if c.capacidad %}
+            <tfoot><tr>
+              <th colspan="2">Totales</th>
+              <td class="num">{{ c.capacidad.n_viviendas_objetivo if c.capacidad.n_viviendas_objetivo is not none else "" }}</td>
+              <td class="num">{{ c.capacidad.construida_total_m2|es_num }}</td>
+              <td class="num">{{ c.capacidad.util_total_m2|es_num }}</td>
+              <td class="num">{{ c.capacidad.muros_total_m2|es_num }}</td>
+              <td class="num">{{ c.capacidad.circulacion_total_m2|es_num }}</td>
+              <td class="num">{{ c.capacidad.nucleo_total_m2|es_num }}</td>
+              <td class="num">{{ c.capacidad.patio_total_m2|es_num }}</td>
+            </tr></tfoot>
+            {% endif %}
+          </table>
+        </div>
+
+        {% if c.tabla_unidad %}
+        <h3 class="doc-sub">Por unidad</h3>
+        <div class="doc-tabla-scroll">
+          <table class="doc-tabla">
+            <thead><tr>
+              <th>Planta</th><th>Unidad</th><th class="num">Dorm.</th><th>Tipo</th>
+              <th class="num">Útil objetivo m²</th><th class="num">Útil m²</th>
+              <th class="num">Construida m²</th><th>Adaptada</th>
+            </tr></thead>
+            <tbody>
+            {% for r in c.tabla_unidad %}
+              <tr>
+                <td>{{ r.planta }}</td><td>{{ r.vivienda }}</td>
+                <td class="num">{{ r.dorms }}</td><td>{{ r.tipo }}</td>
+                <td class="num">{{ r.util_m2_objetivo|es_num }}</td>
+                <td class="num">{{ (r.util_por_unidad_m2 or 0)|es_num }}</td>
+                <td class="num">{{ (r.construida_por_unidad_m2 or 0)|es_num }}</td>
+                <td>{{ "Sí" if r.adaptada else "—" }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+
+      {% elif sec.clave == "alertas" %}
+        {% if c.alertas %}
+          <ul class="doc-alertas">
+          {% for a in c.alertas %}
+            <li class="doc-alerta doc-alerta--{{ a.nivel }}">
+              <span class="doc-alerta-nivel">{{ nivel_etiqueta[a.nivel] or a.nivel }}</span>
+              <span class="doc-alerta-msg">{{ a.mensaje }}</span>
+            </li>
+          {% endfor %}
+          </ul>
+        {% else %}
+          <p class="doc-ok">Sin incumplimientos urbanísticos detectados en el escenario calculado.</p>
+        {% endif %}
+      {% endif %}
+
+      {% if sec.nota_pendiente and sec.estado == "parcial" %}
+        <p class="doc-nota">Pendiente: {{ sec.nota_pendiente }}</p>
+      {% endif %}
+    {% endif %}
+  </section>
+  {% endfor %}
+
+</article>
+
+<script>
+  (function () {
+    var b = document.getElementById("inf-btn-pdf");
+    if (b) b.addEventListener("click", function () { window.print(); });
+  })();
+</script>
+{% endblock %}

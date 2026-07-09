@@ -28,6 +28,21 @@ def ring(geom: Polygon, tol: float = 0.03) -> list[list[float]]:
     return [[round(x, 2), round(y, 2)] for x, y in g.exterior.coords]
 
 
+def huecos_de(geom: Polygon, tol: float = 0.03) -> list[list[list[float]]]:
+    """Anillos INTERIORES de un Polygon como [[[x,y],...],...] (vacío si es macizo).
+
+    Un patio en anillo (edificio dentro) lleva su hueco aquí; el canvas lo recorta.
+    """
+    if geom is None or geom.is_empty or not hasattr(geom, "interiors"):
+        return []
+    g = geom.simplify(tol, preserve_topology=True)
+    fuente = g if (hasattr(g, "interiors") and len(g.interiors) == len(geom.interiors)) else geom
+    return [
+        [[round(x, 2), round(y, 2)] for x, y in anillo.coords]
+        for anillo in fuente.interiors
+    ]
+
+
 def lados_a_dict(lados: list[LadoParcela]) -> list[dict[str, Any]]:
     """Lados con orientación cardinal y bandera fachada/medianera (req. 10)."""
     return [
@@ -233,9 +248,12 @@ def _estancias_por_unidad_dorms(
         CONFIG_DEFAULT as CFG_VIV, programa_vivienda, programa_vivienda_combo,
     )
     from .programa_apartamentos import (
-        CONFIG_DEFAULT as CFG_APT, programa_apartamentos, programa_apartamentos_combo,
+        CONFIG_DEFAULT as CFG_APT, _circ_interior_combo, circ_interior_apartamento,
+        programa_apartamentos, programa_apartamentos_combo,
     )
-    from .programa_hotelero import CONFIG_DEFAULT as CFG_HOT, programa_habitacion
+    from .programa_hotelero import (
+        CONFIG_DEFAULT as CFG_HOT, circ_interior_habitacion, programa_habitacion,
+    )
 
     if util_por_unidad <= 0:
         return []
@@ -243,15 +261,10 @@ def _estancias_por_unidad_dorms(
     tipo_unidad = getattr(programa_uso, "tipo_unidad", "vivienda") if programa_uso is not None else "vivienda"
     es_turismo = tipo_unidad in USOS_TURISMO
 
-    # En usos turísticos reservamos el margen de circulación de acceso (no
-    # computable): los programas del Anexo I sólo dimensionan estancias
-    # computables, que se ajustan al presupuesto `útil / 1.15`. La vivienda
-    # gestiona su propia circulación internamente (emite `circulacion_interior`).
-    if es_turismo:
-        util_computable = util_por_unidad / (1.0 + PCT_CIRCULACION_TURISMO / 100.0)
-    else:
-        util_computable = util_por_unidad
-
+    # En usos turísticos reservamos la circulación de acceso (no computable) como m²
+    # FIJOS por tipología (antes era el 15 % del útil): las estancias computables
+    # ocupan `útil − circulación`. La vivienda gestiona su circulación internamente
+    # (emite `circulacion_interior`).
     if tipo_unidad == "apartamento":
         cfg_apt = cfg if cfg is not None else CFG_APT
         cat = getattr(params.programa, "categoria_apartamentos", None)
@@ -263,14 +276,20 @@ def _estancias_por_unidad_dorms(
         # ("doble*1+individual*1"), el programa lo genera por composición; un slug
         # de ocupación heredado ("doble") sigue la vía monodormitorio.
         if es_slug_combo(tip_v):
+            circ_m2 = _circ_interior_combo(slug_a_combo(tip_v), cfg_apt)
+            util_computable = max(0.0, util_por_unidad - circ_m2)
             estancias = programa_apartamentos_combo(slug_a_combo(tip_v), cat_v, util_computable, grupo_v, cfg_apt)
         else:
+            circ_m2 = circ_interior_apartamento(tip_v, cfg_apt)
+            util_computable = max(0.0, util_por_unidad - circ_m2)
             estancias = programa_apartamentos(tip_v, cat_v, util_computable, grupo_v, cfg_apt)
     elif tipo_unidad == "habitacion":
         cfg_hot = cfg if cfg is not None else CFG_HOT
         cat = getattr(params.programa, "categoria_hotelero", None)
         cat_v = cat.value if cat is not None else "hotel_3"
         tip_v = slug or _slug_principal(params, "habitacion")
+        circ_m2 = circ_interior_habitacion(tip_v, cfg_hot)
+        util_computable = max(0.0, util_por_unidad - circ_m2)
         estancias = programa_habitacion(tip_v, cat_v, util_computable, cfg_hot)
     else:
         cfg_viv = cfg if cfg is not None else CFG_VIV
@@ -378,11 +397,8 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None, cfg=None) -> li
     adaptadas_marcadas = 0
 
     local_pp = list(getattr(cap, "local_por_planta", [])) or [0.0] * len(cap.nombres_planta)
-    pct_local_pb = float(getattr(cap, "pct_local_pb", 0.0))
     otros_pp = list(getattr(cap, "otros_por_planta", [])) or [0.0] * len(cap.nombres_planta)
-    pct_otros_pb = float(getattr(cap, "pct_otros_pb", 0.0))
     comunes_pp = list(getattr(cap, "usos_comunes_por_planta", [])) or [0.0] * len(cap.nombres_planta)
-    pct_usos_comunes_pb = float(getattr(cap, "pct_usos_comunes_pb", 0.0))
     unidades_pp = list(getattr(cap, "unidades_por_planta", []))
     tipologias_pp = list(getattr(cap, "tipologias_unidad_por_planta", []))
     muros_int_pp = list(getattr(cap, "muros_interior_por_planta", [])) or [0.0] * len(cap.nombres_planta)
@@ -398,10 +414,10 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None, cfg=None) -> li
         # Filas de reserva de PB (local / otros / usos comunes) — cada una aparece
         # solo si la planta tiene m² destinados a ese uso. Sin estancias y sin
         # circulación: son superficie útil de PB apartada para uso no residencial.
-        for etiqueta, tipo_reserva, m2_reserva, pct_reserva in (
-            ("Local", "local", local_i, pct_local_pb),
-            ("Otros", "otros", otros_i, pct_otros_pb),
-            ("Usos comunes", "usos_comunes", comunes_i, pct_usos_comunes_pb),
+        for etiqueta, tipo_reserva, m2_reserva in (
+            ("Local", "local", local_i),
+            ("Otros", "otros", otros_i),
+            ("Usos comunes", "usos_comunes", comunes_i),
         ):
             if m2_reserva > 0:
                 rows.append({
@@ -415,7 +431,8 @@ def tabla_unidad_desde_capacidad(cap, params, programa_uso=None, cfg=None) -> li
                     "muros_por_unidad_m2": 0.0,
                     "muros_interior_por_unidad_m2": 0.0,
                     "circulacion_por_unidad_m2": 0.0,
-                    "pct_util_destinado": round(pct_reserva, 1),
+                    # Reserva en m² absolutos (ya no es un % del útil de PB).
+                    "pct_util_destinado": 0.0,
                     "adaptada": False,
                     "estancias": [],
                 })

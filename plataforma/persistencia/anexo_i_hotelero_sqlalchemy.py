@@ -3,7 +3,8 @@
 Análogo a `anexo_i_apartamentos_sqlalchemy.py` pero para el modelo de
 *habitación*. PK `(categoria, tipologia, estancia)`. La categoría es
 "hotel_5".."hotel_1", "hostal_2"/"hostal_1", "pension", "albergue"; la tipología
-es "individual"/"doble"/"triple"/"cuadruple"/"multiple". Las áreas sociales del
+es "individual"/"doble"/"junior_suite"/"suite"/"multiple". Junior suite y suite
+llevan además una estancia `salon` (mínimo editable). Las áreas sociales del
 establecimiento se guardan con `categoria="comunes_<cat>"`, `tipologia="comunes"`.
 """
 from __future__ import annotations
@@ -62,21 +63,26 @@ class CatalogoHoteleroSQLAlchemy:
         ).all()
         if not filas:
             return None
+        # La suma de estancias incluye ya la circulación interior (m² por tipología);
+        # el útil objetivo = habitación + baño + circulación (antes era × 1.15).
         base = sum(float(f.min_m2) for f in filas)
-        return round(base * 1.15, 2)
+        return round(base, 2)
 
     def consolidadas_hotelero(self) -> dict:
         """Mínimos editables de BBDD en la forma de las constantes del motor (A1.1).
 
         `programa_hotelero.config_desde_repo` lo empaqueta en su config. Mapeo
         (excluye `comunes_*`): `habitacion` → `MIN_HABITACION[(cat, tip)]`;
-        `bano` → `MIN_BANO_HOTELERO[cat]`.
+        `bano` → `MIN_BANO_HOTELERO[cat]`; `salon` → `SALON_UNIDAD[(cat, tip)]`
+        (solo junior suite / suite).
         """
         filas = self._session.scalars(select(AnexoIHoteleroORM)).all()
         if not filas:
             return {}
         habitacion: dict[tuple[str, str], float] = {}
         bano: dict[str, float] = {}
+        circ: dict[str, float] = {}
+        salon: dict[tuple[str, str], float] = {}
         for f in filas:
             if str(f.categoria).startswith("comunes"):
                 continue
@@ -85,11 +91,19 @@ class CatalogoHoteleroSQLAlchemy:
                 habitacion[(cat, tip)] = float(f.min_m2)
             elif est == "bano":
                 bano[cat] = float(f.min_m2)
+            elif est == "circulacion_interior":
+                circ[tip] = float(f.min_m2)
+            elif est == "salon":
+                salon[(cat, tip)] = float(f.min_m2)
         out: dict = {}
         if habitacion:
             out["MIN_HABITACION"] = habitacion
         if bano:
             out["MIN_BANO_HOTELERO"] = bano
+        if circ:
+            out["CIRC_INTERIOR_M2"] = circ
+        if salon:
+            out["SALON_UNIDAD"] = salon
         return out
 
     def areas_sociales(self, categoria: str) -> dict[str, float]:
@@ -121,6 +135,23 @@ class CatalogoHoteleroSQLAlchemy:
         valor: float,
         usuario: str | None = None,
     ) -> None:
+        # La circulación interior es por TIPOLOGÍA (no por categoría): editarla se
+        # propaga a todas las categorías con esa tipología (el motor la consolida
+        # por tipología; evita el last-write-wins entre categorías).
+        if estancia == "circulacion_interior":
+            ahora = datetime.now(timezone.utc)
+            filas = self._session.scalars(
+                select(AnexoIHoteleroORM)
+                .where(AnexoIHoteleroORM.tipologia == tipologia)
+                .where(AnexoIHoteleroORM.estancia == "circulacion_interior")
+            ).all()
+            for f in filas:
+                f.min_m2 = valor
+                f.editable_por_usuario = 1
+                f.actualizado_en = ahora
+            self._session.commit()
+            return
+
         orm = self._session.get(AnexoIHoteleroORM, (categoria, tipologia, estancia))
         if orm is None:
             orm = AnexoIHoteleroORM(

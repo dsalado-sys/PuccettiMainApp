@@ -179,7 +179,7 @@
 
         <fieldset class="nm-usos">
           <legend class="eyebrow">Usos permitidos</legend>
-          {% for u, label in [("residencial", "Residencial"), ("hotelero", "Hotelero"), ("terciario", "Terciario"), ("mixto", "Mixto")] %}
+          {% for u, label in [("residencial", "Residencial"), ("hotelero", "Hotelero"), ("apartamento", "Apartamento")] %}
             <label class="nm-checkbox">
               <input type="checkbox" class="nm-f-uso" value="{{ u }}"
                      {% if not puede_editar %}disabled{% endif %}>
