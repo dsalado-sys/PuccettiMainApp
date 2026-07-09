@@ -65,6 +65,31 @@
     onMerge: (idA, idB) => fusionarPatios(idA, idB),
   }) : null;
   if (renderer && patioEditor) renderer.setOverlay(() => patioEditor.dibujarOverlay());
+  // Paneo del plano (arrastrar sobre vacío). Se habilita DESPUÉS del editor de
+  // patios para que su listener de mousedown quede registrado detrás y respete el
+  // preventDefault del editor cuando este agarra un tirador/patio.
+  if (renderer) renderer.habilitarPaneo();
+
+  // ── Control de capas (Plano / Catastro + transparencia) ──────────────────
+  // Estado de UI efímero: no se persiste en el escenario. La transparencia se
+  // invierte a opacidad del raster (100% transparencia → alpha 0 = Plano).
+  (function cablearCapas() {
+    if (!renderer) return;
+    const transpBox = document.getElementById("rc-capas-transp");
+    const slider = document.getElementById("rc-capas-slider");
+    const radios = document.querySelectorAll('input[name="rc-capa"]');
+    if (!radios.length || !slider) return;
+    const aplicar = () => {
+      const esCatastro = document.querySelector('input[name="rc-capa"]:checked')?.value === "catastro";
+      if (transpBox) transpBox.hidden = !esCatastro;
+      renderer.setCapaCatastro({
+        activa: esCatastro,
+        alpha: 1 - (Number(slider.value) || 0) / 100,
+      });
+    };
+    radios.forEach(r => r.addEventListener("change", aplicar));
+    slider.addEventListener("input", aplicar);
+  })();
 
   let _patioSeq = 0;   // contador para ids temporales de patios nuevos
 

@@ -134,6 +134,9 @@ class ParcelaMetrica:
     # §2.1. Es la fuente de verdad para edificabilidad/ocupación; el área del
     # polígono reproyectado solo se usa si esta falta.
     superficie_catastral_m2: float | None = None
+    # Código EPSG del huso UTM en que está `poligono_utm` (mismo criterio que §2.1).
+    # Viaja al canvas para pedir el WMS de Catastro en ese CRS y encajar el raster.
+    epsg: int | None = None
 
 
 def superficie_referencia_parcela(parcela: ParcelaMetrica) -> float:
@@ -164,7 +167,8 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
     # en ambos contextos, sin la deformación del 30N fijo fuera de la peninsular
     # centro-occidental.
     lon_ref, lat_ref = float(contorno[0][0]), float(contorno[0][1])
-    a_utm = _transformer_a_utm(_epsg_utm_para_lon(lon_ref, lat_ref))
+    epsg_utm = _epsg_utm_para_lon(lon_ref, lat_ref)
+    a_utm = _transformer_a_utm(epsg_utm)
 
     poly = _polygon_a_utm([(float(p[0]), float(p[1])) for p in contorno], a_utm)
     if poly.is_empty or not poly.is_valid:
@@ -224,6 +228,7 @@ def construir_parcela_metrica(proyecto: Proyecto) -> ParcelaMetrica | None:
         centroide_lonlat=centroide,
         referencia_catastral=datos.get("referencia_catastral"),
         superficie_catastral_m2=superficie_cat if superficie_cat > 0 else None,
+        epsg=epsg_utm,
     )
 
 
@@ -297,6 +302,7 @@ class CalcularEnvolvente:
                 "municipio": parcela.municipio,
                 "provincia": parcela.provincia,
                 "bbox": [round(v, 2) for v in parcela.poligono_utm.bounds],
+                "epsg": parcela.epsg,
             },
             "lados": lados_a_dict(parcela.lados),
             "indicadores": _indicadores_dict(indicadores),
@@ -545,6 +551,7 @@ class CalcularLayout:
                 "municipio": parcela.municipio,
                 "provincia": parcela.provincia,
                 "bbox": [round(v, 2) for v in parcela.poligono_utm.bounds],
+                "epsg": parcela.epsg,
             },
             "lados": lados_a_dict(parcela.lados),
         }

@@ -291,6 +291,42 @@
 }
 @keyframes rc-spin { to { transform: rotate(360deg); } }
 
+/* ── Control de capas (arriba-izquierda del lienzo) ──────────────────── */
+.rc-capas { position: absolute; top: 14px; left: 14px; z-index: 3; }
+.rc-capas-btn {
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--lienzo-papel);
+  border: 1px solid var(--dorado);
+  border-radius: var(--radio);
+  color: var(--surface-inverse);
+  cursor: pointer;
+  list-style: none;
+}
+.rc-capas-btn::-webkit-details-marker { display: none; }
+.rc-capas[open] .rc-capas-btn { color: var(--dorado); }
+.rc-capas-panel {
+  margin-top: 6px;
+  min-width: 148px;
+  padding: var(--space-sm);
+  background: var(--lienzo-papel);
+  border: 1px solid var(--dorado);
+  border-radius: var(--radio);
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--on-surface);
+}
+.rc-capas-opcion { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.rc-capas-opcion input[type="radio"] { accent-color: var(--dorado); }
+.rc-capas-transp {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 4px; padding-top: 8px;
+  border-top: 1px solid var(--gris-suave);
+}
+.rc-capas-transp[hidden] { display: none; }
+.rc-capas-transp label { font-size: var(--text-xs); color: var(--gris-medio); }
+.rc-capas-transp input[type="range"] { width: 100%; accent-color: var(--dorado); }
+
 /* ── Tabla derecha ───────────────────────────────────────────────── */
 .rc-kpis {
   display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm);
