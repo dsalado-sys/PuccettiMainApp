@@ -300,6 +300,7 @@ def _filas_anexo_i_hotelero() -> list[tuple[str, str, str, float, float]]:
         BANO_INTERIOR_OBLIGATORIO,
         CIRC_INTERIOR_M2_HOTELERO,
         SALON_SOCIAL_MIN,
+        SALON_UNIDAD_MIN,
         AREA_SOCIAL_POR_UA,
         AREA_SOCIAL_POR_PLAZA,
         CATEGORIAS,
@@ -308,8 +309,12 @@ def _filas_anexo_i_hotelero() -> list[tuple[str, str, str, float, float]]:
 
     filas: list[tuple[str, str, str, float, float]] = []
     for (cat, tipo), room_min in MIN_HABITACION.items():
-        util_max = util_minimo_habitacion(cat, tipo)  # habitación + baño
+        util_max = util_minimo_habitacion(cat, tipo)  # habitación + salón + baño
         filas.append((cat, tipo, "habitacion", room_min, util_max))
+        # Salón privado de la unidad (solo junior suite / suite): mínimo editable.
+        salon = SALON_UNIDAD_MIN.get((cat, tipo), 0.0)
+        if salon > 0:
+            filas.append((cat, tipo, "salon", salon, util_max))
         if BANO_INTERIOR_OBLIGATORIO[cat]:
             filas.append((cat, tipo, "bano", MIN_BANO_HOTELERO[cat], util_max))
         # Circulación interior de la habitación (m² mínimo editable por tipología).
@@ -333,6 +338,17 @@ def sembrar_anexo_i_hotelero(session: Session, forzar: bool = False, commit: boo
     # Idempotente: añade solo las filas que falten (ver `sembrar_anexo_i_apartamentos`).
     from .anexo_i_hotelero_sqlalchemy import AnexoIHoteleroORM
     ahora = datetime.now(timezone.utc)
+    # Limpieza idempotente: las tipologías `triple`/`cuadruple` se sustituyeron por
+    # `junior_suite`/`suite` (Anexo I.1). Borra filas obsoletas de BBDD previas para
+    # que el editor de mínimos no las siga mostrando. Solo esta tabla (apartamentos
+    # conserva triple/cuadruple en su propia tabla).
+    obsoletas = (
+        session.query(AnexoIHoteleroORM)
+        .filter(AnexoIHoteleroORM.tipologia.in_(("triple", "cuadruple")))
+        .all()
+    )
+    for orm in obsoletas:
+        session.delete(orm)
     for cat, tip, estancia, min_m2, max_m2 in _filas_anexo_i_hotelero():
         orm = session.get(AnexoIHoteleroORM, (cat, tip, estancia))
         if orm is None:

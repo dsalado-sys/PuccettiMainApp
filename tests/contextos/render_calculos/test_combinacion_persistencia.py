@@ -26,8 +26,8 @@ def test_combinacion_de_otro_uso_se_descarta():
 
 
 def test_combinacion_tipologia_no_valida_se_descarta():
-    # "suite" no es una tipología hotelera válida.
-    assert _prog("hotelero", "suite*2").combinacion == ""
+    # "triple" dejó de ser una tipología hotelera válida (ahora junior_suite/suite).
+    assert _prog("hotelero", "triple*2").combinacion == ""
 
 
 def test_combinacion_vivienda_estudio_round_trip():

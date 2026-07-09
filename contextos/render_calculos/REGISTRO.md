@@ -155,7 +155,7 @@ usuarios) descontadas del techo de planta — no hay pasillo interno propio por 
 |---|---|---|---|
 | Vivienda | I.5 — VPO Junta Andalucía | nº de dormitorios (0..4) | rama directa (`programa_uso=None`); estancias vía `programa.programa_vivienda` |
 | Apartamentos turísticos | I.3 (edificios) / I.4 (conjuntos) — Decreto 194/2010 | categoría 1L–4L × tipología estudio/individual/doble/triple/cuádruple | `programa_apartamentos.programa_uso_apartamento(cat, tip)` |
-| Hotelero | I.1 — Hotel 1–5★, Hostal 1–2★, Pensión, Albergue | individual/doble/triple/cuádruple/múltiple (solo albergue) | `programa_hotelero.programa_uso_hotelero(cat, tip)` |
+| Hotelero | I.1 — Hotel 1–5★, Hostal 1–2★, Pensión, Albergue | individual/doble/junior_suite/suite/múltiple (solo albergue) | `programa_hotelero.programa_uso_hotelero(cat, tip)` |
 
 ### 1.5 Unidades adaptadas DB-SUA (`geometria/accesibilidad.py`)
 
@@ -421,6 +421,22 @@ combinación → edificio homogéneo); el caso homogéneo pasa a ser «1 solo ti
 > en `git log`; aquí solo el resumen operativo. El "cómo funciona hoy" de cada pieza está
 > en §1 (con su propia subsección) y §2 (reglas), no hace falta repetirlo aquí.
 
+- **2026-07-09** — **Tipologías hoteleras redefinidas** (Anexo I.1): `triple`/`cuadruple`
+  se sustituyen por `junior_suite` (habitación doble + salón) y `suite` (dos habitaciones
+  dobles con salón compartido); se mantienen individual/doble/multiple. m² por unidad
+  **compuestos** (junior_suite = habitación doble + salón; suite = 2·doble + salón) —
+  Hotel 5★ ⇒ JS 32 / Suite 52. Plazas: JS 4, Suite 6 (el salón cuenta 2). El **salón
+  privado** es una estancia con **mínimo editable propio** (`SALON_UNIDAD_MIN` +
+  `ProgramaHoteleroConfig.salon_unidad`, estancia `salon` en `anexo_i_hotelero`,
+  editable en «Ver / editar mínimos»): `MIN_HABITACION` guarda solo la habitación y el
+  total = habitación + salón + baño. El salón social COMÚN del establecimiento
+  (`SALON_SOCIAL_MIN`) es independiente. Piezas: enum `TipologiaHabitacion` +
+  `TIPOLOGIA_HABITACION_A_PLAZAS` (`dominio.py`), `MIN_HABITACION`/plazas/circulación
+  (`programa_hotelero.py`), `slugs_validos` hotel (`parametros.py`), `_ORDEN_TIPOLOGIA`
+  (`etiquetas_anexo.py`), limpieza idempotente de filas triple/cuádruple en
+  `sembrar_anexo_i_hotelero` (`seed_normativa.py`), etiquetas frontend
+  (`_rc_panel_params.html`, `render_calculos.js`). Apartamentos turísticos conserva
+  triple/cuádruple (enum y tabla propios). Tests hoteleros actualizados; suite verde.
 - **2026-07-09** — **Tipos de unidad + combinaciones POR PLANTA para vivienda y
   apartamento turístico** (reemplaza el flujo homogéneo). Ver §1.10. Piezas:
   `ParametrosPrograma.tipos_unidad`/`mezcla_planta` (`parametros.py`),

@@ -209,7 +209,7 @@ el preview rápido.
 |-----|-------|---------------------|---------------------------|
 | Vivienda | I.5 — VPO Junta Andalucía | nº de dormitorios (0..4) | rama directa con `programa_uso=None` (estancias vía `programa.programa_vivienda`) |
 | Apartamentos turísticos | I.3 (edificios) / I.4 (conjuntos) — Decreto 194/2010 | categoría 1L–4L × tipología estudio/1d/2d/3d | `programa_apartamentos.programa_uso_apartamento(cat, tip)` |
-| Hotelero | I.1 — Hotel 1–5★, Hostal 1–2★, Pensión, Albergue | individual / doble / triple / cuádruple / múltiple (sólo albergue) | `programa_hotelero.programa_uso_hotelero(cat, tip)` |
+| Hotelero | I.1 — Hotel 1–5★, Hostal 1–2★, Pensión, Albergue | individual / doble / junior suite / suite / múltiple (sólo albergue) | `programa_hotelero.programa_uso_hotelero(cat, tip)` |
 
 Para los usos NO-vivienda, cada uso descuenta del techo de planta las
 **áreas comunes obligatorias** (recepción, áreas sociales, segundo

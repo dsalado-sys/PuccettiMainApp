@@ -106,18 +106,19 @@ class TipologiaHabitacion(str, Enum):
     """Anexo I.1 — tipos de habitación (unidad de alojamiento hotelera)."""
     INDIVIDUAL = "individual"
     DOBLE = "doble"
-    TRIPLE = "triple"
-    CUADRUPLE = "cuadruple"
-    MULTIPLE = "multiple"          # solo albergue
+    JUNIOR_SUITE = "junior_suite"   # habitación doble + salón
+    SUITE = "suite"                 # dos habitaciones dobles con salón compartido
+    MULTIPLE = "multiple"           # solo albergue
 
 
 # Plazas (camas) por tipología de habitación: escala las áreas sociales por
 # plaza (albergue) y decide el 2º baño obligatorio (>5 usuarios) en A1.4.
+# El salón cuenta como 2 plazas (junior suite = doble+salón; suite = 2 dobles+salón).
 TIPOLOGIA_HABITACION_A_PLAZAS = {
     TipologiaHabitacion.INDIVIDUAL: 1,
     TipologiaHabitacion.DOBLE: 2,
-    TipologiaHabitacion.TRIPLE: 3,
-    TipologiaHabitacion.CUADRUPLE: 4,
+    TipologiaHabitacion.JUNIOR_SUITE: 4,
+    TipologiaHabitacion.SUITE: 6,
     TipologiaHabitacion.MULTIPLE: 6,
 }
 

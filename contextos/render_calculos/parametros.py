@@ -215,7 +215,7 @@ class ParametrosPrograma:
     salon_cocina_open: bool = False
     # Tipologías adicionales para la mezcla multi-tipología. Los slugs válidos
     # dependen del uso activo (vivienda: estudio/1d/2d/3d/4d+; apartamentos:
-    # estudio/1d/2d/3d; hotelero: individual/doble/triple/cuadruple/multiple).
+    # estudio/1d/2d/3d; hotelero: individual/doble/junior_suite/suite/multiple).
     tipologias_extra: list[str] = field(default_factory=list)
     # Combinación elegida por el arquitecto (slug canónico multiconjunto). Su
     # SEMÁNTICA depende del uso:
@@ -563,7 +563,7 @@ def parametros_desde_dict(d: dict[str, Any] | None) -> ParametrosRender:
 
         # Los slugs válidos de la mezcla dependen del uso activo.
         if uso == UsoEdificio.HOTELERO:
-            slugs_validos = {"individual", "doble", "triple", "cuadruple", "multiple"}
+            slugs_validos = {"individual", "doble", "junior_suite", "suite", "multiple"}
         elif uso == UsoEdificio.APARTAMENTOS_TURISTICOS:
             slugs_validos = {"estudio", "individual", "doble", "triple", "cuadruple"}
         else:  # VIVIENDA

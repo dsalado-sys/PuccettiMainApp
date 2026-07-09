@@ -3,7 +3,8 @@
 Análogo a `anexo_i_apartamentos_sqlalchemy.py` pero para el modelo de
 *habitación*. PK `(categoria, tipologia, estancia)`. La categoría es
 "hotel_5".."hotel_1", "hostal_2"/"hostal_1", "pension", "albergue"; la tipología
-es "individual"/"doble"/"triple"/"cuadruple"/"multiple". Las áreas sociales del
+es "individual"/"doble"/"junior_suite"/"suite"/"multiple". Junior suite y suite
+llevan además una estancia `salon` (mínimo editable). Las áreas sociales del
 establecimiento se guardan con `categoria="comunes_<cat>"`, `tipologia="comunes"`.
 """
 from __future__ import annotations
@@ -72,7 +73,8 @@ class CatalogoHoteleroSQLAlchemy:
 
         `programa_hotelero.config_desde_repo` lo empaqueta en su config. Mapeo
         (excluye `comunes_*`): `habitacion` → `MIN_HABITACION[(cat, tip)]`;
-        `bano` → `MIN_BANO_HOTELERO[cat]`.
+        `bano` → `MIN_BANO_HOTELERO[cat]`; `salon` → `SALON_UNIDAD[(cat, tip)]`
+        (solo junior suite / suite).
         """
         filas = self._session.scalars(select(AnexoIHoteleroORM)).all()
         if not filas:
@@ -80,6 +82,7 @@ class CatalogoHoteleroSQLAlchemy:
         habitacion: dict[tuple[str, str], float] = {}
         bano: dict[str, float] = {}
         circ: dict[str, float] = {}
+        salon: dict[tuple[str, str], float] = {}
         for f in filas:
             if str(f.categoria).startswith("comunes"):
                 continue
@@ -90,6 +93,8 @@ class CatalogoHoteleroSQLAlchemy:
                 bano[cat] = float(f.min_m2)
             elif est == "circulacion_interior":
                 circ[tip] = float(f.min_m2)
+            elif est == "salon":
+                salon[(cat, tip)] = float(f.min_m2)
         out: dict = {}
         if habitacion:
             out["MIN_HABITACION"] = habitacion
@@ -97,6 +102,8 @@ class CatalogoHoteleroSQLAlchemy:
             out["MIN_BANO_HOTELERO"] = bano
         if circ:
             out["CIRC_INTERIOR_M2"] = circ
+        if salon:
+            out["SALON_UNIDAD"] = salon
         return out
 
     def areas_sociales(self, categoria: str) -> dict[str, float]:

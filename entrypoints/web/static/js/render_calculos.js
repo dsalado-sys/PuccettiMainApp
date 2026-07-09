@@ -121,6 +121,8 @@
     doble: ["doble", "dobles"],
     triple: ["triple", "triples"],
     cuadruple: ["cuádruple", "cuádruples"],
+    junior_suite: ["junior suite", "junior suites"],
+    suite: ["suite", "suites"],
     multiple: ["múltiple", "múltiples"],
   };
   function etiquetaDesdeSlug(slug) {
@@ -313,6 +315,20 @@
   const modalExceso = document.getElementById("rc-modal-exceso");
   const avisoExceso = document.getElementById("rc-aviso-exceso");
 
+  // El modal de exceso se muestra UNA sola vez POR PROYECTO: cambiar o eliminar
+  // pestañas recarga la página (reiniciaría `excesoAceptado`), así que persistimos
+  // en localStorage (con clave por proyecto) que ya se vio. Tras la primera vez solo
+  // queda el aviso inferior.
+  const _proyectoId = (typeof window.__RC_PROYECTO_ID__ === "string" && window.__RC_PROYECTO_ID__) || "sin-proyecto";
+  const EXCESO_VISTO_KEY = "rc_exceso_visto:" + _proyectoId;
+  function excesoYaVisto() {
+    try { return localStorage.getItem(EXCESO_VISTO_KEY) === "1"; } catch (e) { return false; }
+  }
+  function marcarExcesoVisto() {
+    try { localStorage.setItem(EXCESO_VISTO_KEY, "1"); } catch (e) { /* storage no disponible */ }
+  }
+  if (excesoYaVisto()) ESTADO.excesoAceptado = true;
+
   function construidaProyectada(payload) {
     const cap = payload?.capacidad;
     const env = payload?.envolvente;
@@ -367,6 +383,7 @@
   // Aceptar (o cerrar) = se ha visto la advertencia: a partir de ahí, aviso inferior.
   function aceptarExceso() {
     ESTADO.excesoAceptado = true;
+    marcarExcesoVisto();                 // no volver a mostrar el modal en cargas futuras
     cerrarModalExceso();
     if (avisoExceso) avisoExceso.hidden = false;
   }
@@ -768,8 +785,13 @@
       actualizarBrujula(data);
       repintarKpis(data);
       repintarAlertas(data.alertas);
-      repintarTablaPlanta(data.tabla_planta);
-      repintarTablaUnidad(data.tabla_unidad);
+      // Las tablas «Por planta» / «Por unidad» permanecen vacías hasta el PRIMER
+      // cálculo disparado por el usuario: el cálculo automático de la carga inicial
+      // (opts.inicial) dibuja envolvente/KPIs pero no rellena las tablas.
+      if (!opts.inicial) {
+        repintarTablaPlanta(data.tabla_planta);
+        repintarTablaUnidad(data.tabla_unidad);
+      }
       verificarExcesoConstruida(data);
       if (!auto) mostrarToast("Capacidad calculada");
     } catch (e) {
@@ -1064,11 +1086,14 @@
     ocupadoEsc = true;
     try {
       _snapshotActivo();
+      // Pestaña nueva EN BLANCO: no copia el escenario activo. `parametros: {}` →
+      // el backend lo normaliza a los parámetros de fábrica (por defecto); `resumen`
+      // vacío → sin cálculos (las tablas salen vacías hasta el primer cálculo).
       const nuevo = {
         id: _nuevoIdEscenario(),
-        nombre: nombreEscenario(),
-        parametros: leerFormulario(),   // copia del escenario actual
-        resumen: resumenActual(),
+        nombre: "",
+        parametros: {},
+        resumen: {},
       };
       ESCENARIOS.push(nuevo);
       const r = await _persistirEscenarios(nuevo.id);
@@ -2070,7 +2095,8 @@
     estudio: "Estudio", "1d": "1 dormitorio", "2d": "2 dormitorios",
     "3d": "3 dormitorios", "4d": "4 o más dormitorios",
     individual: "Individual", doble: "Doble", triple: "Triple",
-    cuadruple: "Cuádruple", multiple: "Múltiple (albergue)",
+    cuadruple: "Cuádruple", junior_suite: "Junior Suite", suite: "Suite",
+    multiple: "Múltiple (albergue)",
     salon_comedor: "Salón-comedor (común de la unidad)", comunes: "Áreas comunes",
   };
   const SELECT_CATEGORIA_MIN = {
@@ -2260,7 +2286,7 @@
     _toggleOpcion(catSel, "4L", !soloDos, "2L");
   }
 
-  // "Múltiple" solo existe en albergue (resto: individual/doble/triple/cuádruple).
+  // "Múltiple" solo existe en albergue (resto: individual/doble/junior suite/suite).
   function _filtrarTipologiaHotelero() {
     const catSel = form.querySelector('select[name="categoria_hotelero"]');
     if (!catSel) return;
@@ -2491,7 +2517,7 @@
   const OPCIONES_TIPOLOGIA = {
     vivienda: { "estudio": "Estudio", "1d": "1 dormitorio", "2d": "2 dormitorios", "3d": "3 dormitorios", "4d+": "4 o más dormitorios" },
     apartamento: { "estudio": "Estudio", "individual": "Individual", "doble": "Doble", "triple": "Triple", "cuadruple": "Cuádruple" },
-    hotelero: { "individual": "Individual", "doble": "Doble", "triple": "Triple", "cuadruple": "Cuádruple", "multiple": "Múltiple (albergue)" },
+    hotelero: { "individual": "Individual", "doble": "Doble", "junior_suite": "Junior Suite", "suite": "Suite", "multiple": "Múltiple (albergue)" },
   };
   const DEFAULT_TIPOLOGIA = { vivienda: "1d", apartamento: "doble", hotelero: "doble" };
 
@@ -2682,8 +2708,24 @@
   if (chkUsarCoef) chkUsarCoef.addEventListener("change", aplicarToggleCoef);
   aplicarToggleCoef();
 
-  // Si hay proyecto + parcela, primer cálculo automático
+  // ¿El escenario activo ya tiene un cálculo guardado (resumen no vacío)? Si es
+  // así, sus tablas se rellenan al abrir (persiste lo guardado); un escenario
+  // nuevo/sin calcular las deja vacías hasta el primer cálculo del usuario.
+  const _escActivo = ESCENARIOS.find(e => e.id === escenarioActivo);
+  const _yaCalculado = estado === "ok"
+    && !!(_escActivo && _escActivo.resumen && Object.keys(_escActivo.resumen).length);
+
+  if (!_yaCalculado) {
+    // Placeholder inicial: las tablas quedan vacías («Sin datos…») hasta el primer
+    // cálculo del usuario (cualquier cambio de parámetro).
+    repintarTablaPlanta([]);
+    repintarTablaUnidad([]);
+  }
+
+  // Si hay proyecto + parcela, primer cálculo automático de la carga. Dibuja la
+  // envolvente/KPIs/canvas siempre; rellena las tablas solo si el escenario YA
+  // estaba calculado (opts.inicial suprime el pintado de tablas en el resto).
   if (estado === "ok") {
-    recalcularAuto();
+    pedirCalculo({ auto: true, inicial: !_yaCalculado });
   }
 })();

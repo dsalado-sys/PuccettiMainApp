@@ -268,6 +268,8 @@
   // Escenarios (pestañas) del modo activo: lista con parámetros+resumen y cuál está activo.
   window.__RC_ESCENARIOS__ = {{ escenarios | tojson if escenarios else '[]' }};
   window.__RC_ESCENARIO_ACTIVO__ = {{ escenario_activo | tojson if escenario_activo else 'null' }};
+  // Id del proyecto activo: clave del aviso de exceso «una vez por proyecto».
+  window.__RC_PROYECTO_ID__ = {{ proyecto_activo.id | tojson if proyecto_activo else 'null' }};
 </script>
 <script src="/static/js/rc_brujula.js?v={{ estaticos_version }}" defer></script>
 <script src="/static/js/rc_canvas.js?v={{ estaticos_version }}" defer></script>

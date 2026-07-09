@@ -35,8 +35,8 @@ _ORDEN_TIPOLOGIA: dict[str, int] = {
     "estudio": 0,
     "1d": 1, "individual": 1,
     "2d": 2, "doble": 2,
-    "3d": 3, "triple": 3,
-    "4d": 4, "cuadruple": 4,
+    "3d": 3, "triple": 3, "junior_suite": 3,
+    "4d": 4, "cuadruple": 4, "suite": 4,
     "multiple": 5,
     # Salón-comedor común de la unidad: tras las ocupaciones y antes de las áreas
     # comunes del establecimiento.
