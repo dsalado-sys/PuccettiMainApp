@@ -492,10 +492,12 @@ def construir_envolvente(
     retranqueos se aplican direccionalmente según el tipo de cada lado.
 
     `superficie_referencia` es la superficie de SUELO contra la que se calculan los
-    límites legales (edificabilidad y ocupación máxima). Cuando se conoce la
-    superficie catastral real de la parcela se pasa aquí; si es None/0 se usa el
-    área geométrica del polígono reproyectado (comportamiento histórico). La FORMA
-    de la huella (retranqueos, geometría) siempre proviene del polígono.
+    límites (edificabilidad y ocupación máxima). El render la alimenta con el ÁREA DEL
+    POLÍGONO reproyectado (`casos_uso`), de modo que ocupación, edificabilidad y superficie
+    libre se miden todas contra la misma superficie —la que dibuja el polígono— y no aparece
+    «libre» fantasma por descuadre catastral vs polígono; la catastral queda como dato
+    informativo. Si es None/0 se usa el área del polígono igualmente. La FORMA de la huella
+    (retranqueos, geometría) siempre proviene del polígono.
 
     Ocupación máxima: NO es geometría. La huella de todas las plantas es la huella
     íntegra tras retranqueos normativos (sin recorte ni anillo por ocupación); la
