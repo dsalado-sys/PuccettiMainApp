@@ -114,10 +114,11 @@ class Capacidad:
     circulacion_por_planta: list[float] = field(default_factory=list)
     nucleo_por_planta: list[float] = field(default_factory=list)
     patio_por_planta: list[float] = field(default_factory=list)
-    # Superficie libre por planta (complemento de la ocupación máxima): en cada
-    # planta habitable = superficie de referencia − construida = (1 − ocupación) ×
-    # sup_ref. Sótano → 0. Su suma es la «superficie libre» contra la que se compara
-    # el total de patios para el aviso de Capacidad.
+    # Superficie libre por planta = suelo no edificado: en cada planta habitable =
+    # superficie de referencia − construida. La referencia es el ÁREA DEL POLÍGONO (la
+    # alimenta `casos_uso`), la misma contra la que se topa la construida, así que al 100%
+    # de ocupación sin retranqueos ⇒ 0. Sótano → 0. Su suma es la «superficie libre»
+    # contra la que se compara el total de patios para el aviso de Capacidad.
     superficie_libre_por_planta: list[float] = field(default_factory=list)
     local_por_planta: list[float] = field(default_factory=list)
     otros_por_planta: list[float] = field(default_factory=list)
@@ -285,8 +286,11 @@ def calcular_capacidad(
     # vía int-based de vivienda (sin descriptores); para el resto de usos llega None.
     cfg_vivienda = cfg_vivienda if cfg_vivienda is not None else CONFIG_VIVIENDA_DEFAULT
 
-    # Superficie de suelo para los límites legales (edificabilidad / ocupación):
-    # la catastral real si la envolvente la conoce; si no, el área geométrica.
+    # Superficie de suelo de REFERENCIA para TODO el cálculo (ocupación, edificabilidad y
+    # superficie libre): el render la alimenta con el ÁREA DEL POLÍGONO (`casos_uso`), de modo
+    # que la construida, el techo y la libre se miden contra la misma superficie —la que dibuja
+    # el polígono— y no aparece «libre» fantasma por descuadre catastral vs polígono. La
+    # catastral queda solo como dato informativo (KPI `area_m2`), fuera del cálculo.
     parcela_area = getattr(envolvente, "superficie_referencia_m2", 0.0) or envolvente.parcela.area
     urb = params.urbanismo
 
@@ -566,10 +570,11 @@ def calcular_capacidad(
         construida_neta_i = construida_i
         construida_total += construida_neta_i
 
-        # Superficie libre de la planta = complemento de la ocupación (sup_ref −
-        # construida). Como `construida_i` = huella erosionada por ocupación, esto es
-        # (1 − ocupación_planta) × sup_ref y contempla PB y plantas tipo por
-        # construcción. El sótano (bajo rasante) no aporta superficie libre.
+        # Superficie libre de la planta = suelo no edificado = referencia − construida.
+        # La referencia (`parcela_area`) es el ÁREA DEL POLÍGONO (la alimenta `casos_uso`),
+        # la misma contra la que se topa la construida, así que al 100% de ocupación sin
+        # retranqueos la huella llena el polígono ⇒ libre = 0; con retranqueos, libre = el
+        # suelo de retranqueo. El sótano (bajo rasante) no aporta superficie libre.
         libre_i = 0.0 if p.tipo == "sotano" else max(0.0, parcela_area - construida_neta_i)
 
         # Se guardan los m² SIN redondear (precisión completa). El redondeo a

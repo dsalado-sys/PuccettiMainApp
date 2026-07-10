@@ -244,11 +244,15 @@ class CalcularEnvolvente:
     ) -> dict[str, Any]:
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
-        sup_ref = superficie_referencia_parcela(parcela)
+        sup_ref = superficie_referencia_parcela(parcela)  # catastral: solo dato informativo (KPI `area_m2`)
         try:
+            # El cálculo trabaja ÍNTEGRAMENTE con la superficie del POLÍGONO: ocupación,
+            # edificabilidad y superficie libre se miden todas contra la misma superficie (la
+            # que dibuja el polígono), de modo que al 100% de ocupación sin retranqueos no queda
+            # «libre» fantasma por descuadre catastral vs polígono. La catastral es informativa.
             envolvente = construir_envolvente(
                 parcela.poligono_utm, params_motor, parcela.lados,
-                superficie_referencia=sup_ref,
+                superficie_referencia=parcela.poligono_utm.area,
             )
         except ValueError as exc:
             return {
@@ -449,11 +453,15 @@ class CalcularLayout:
 
         params_motor = params.a_parametros_motor()
         params_motor_tipo = params.a_parametros_motor_tipo()
-        sup_ref = superficie_referencia_parcela(parcela)
+        sup_ref = superficie_referencia_parcela(parcela)  # catastral: solo dato informativo (KPI `area_m2`)
         try:
+            # El cálculo trabaja ÍNTEGRAMENTE con la superficie del POLÍGONO: ocupación,
+            # edificabilidad y superficie libre se miden todas contra la misma superficie (la
+            # que dibuja el polígono), de modo que al 100% de ocupación sin retranqueos no queda
+            # «libre» fantasma por descuadre catastral vs polígono. La catastral es informativa.
             envolvente = construir_envolvente(
                 parcela.poligono_utm, params_motor, parcela.lados,
-                superficie_referencia=sup_ref,
+                superficie_referencia=parcela.poligono_utm.area,
             )
         except ValueError as exc:
             return {
