@@ -318,8 +318,9 @@
     const cap = payload?.capacidad;
     const parcelaArea = payload?.parcela?.area_m2;
     // Área REAL del polígono (geometría), distinta de la superficie catastral (area_m2):
-    // es la que se muestra en el KPI «Superficie del polígono». La catastral sigue
-    // gobernando edificabilidad/ocupación (cap.*), solo cambia lo que se ENSEÑA aquí.
+    // es la que se muestra en el KPI «Superficie del polígono». El cálculo (cap.*) trabaja
+    // ÍNTEGRAMENTE con el polígono (ocupación/edificabilidad/libre); la catastral (area_m2)
+    // es solo un dato informativo.
     const parcelaGeom = payload?.parcela?.area_geometrica_m2;
     // Fuente de verdad iter. 4: data.capacidad. Fallback a envolvente del preview.
     if (cap) {

@@ -1,10 +1,15 @@
-"""Superficie libre (complemento de la ocupación) y aviso de excavación de patio.
+"""Superficie libre (suelo no edificado) y aviso de excavación de patio.
 
-Al eliminar el retranqueo de ocupación en el render, la ocupación deja de dibujarse
-como un anillo y su complemento se reporta como «superficie libre» = (1 − ocupación) ×
-sup_ref, sumada por plantas y contemplando las dos ocupaciones (PB y tipo). Modelo
-mixto de patio: el patio vive en esa superficie libre; la parte que no cabe EXCAVA la
-huella construida y salta un aviso `Alerta("aviso", "Normativa", "… está excavando …")`.
+La «superficie libre» de cada planta = superficie de referencia − construida, sumada por
+plantas (contempla las dos ocupaciones, PB y tipo). El render alimenta esa referencia con el
+ÁREA DEL POLÍGONO (`casos_uso`), la misma contra la que se topa la construida, así que al 100%
+de ocupación sin retranqueos la huella llena el polígono ⇒ libre = 0. Modelo mixto de patio:
+el patio vive en esa superficie libre; la parte que no cabe EXCAVA la huella construida y salta
+`Alerta("aviso", "Normativa", "… está excavando …")`.
+
+Estos tests fijan el MOTOR: pasan `superficie_referencia = área del polígono` (= AREA, igual al
+`box`), que es justo lo que produce `casos_uso`. La regresión de que producción alimenta el
+polígono (y NO la catastral) vive en `test_layout_referencia_poligono.py` (nivel `CalcularLayout`).
 """
 from __future__ import annotations
 
