@@ -79,7 +79,7 @@ def crear_app(engine=None, session_factory=None) -> FastAPI:
     init_db(engine=engine, session_factory=session_factory)
 
     app = FastAPI(
-        title="Puccetti — Prefactibilidad inmobiliaria",
+        title="Puccetti&Ronquillo — Prefactibilidad inmobiliaria",
         description="Main app: integra localización, viabilidad, render e informe sobre un mismo proyecto.",
         version="0.1.0",
     )
