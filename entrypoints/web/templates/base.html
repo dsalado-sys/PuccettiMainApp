@@ -13,7 +13,7 @@
       } catch (e) { /* almacenamiento bloqueado */ }
     })();
   </script>
-  <title>{% block titulo %}Puccetti{% endblock %}</title>
+  <title>{% block titulo %}Puccetti&amp;Ronquillo{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/puccetti.css?v={{ estaticos_version }}" />
   <script defer src="/static/js/tema.js?v={{ estaticos_version }}"></script>
   {% block head %}{% endblock %}
@@ -72,7 +72,8 @@
   {# Nexo principal: solo cabecera superior (las tarjetas del hub son la navegación). #}
   <header class="cabecera">
     <a class="marca" href="/">
-      <span class="marca-nombre">PUCCETTI</span>
+      <img class="marca-logo" src="/static/img/logo.svg?v={{ estaticos_version }}"
+           alt="Puccetti&amp;Ronquillo Asset Management" width="209" height="157" />
       <span class="marca-claim">Prefactibilidad inmobiliaria</span>
     </a>
     <div class="sesion-usuario">
@@ -91,9 +92,9 @@
   {# Dentro de un módulo: solo el rail vertical (sin cabecera). Colapsado muestra
      iconos; se ensancha al pasar el ratón / al recibir foco para ver los nombres. #}
   <aside class="rail" aria-label="Navegación principal">
-    <a class="rail-marca" href="/" title="Inicio" aria-label="Puccetti — inicio">
-      <span class="rail-monograma" aria-hidden="true">P</span>
-      <span class="rail-marca-texto">PUCCETTI</span>
+    <a class="rail-marca" href="/" title="Inicio" aria-label="Puccetti&amp;Ronquillo — inicio">
+      <img class="rail-logo" src="/static/img/logo.svg?v={{ estaticos_version }}"
+           alt="Puccetti&amp;Ronquillo" width="209" height="157" />
     </a>
     <nav class="rail-nav">
       {% for item in shell.nav_items %}
