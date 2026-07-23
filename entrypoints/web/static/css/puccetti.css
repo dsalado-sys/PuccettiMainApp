@@ -304,9 +304,19 @@ summary:focus-visible,
   border-bottom: 1px solid var(--dorado);
 }
 
-.marca { display: flex; flex-direction: column; }
+.marca { display: flex; flex-direction: column; gap: 6px; }
 .marca-nombre { font-family: var(--fuente-titulos); font-weight: 700; letter-spacing: 0.35em; font-size: 18px; color: var(--dorado); }
 .marca-claim { font-size: var(--text-eyebrow); color: var(--on-inverse-muted); letter-spacing: 0.12em; text-transform: uppercase; }
+/* Logotipo Puccetti&Ronquillo (SVG, tinta clara + dorado, fondo transparente):
+   pensado para fondos oscuros → en rail y cabecera va directo. En el login la
+   tarjeta es clara, así que allí se apoya sobre placa oscura (ver .marca-logo--login). */
+.marca-logo { display: block; height: 46px; width: auto; }
+.marca-logo--login { height: 92px; }
+/* Login: cada variante encaja en la superficie de su tema, sin placa —
+   claro = tinta negra (logoW.svg), oscuro = tinta clara (logo.svg). */
+.marca-logo--tema-oscuro { display: none; }
+:root[data-theme="dark"] .marca-logo--tema-claro { display: none; }
+:root[data-theme="dark"] .marca-logo--tema-oscuro { display: block; }
 
 .sesion-usuario { display: flex; gap: 14px; align-items: center; }
 .sesion-nombre { color: var(--on-inverse-accent); font-weight: 600; font-size: var(--text-md); letter-spacing: 0.02em; }
@@ -379,7 +389,10 @@ summary:focus-visible,
   text-align: left;
   cursor: pointer;
 }
-.rail-marca { height: 48px; margin-bottom: var(--space-sm); color: var(--dorado); }
+.rail-marca { height: 48px; margin-bottom: var(--space-sm); color: var(--dorado); padding: 0; justify-content: center; }
+/* En el rail el logo es la marca compacta centrada (fondo oscuro del rail →
+   SVG directo), visible colapsado (72px) y expandido (no se desvanece). */
+.rail-logo { display: block; height: 40px; width: auto; }
 .rail-monograma {
   flex: 0 0 24px; width: 24px; height: 24px;
   display: inline-flex; align-items: center; justify-content: center;
